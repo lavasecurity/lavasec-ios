@@ -7,7 +7,8 @@ final class ProtectionSettingsApplySourceTests: XCTestCase {
         let bridge = try readSource(.reactNativeAppSettings)
         let swap = try sourceBlock(in: bridge, startingAt: "if action == \"vpn.swap\"", endingBefore: "guard let index = input")
         let sheet = try sourceBlock(in: bridge, startingAt: "editor.saveWireGuardDraft =", endingBefore: "flow = editor")
-        for block in [swap, sheet] {
+        let cancel = try sourceBlock(in: bridge, startingAt: "if action == \"vpn.cancel\"", endingBefore: "try await authorize")
+        for block in [swap, sheet, cancel] {
             XCTAssertFalse(block.contains("commitWireGuardPage"))
             XCTAssertFalse(block.contains("saveWireGuardHop"))
             XCTAssertFalse(block.contains("requestChainedSettingsApply"))
@@ -16,6 +17,13 @@ final class ProtectionSettingsApplySourceTests: XCTestCase {
         }
         XCTAssertTrue(swap.contains("draft.swapOrder()"))
         XCTAssertTrue(sheet.contains("current.save(index:"))
+        // Visit cleanup closes only that visit's editor, even if its draft is already gone.
+        XCTAssertTrue(bridge.contains("editor.wireGuardDraftID = draft.id"))
+        XCTAssertTrue(cancel.contains("if let id = input[\"id\"] as? String"))
+        XCTAssertTrue(cancel.contains("if wireGuardDraft?.id == id { wireGuardDraft = nil }"))
+        XCTAssertTrue(cancel.contains("if flow?.name == \"vpnConfiguration\", flow?.wireGuardDraftID == id"))
+        XCTAssertTrue(cancel.contains("flow = nil"))
+        XCTAssertTrue(try readSource(.reactNativeAppFlows).contains("var wireGuardDraftID: String? = nil"))
         let commit = try sourceBlock(in: bridge, startingAt: "if action == \"vpn.commit\"", endingBefore: "if action == \"vpn.reset\"")
         XCTAssertTrue(commit.contains("try model.commitWireGuardPage(&draft)"))
         let model = try sourceBlock(in: readAppViewModelSource(), startingAt: "func commitWireGuardPage", endingBefore: "private func editableWireGuardStore")

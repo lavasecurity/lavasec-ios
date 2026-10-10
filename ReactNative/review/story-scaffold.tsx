@@ -1,4 +1,4 @@
-import {Fragment,useState,useEffect,useRef,type PropsWithChildren,type ReactNode,type ComponentRef} from 'react';
+import {Fragment,useState,useEffect,useLayoutEffect,useRef,type PropsWithChildren,type ReactNode,type ComponentRef} from 'react';
 import {Animated,AppState,Image,Pressable,ScrollView,StyleSheet,View,useWindowDimensions,type AccessibilityActionEvent,type AccessibilityActionInfo,type LayoutRectangle,type GestureResponderEvent,type ScrollViewInstance} from 'react-native';
 import {localized} from '../app/presentation';
 import {useTextScale} from '../app/text-metrics';
@@ -8,7 +8,7 @@ import {foundation} from '../src/foundation';
 import {Copy, Section, Row, RowContent, RowAccessory, Symbol,usePageInspectionLock} from './primitives';
 import {LavaActionButton,LavaCard,LavaIconButton,LavaIconButtonGroup} from '../src';
 import {LavaDiscoveryDot} from '../src/LavaDiscoveryDot';
-import {Group,Quiet,StableVariants,Sheet,Search} from './scaffold';
+import {CatalogControlMaterial,Group,Quiet,StableVariants,Sheet,Search} from './scaffold';
 import {SettingsControl} from './settings-scaffold';
 import NativeTextField from '../specs/LavaTextFieldNativeComponent';
 import Decoration from '../specs/LavaDecorationNativeComponent';
@@ -16,6 +16,7 @@ import {connectionParts,type ConnectionPart,type ConnectionStage} from './connec
 import {connectionAttention,connectionAperture,type GlyphCenter} from './connection-reveal';
 import {CountLegend,ProportionBar} from './detail-scaffold';
 import {GuardMaterial,type GuardMaterialIntent} from './guard-material';
+import {useReducedMotionPreference} from './navigation-scaffold';
 
 import {lavaTokens} from '../src/generated/tokens';
 const space=foundation.space;
@@ -34,8 +35,9 @@ export function StorySurface({children,tone='neutral',testID,footer}:PropsWithCh
 export function StoryInset({children}:PropsWithChildren){return <View style={s.inset}>{children}</View>;}
 // A destination's content keeps its semantic text role; the trailing navigation
 // accessory is the same atom as a utility row, with one fixed accessory axis.
+// Discovery replaces the chevron in that slot without shifting the heading.
 export function StoryNavigationLine({children,testID,attention=false}:PropsWithChildren<{testID?:string;attention?:boolean}>){
-  return <View style={s.summaryHeading}><View style={s.flex}>{children}</View><RowAccessory intent="page" testID={testID} attention={attention} attentionTestID={testID?`${testID}.new`:undefined}/></View>;
+  return <View style={s.summaryHeading}><View style={s.flex}>{children}</View><RowAccessory intent="page" testID={testID}>{attention?<LavaDiscoveryDot testID={testID?`${testID}.new`:undefined}/>:undefined}</RowAccessory></View>;
 }
 export function StoryStack({children}:PropsWithChildren){return <View style={s.stack}>{children}</View>;}
 export function StoryColumns({primary,secondary}: {primary:ReactNode;secondary:ReactNode}){
@@ -163,7 +165,7 @@ export function ConnectionPanel({stages,onSelect,onExplore}:{stages:readonly Con
   return <StoryStack><Copy role="section" color={colors.secondaryText}>Your connection</Copy><Group tone="green">
     {visible.map(stage=>{
       const title=stage.id==='dns'?'DNS settings':stage.title;
-      const summary=expanded?[stage.id==='filter'?stage.value:localized(stage.value),stage.detail&&localized(stage.detail)].filter(Boolean).join('\n'):undefined;
+      const summary=expanded?[stage.value,stage.detail].filter(Boolean).join('\n'):undefined;
       return stage.destination?<Row key={stage.id} testID={`connection.${stage.id}`} intent="page" icon={stage.symbol} title={title} summary={summary} verbatimSummary onPress={()=>onSelect(stage)}/>
         :<View key={stage.id} testID={`connection.${stage.id}`}><RowContent title={title} summary={summary} icon={stage.symbol} intent="task" verbatimSummary/></View>;
     })}
@@ -275,10 +277,10 @@ function ConnectionStep({stage,expanded=false,onPress,onTouchStart,selected,focu
       revealX={reveal?.x??13} revealY={reveal?.y??13} revealRadius={reveal?.radius??22} style={{width:26,height:26}} accessible={false} accessibilityElementsHidden/>
     {discoveryAttention&&<View pointerEvents="none" testID={`connection.${stage.id}.discovery-dot`} style={s.nodeDiscovery}><LavaDiscoveryDot/></View>}
     </View>
-    {expanded&&!conceptual?<View style={s.nodeDetails}><Copy role="caption" color={colors.secondaryText}>{stage.title}</Copy><Copy verbatim role="section">{stage.id==='filter'?stage.value:localized(stage.value)}</Copy>{details&&stage.detail&&<Copy verbatim role="supporting" color={colors.secondaryText}>{stage.detail}</Copy>}</View>:<Copy role="caption" center={!expanded} color={subdued?colors.secondaryText:colors.primaryText}>{shortTitle}</Copy>}
+    {expanded&&!conceptual?<View style={s.nodeDetails}><Copy role="caption" color={colors.secondaryText}>{stage.title}</Copy><Copy verbatim role="section">{stage.value}</Copy>{details&&stage.detail&&<Copy verbatim role="supporting" color={colors.secondaryText}>{stage.detail}</Copy>}</View>:<Copy role="caption" center={!expanded} color={subdued?colors.secondaryText:colors.primaryText}>{shortTitle}</Copy>}
     {expanded&&!conceptual&&stage.destination&&<RowAccessory intent="page"/>}</>;
   // In Settings Phone is orientation, while Explore makes each part selectable.
-  const label=conceptual?localized(shortTitle):`${localized(stage.title)}, ${stage.id==='filter'?stage.value:localized(stage.value)}`;
+  const label=conceptual?localized(shortTitle):`${localized(stage.title)}, ${stage.value}`;
   if(!interactive)return <View testID={`connection.${stage.id}`} accessible accessibilityRole="text" accessibilityLabel={label} onLayout={onControlLayout?event=>onControlLayout(event.nativeEvent.layout):undefined} style={[expanded?s.expandedNode:s.compactNode,dimmed&&s.dimmed]}>{content}</View>;
   return <Pressable testID={`connection.${stage.id}`} accessibilityRole="button" accessibilityLabel={label} accessibilityHint={discoveryAttention?localized('New'):undefined}
     accessibilityState={{selected:!!selected||focus}} onTouchStart={onTouchStart} onLayout={onControlLayout?event=>onControlLayout(event.nativeEvent.layout):undefined} onPress={onPress} style={({pressed})=>[expanded?s.expandedNode:s.compactNode,selected&&{borderColor:selectionColor},dimmed&&s.dimmed,pressed&&s.dim]}><View pointerEvents="none" style={{display:'contents'}}>{content}</View></Pressable>;
@@ -287,18 +289,26 @@ export function StoryLink({title,onPress,testID,attention=false}:{title:string;o
   return <Row title={title} intent="page" onPress={onPress} testID={testID} attention={attention}/>;
 }
 export function CategoryLinks({titles,onSelect}:{titles:readonly string[];onSelect:(title:string)=>void}){
-  return <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.categoryLinks}>{titles.map(title=><Pressable key={title} accessibilityRole="button" accessibilityLabel={localized(title)} onPress={()=>onSelect(title)} style={({pressed})=>[s.category,pressed&&s.dim]}><Copy role="supporting" weight="600">{title}</Copy></Pressable>)}</ScrollView>;
+  return <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{minHeight:foundation.control.target}} contentContainerStyle={s.categoryLinks}>{titles.map(title=><Pressable key={title} accessibilityRole="button" accessibilityLabel={localized(title)} onPress={()=>onSelect(title)} style={({pressed})=>[s.category,pressed&&s.dim]}><CatalogControlMaterial/><Copy role="supporting" weight="600">{title}</Copy></Pressable>)}</ScrollView>;
 }
 // Blocklist and DNS catalogs share the same sheet, category navigation, search,
 // section positioning and confirmation footer. Callers supply rows and selection semantics.
-export function CatalogSheet<T>({sections,search,onSearch,searchLabel,renderRow,footer,empty}: {
-  sections:{title:string;items:T[]}[];search:string;onSearch:(value:string)=>void;searchLabel:string;
+export function CatalogSheet<T>({sections,categoryTitles=sections.map(section=>section.title),search,onSearch,searchLabel,renderRow,footer,empty}: {
+  sections:{title:string;items:T[]}[];categoryTitles?:readonly string[];search:string;onSearch:(value:string)=>void;searchLabel:string;
   renderRow:(item:T,section:string)=>ReactNode;footer?:ReactNode;empty?:ReactNode;
 }) {
   const scroll=useRef<ScrollViewInstance>(null);const positions=useRef<Record<string,number>>({});
-  return <Sheet scrollRef={scroll} header={<View style={{gap:12}}>
-    <CategoryLinks titles={sections.map(section=>section.title)} onSelect={title=>scroll.current?.scrollTo({y:positions.current[title]??0,animated:true})}/>
-    <Search value={search} onChange={onSearch} label={searchLabel}/>
+  const previousSearch=useRef(search);
+  useLayoutEffect(()=>{
+    if(previousSearch.current===search)return;
+    previousSearch.current=search;
+    // New results begin below the pinned controls, including the empty state.
+    // Ordinary selection updates and returning from a child retain their offset.
+    scroll.current?.scrollTo({y:0,animated:false});
+  },[search]);
+  return <Sheet scrollMode="list" scrollRef={scroll} headerMaterial={false} header={<View testID="catalog.controls" style={{gap:12}}>
+    <CategoryLinks titles={categoryTitles} onSelect={title=>{if(sections.some(section=>section.title===title))scroll.current?.scrollTo({y:positions.current[title]??0,animated:true});}}/>
+    <Search surface="catalog" value={search} onChange={onSearch} label={searchLabel}/>
   </View>} footer={footer}>
     {sections.map(section=><View key={section.title} onLayout={event=>{positions.current[section.title]=event.nativeEvent.layout.y;}}>
       <Section title={section.title}><Group plain>{section.items.map(item=>renderRow(item,section.title))}</Group></Section>
@@ -307,9 +317,21 @@ export function CatalogSheet<T>({sections,search,onSearch,searchLabel,renderRow,
   </Sheet>;
 }
 
-export function BudgetBar({fraction,indeterminate,warning}:{fraction:number;indeterminate:boolean;warning?:boolean}){
+export function BudgetBar({fraction,indeterminate,warning,available=true}:{fraction:number;indeterminate:boolean;warning?:boolean;available?:boolean}){
+  const reduced=useReducedMotionPreference();
+  const fill=useRef(new Animated.Value(available&&!indeterminate?Math.max(0,Math.min(1,fraction)):0)).current;
+  useEffect(()=>{
+    // A current foreground recalculation keeps the last accepted paint. Losing
+    // the authorized query clears it immediately; this is no reusable data cache.
+    if(!available){fill.stopAnimation();fill.setValue(0);return;}
+    if(indeterminate)return;
+    const target=Math.max(0,Math.min(1,fraction));
+    if(reduced){fill.stopAnimation();fill.setValue(target);return;}
+    const animation=Animated.timing(fill,{toValue:target,duration:250,useNativeDriver:true});
+    animation.start();return()=>animation.stop();
+  },[fraction,indeterminate,available,reduced,fill]);
   return <View accessible accessibilityRole="progressbar" accessibilityLabel={localized('Filter rule budget')} accessibilityValue={indeterminate?{text:localized('calculating')}:{min:0,max:100,now:Math.round(fraction*100)}} style={s.budgetTrack}>
-    {!indeterminate&&<View style={[s.budgetFill,warning&&s.budgetWarning,{width:`${Math.max(0,Math.min(1,fraction))*100}%`}]}/>}
+    <Animated.View testID="budget.fill" style={[s.budgetFill,warning&&s.budgetWarning,{width:'100%',transformOrigin:'left center',transform:[{scaleX:fill}]}]}/>
   </View>;
 }
 export function PrivateQRCode({image,revealed,onReveal,available,loadingMessage}:{image?:string|null;revealed:boolean;onReveal:()=>void;available:boolean;loadingMessage:string}){
@@ -365,7 +387,7 @@ const s=StyleSheet.create({
   node:{width:44,height:44,borderRadius:22,alignItems:'center',justifyContent:'center'},
   pathVertical:{gap:0},pathStep:{position:'relative'},pathRail:{position:'absolute',left:22,top:0,bottom:0,width:connectionStrokeWidth},lineAbove:{position:'absolute',top:0,height:12,width:connectionStrokeWidth,backgroundColor:colors.safeGreen},lineBelow:{position:'absolute',top:52,bottom:0,width:connectionStrokeWidth,backgroundColor:colors.safeGreen},lastLineCover:{position:'absolute',top:44,bottom:0,width:connectionStrokeWidth,backgroundColor:colors.softGreen},
   expandedNode:{borderWidth:connectionStrokeWidth,borderColor:'transparent',borderRadius:foundation.radius.control,flexDirection:'row',alignItems:'center',gap:space.md,paddingVertical:space.sm,minHeight:88},nodeDetails:{flex:1,minWidth:0,gap:space.xs,paddingBottom:space.md},
-  categoryLinks:{gap:space.sm},category:{minHeight:foundation.control.target,paddingHorizontal:space.md,paddingVertical:space.sm,justifyContent:'center',borderRadius:foundation.radius.control,backgroundColor:colors.cardBackground},
+  categoryLinks:{gap:space.sm},category:{minHeight:foundation.control.target,paddingHorizontal:space.md,paddingVertical:space.sm,justifyContent:'center',borderRadius:foundation.radius.circle,overflow:'hidden'},
   budgetTrack:{height:6,borderRadius:foundation.radius.circle,overflow:'hidden',backgroundColor:colors.disabledSurface},budgetFill:{height:6,backgroundColor:colors.safeGreen},budgetWarning:{backgroundColor:colors.lavaOrange},
   qrBackground:{position:'absolute',top:0,bottom:0,left:0,right:0,opacity:0.25},qrRegion:{alignItems:'center',justifyContent:'center'},qrContent:{alignItems:'center',gap:space.md},
   // A QR needs a white quiet zone for reliable scanning in either appearance.

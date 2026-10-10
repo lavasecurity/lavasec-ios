@@ -2,6 +2,7 @@ import type {AppSnapshot} from '../app/contract';
 import {activeFilterSummary,connectionStages,connectionDemo,demoEnding,demoSection,demoReadingTime,todaySummary} from '../review/connection-model';
 import {initialSession} from '../review/session';
 import {translations} from '../app/translations';
+import {configurePresentation,localized,localizedFormat} from '../app/presentation';
 
 const session=initialSession();
 const snapshot=(extra:Partial<AppSnapshot>={}):AppSnapshot=>({
@@ -111,9 +112,32 @@ test('WireGuard configuration uses the native fallback availability and saved re
   const projected=(enabled:boolean|null)=>connectionStages({...live,connection:{...live.connection!,
     dns:{...live.connection!.dns,usesWireGuard:true,editable:enabled!==false},
     vpn:{eligible:true,enabled:true,fallbackEnabled:enabled}}},session);
-  expect(projected(true).find(stage=>stage.id==='dns')).toMatchObject({value:'WireGuard Config',detail:'Fallback: Device DNS, Quad9'});
-  expect(projected(false).find(stage=>stage.id==='dns')).toMatchObject({value:'WireGuard Config',detail:'Fallback: disabled'});
+  expect(projected(true).find(stage=>stage.id==='dns')).toMatchObject({value:'WireGuard configuration',detail:'Fallback: Device DNS, Quad9'});
+  expect(projected(false).find(stage=>stage.id==='dns')).toMatchObject({value:'WireGuard configuration',detail:'DNS fallback: Disabled'});
   expect(projected(false).find(stage=>stage.id==='vpn')).toMatchObject({value:'Enabled',detail:'DNS fallback: Disabled'});
-  expect(projected(null).find(stage=>stage.id==='dns')?.detail).toBe('Fallback: unavailable');
-  expect(projected(null).find(stage=>stage.id==='vpn')?.detail).toBe('DNS fallback: unavailable');
+  expect(projected(null).find(stage=>stage.id==='dns')?.detail).toBe('DNS fallback: Unavailable');
+  expect(projected(null).find(stage=>stage.id==='vpn')?.detail).toBe('DNS fallback: Unavailable');
+});
+
+test.each(['zh-Hant','de'])('connection details translate app labels before composition in %s without changing provider identities',locale=>{
+  configurePresentation({locale,textScales:null});
+  try {
+    const live=snapshot();
+    const providerName='Cancel'; // A legitimate identity that also matches a UI key.
+    const projected=(enabled:boolean|null)=>connectionStages({...live,connection:{...live.connection!,
+      dns:{primary:{name:providerName,detail:'resolver.example',transport:'DoH'},fallback:{name:'Quad9',detail:'',transport:'DoH'},usesWireGuard:true},
+      vpn:{eligible:true,enabled:true,fallbackEnabled:enabled}}},session);
+    expect(projected(true).find(stage=>stage.id==='dns')?.detail).toBe(localizedFormat('Fallback: %@','Cancel, Quad9'));
+    expect(projected(false).find(stage=>stage.id==='dns')?.detail).toBe(localized('Fallback: disabled'));
+    expect(projected(null).find(stage=>stage.id==='dns')?.detail).toBe(localized('Fallback: unavailable'));
+    for(const enabled of [true,false,null])expect(projected(enabled).find(stage=>stage.id==='vpn')?.detail)
+      .toBe(localized(enabled===true?'DNS fallback: Enabled':enabled===false?'DNS fallback: Disabled':'DNS fallback: unavailable'));
+    expect(projected(true).find(stage=>stage.id==='dns')?.setupSummary).toContain(providerName);
+    expect(projected(true).find(stage=>stage.id==='dns')?.setupSummary).not.toContain(localized(providerName));
+    const preview=connectionStages(undefined,{...session,deviceDNS:true});
+    expect(preview.find(stage=>stage.id==='dns')?.setupSummary).toBe(localizedFormat('Your primary DNS is %@. For more details, check DNS settings.',localized('Device DNS')));
+    expect(preview.find(stage=>stage.id==='dns')?.detail).toBe(localized('Fallback enabled'));
+    const pending=connectionStages(snapshot({connection:undefined,dns:{providers:[],customSelected:false,transports:[]}}),{...session,deviceDNS:false});
+    expect(pending.find(stage=>stage.id==='dns')?.setupSummary).toBe(localizedFormat('Your primary DNS is %@. For more details, check DNS settings.',localized('DNS settings')));
+  } finally {configurePresentation();}
 });

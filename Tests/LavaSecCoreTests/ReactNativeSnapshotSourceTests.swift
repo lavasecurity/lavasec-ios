@@ -33,6 +33,13 @@ final class ReactNativeSnapshotSourceTests: XCTestCase {
         XCTAssertFalse(filters.contains("filterEditDraft"))
     }
 
+    func testShareabilityMemoUsesSavedLibraryRevisionAndDraftsBypassIt() throws {
+        let source = try readSource(.reactNativeAppBridge)
+        XCTAssertTrue(source.contains("let shareable = libraryEditor.isEditing ? m.isFilterShareable(filter)"))
+        XCTAssertTrue(source.contains("filterShareability.value(for: filter.id, revision: presentationLibraryDisplayRevision)"))
+        XCTAssertTrue(source.contains("self.presentationLibraryRevision.revision(for: library)"))
+    }
+
     func testActivityPresetBridgeOnlyResolvesCalendarDates() throws {
         let block = try sourceBlock(in: try readSource(.reactNativeActivityDateBridge),
                                     startingAt: "@objc static func preset(", endingBefore: "@objc static func pick(")

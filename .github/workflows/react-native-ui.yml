@@ -165,7 +165,9 @@ jobs:
     # the owned Mac (Kilo review of PR #780; ios.yml adopted the same predicate).
     if: ${{ !cancelled() && github.event.pull_request.draft != true && needs.lava-ui.outputs.docs_only != 'true' && needs.lava-ui.outputs.native_required != 'false' && github.repository == 'lavasecurity/lavasec-ios-internal' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]' && contains(github.event.pull_request.labels.*.name, 'full-build'))) }}
     runs-on: [self-hosted, macOS]
-    timeout-minutes: 50
+    # The explicit journey lane now covers the complete foreground/security UI
+    # suite plus tablet passes. Keep routine compilation's existing budget.
+    timeout-minutes: ${{ (inputs.validation == 'full-app-journeys' || inputs.validation == 'parity-review') && 210 || 50 }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v6

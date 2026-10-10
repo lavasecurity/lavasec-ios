@@ -152,9 +152,10 @@ export function SudokuFeedback({loading,error,outcome,onRetry,column=false,testI
 // Landscape adds the two-player control directly after Close: the six controls
 // then spread at one uniform distance (the flexible spacer is dropped), and only
 // the minimum gap is enforced when a short band cannot host that spacing.
-export type SudokuTool={id:string;label:string;icon:LavaIconAction;selected?:boolean;prominent?:boolean;disabled:boolean;onPress:()=>void};
-export function SudokuRail({tools,onClose,landscape=false,availableHeight,onStartTwoPlayer}:{
+export type SudokuTool={id:string;label:string;icon:LavaIconAction;selected?:boolean;prominent?:boolean;disabled:boolean;onPress:()=>void;onLongPress?:()=>void;longPressDelayMs?:number};
+export function SudokuRail({tools,onClose,landscape=false,availableHeight,onStartTwoPlayer,flash}:{
   tools:readonly SudokuTool[];onClose:()=>void;landscape?:boolean;availableHeight?:number;onStartTwoPlayer?:()=>void;
+  flash?:{id:string;opacity:Animated.Value};
 }) {
   // Six 44pt targets plus the rail's own padding are the physical floor for the
   // two-player control. Below it the control is omitted rather than shrinking a
@@ -172,7 +173,10 @@ export function SudokuRail({tools,onClose,landscape=false,availableHeight,onStar
     <LavaIconButton title="Close" icon="close" shape="rounded" onPress={onClose} testID="sudoku-close"/>
     {showsTwoPlayer&&onStartTwoPlayer&&<LavaIconButton title="Two-player mode" icon="twoPeople" shape="rounded" onPress={onStartTwoPlayer} testID="sudoku-two-player"/>}
     {!showsTwoPlayer&&<View style={s.flexible}/>}
-    {tools.map(tool=><LavaIconButton key={tool.id} title={tool.label} icon={tool.icon} shape="rounded" selected={tool.selected??false} prominent={tool.prominent??false} disabled={tool.disabled} onPress={tool.onPress} testID={tool.id}/>)}
+    {tools.map(tool=><View key={tool.id} style={s.toolSlot}>
+      <LavaIconButton title={tool.label} icon={tool.icon} shape="rounded" selected={tool.selected??false} prominent={tool.prominent??false} disabled={tool.disabled} onPress={tool.onPress} onLongPress={tool.onLongPress} longPressDelayMs={tool.longPressDelayMs} testID={tool.id}/>
+      {flash?.id===tool.id&&<Animated.View pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={[s.toolFlash,{opacity:flash.opacity}]}/>}
+    </View>)}
   </View>;
 }
 
@@ -255,6 +259,10 @@ export const sudokuStyles=StyleSheet.create({
   twoPlayerCaption:{position:'absolute',left:0,right:0,alignItems:'center'},
   twoPlayerCaptionText:{fontSize:foundation.type.caption.fontSize,color:colors.secondaryText,textAlign:'center'},
   rail:{alignSelf:'stretch',alignItems:'center',justifyContent:'flex-start',gap:foundation.space.md},
+  // A fixed slot keeps the rail spacing intact while an accepted long-press paints the
+  // challenge flash over the control; the flash is pointer-transparent and fades out.
+  toolSlot:{width:foundation.control.target,height:foundation.control.target},
+  toolFlash:{position:'absolute',top:0,left:0,width:foundation.control.target,height:foundation.control.target,borderRadius:foundation.radius.circle,backgroundColor:colors.lavaOrange},
   // Six controls at one uniform distance: the flexible spacer is replaced by
   // even distribution, and `gap` stays the minimum for short bands.
   railEven:{justifyContent:'space-between'},

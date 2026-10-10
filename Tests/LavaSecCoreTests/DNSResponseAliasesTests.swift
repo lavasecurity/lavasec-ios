@@ -217,8 +217,40 @@ final class DNSAliasPauseDecisionTests: XCTestCase {
         XCTAssertEqual(resumed.decision.action, .block)
         let safe = dispatcher.decideForwardedResponse(filterDecision: .defaultAllow, isProtectionPaused: true,
                                                        maximumAnswerTTL: nil, pausedWouldBlockTTL: 1)
-        XCTAssertEqual(safe.decision, .pausedAllow)
+        XCTAssertEqual(safe.decision, .defaultAllow)
         XCTAssertNil(safe.maximumAnswerTTL)
+    }
+
+    func testPausedPassesKeepNormalReasonsAndRemainInTopDomains() {
+        let snapshot = FilterSnapshot(
+            blockRules: DomainRuleSet(exactDomains: ["blocked.example", "excepted.example"]),
+            allowRules: DomainRuleSet(exactDomains: ["excepted.example"])
+        )
+        let dispatcher = DNSQueryDispatcher()
+        var diagnostics = DiagnosticsStore()
+        let cases: [(domain: String, expected: FilterDecision)] = [
+            ("safe.example", .defaultAllow),
+            ("excepted.example", FilterDecision(action: .allow, reason: .localAllowlist)),
+            ("blocked.example", .pausedAllow)
+        ]
+        for testCase in cases {
+            let outcome = dispatcher.decideForwardedResponse(
+                filterDecision: snapshot.decision(forNormalizedDomain: testCase.domain),
+                isProtectionPaused: true,
+                maximumAnswerTTL: 30,
+                pausedWouldBlockTTL: 1
+            )
+            XCTAssertEqual(outcome.decision, testCase.expected, testCase.domain)
+            XCTAssertEqual(outcome.maximumAnswerTTL, testCase.expected == .pausedAllow ? 1 : 30,
+                           testCase.domain)
+            diagnostics.record(domain: testCase.domain, decision: outcome.decision, keepDomainHistory: true)
+        }
+
+        XCTAssertEqual(diagnostics.recentEvents.map(\.decision), cases.reversed().map(\.expected))
+        XCTAssertEqual(diagnostics.topDomains(action: .allow).map(\.domain).sorted(),
+                       ["excepted.example", "safe.example"])
+        XCTAssertEqual(diagnostics.summary.allowedCount, 3)
+        XCTAssertEqual(diagnostics.summary.blockedCount, 0)
     }
 
     func testAnExistingStricterTTLIsPreservedAndUnavailableProtectionIsOnlyPausedExplicitly() {

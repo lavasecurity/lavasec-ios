@@ -95,11 +95,11 @@ enum VersionDiagnostics {
                     && Set(contract.serverAddresses) == Set(settings.servers)
             }
             let transport: DNSResolverTransport = https != nil ? .dnsOverHTTPS : tls != nil ? .dnsOverTLS : .plainDNS
-            var details = [provider?.settingsBasePreset.displayName ?? manager.localizedDescription ?? "DNS profile",
-                           transport.displayName]
+            var details = [provider?.settingsBasePreset.displayName ?? manager.localizedDescription ?? "DNS profile".lavaLocalized,
+                           transport.displayName.lavaLocalized]
             if let serverName, !serverName.isEmpty { details.append(serverName) }
             if !settings.servers.isEmpty { details.append(settings.servers.joined(separator: ", ")) }
-            return details.map(\.lavaLocalized).joined(separator: "\n")
+            return details.joined(separator: "\n")
         } catch {
             // Unknown must not retain a previous provider or claim a confirmed off state.
             return ["Unavailable", "Unable to read DNS profile"].map(\.lavaLocalized).joined(separator: "\n")

@@ -1,11 +1,14 @@
 import {mayInteractWithPresentation} from '../app/read-cache';
-import {useOptionalReview} from './ReviewContext';
+import {usePresentationNativeLayout} from '../app/use-presentation-readiness';
+import {useOptionalReview,useRouteBodyConcealed} from './ReviewContext';
 import {LavaDiscoveryDot} from '../src/LavaDiscoveryDot';
+import {GuardianDrawing} from '../src/GuardianDrawing';
 import {Alert, localized} from '../app/presentation';
 import {Text} from '../app/presentation';
 import {createContext,useCallback,useContext,useEffect,useRef, useState,useSyncExternalStore, type PropsWithChildren, type ReactNode} from 'react';
 import {AppState, Dimensions, Pressable, RefreshControl, ScrollView, StyleSheet, View, type ScrollViewInstance, type ColorValue, type TextProps, type TextStyle} from 'react-native';
 import {useIsFocused} from '@react-navigation/native';
+import {SafeAreaInsetsContext} from 'react-native-safe-area-context';
 import Decoration from '../specs/LavaDecorationNativeComponent';
 import {colors} from '../src/colors.ios';
 import {lavaTokens} from '../src/generated/tokens';
@@ -27,10 +30,12 @@ export function Symbol({name, size = foundation.control.glyph, tone = 'green', p
 
 export type GuardianGesture = 'start' | 'end' | 'tap' | 'reveal';
 export function Guardian({size = lavaTokens.guard.mascotSize, mood = 'sleeping', look = 'original', testID, gesturesEnabled=false, onGesture}: {size?: number; mood?: string; look?: string;testID?:string;gesturesEnabled?:boolean;onGesture?:(gesture:GuardianGesture)=>void}) {
-  const drawing=<Decoration testID={testID?`${testID}.gesture`:undefined} mood={mood} look={look} guardianGestures={gesturesEnabled} onGuardianGesture={event=>{
+  const concealed=useRouteBodyConcealed();
+  if(mood==='locked')return <Decoration mood="locked" look={look} style={{width:size,height:size}} accessible={false} accessibilityElementsHidden/>;
+  const drawing=<View style={{width:size,height:size}} accessible={false}><GuardianDrawing size={size} mood={mood} look={look} active={!concealed}/><Decoration symbol="guardian.gestures" testID={testID?`${testID}.gesture`:undefined} mood={mood} look={look} guardianGestures={gesturesEnabled} onGuardianGesture={event=>{
     const value=event.nativeEvent.gesture;
     if(value==='start'||value==='end'||value==='tap'||value==='reveal')onGesture?.(value);
-  }} style={{width: size, height: size}} accessible={false} accessibilityElementsHidden />;
+  }} style={{position:'absolute',width: size,height:size}} accessible={false} accessibilityElementsHidden /></View>;
   // Keep the existing non-VoiceOver layout anchor while the native leaf owns
   // contact recognition. The visible mascot is still one decorative drawing.
   return testID?<View testID={testID} accessible={false}>{drawing}</View>:drawing;
@@ -60,7 +65,14 @@ export function usePageScrollObservation(observe:(sample?:PageScrollSample)=>voi
 // listens to window-wide keyboard frames, including keyboards in native sheets;
 // a read-only page must never retain extra scroll space from those notifications.
 export function Screen({children, onEndReached,onRefresh, keyboard = false, wide=false}: PropsWithChildren<{wide?:boolean;keyboard?: boolean;onEndReached?:()=>void;onRefresh?:()=>Promise<unknown>}>) {
-  const review=useOptionalReview();const canInteract=()=>mayInteractWithPresentation(review?.app);
+  const nativeLayout=usePresentationNativeLayout();
+  const review=useOptionalReview();const concealed=useRouteBodyConcealed();
+  const insets=useContext(SafeAreaInsetsContext);
+  const horizontalContentInsets=insets&&(insets.left!==0||insets.right!==0)?{
+    maxWidth:(wide?foundation.layout.wideWidth:foundation.layout.readingWidth)+insets.left+insets.right,
+    paddingLeft:lavaTokens.spacing.screenHorizontal+insets.left,paddingRight:lavaTokens.spacing.screenHorizontal+insets.right,
+  }:undefined;
+  const canInteract=()=>!concealed&&mayInteractWithPresentation(review?.app);
   const interactive=useSyncExternalStore(review?.app?.subscribe??(()=>()=>{}),canInteract);
   const scroll = useRef<ScrollViewInstance>(null);
   const focused = useIsFocused();
@@ -91,15 +103,19 @@ export function Screen({children, onEndReached,onRefresh, keyboard = false, wide
   // RNScreens behaviour behind it. Safe-area insets come from the one provider at
   // the navigation root; a provider per page also re-measures on mount and
   // foreground, which moved content under a stationary bar.
-  return <ScrollView ref={scroll} testID="screen.scroll" pointerEvents={interactive?'auto':'none'} accessibilityElementsHidden={!interactive} importantForAccessibility={interactive?'auto':'no-hide-descendants'} refreshControl={onRefresh?<RefreshControl refreshing={refreshing} onRefresh={refresh}/>:undefined} style={styles.screen}
-      onLayout={resetObservers} onContentSizeChange={resetObservers}
+  // UIKit's scroll-edge material follows the scroll viewport, so it must span
+  // the physical width. Only Yoga content receives horizontal safe padding.
+  // Include that padding in the width cap to retain the same reading envelope;
+  // automatic adjustment still owns vertical bars and the keyboard.
+  return <ScrollView ref={scroll} testID="screen.scroll" pointerEvents={interactive?'auto':'none'} accessibilityElementsHidden={!interactive} importantForAccessibility={interactive?'auto':'no-hide-descendants'} refreshControl={onRefresh?<RefreshControl refreshing={refreshing} onRefresh={refresh}/>:undefined} style={[styles.screen,concealed&&{opacity:0}]}
+      onLayout={event=>{nativeLayout(event);resetObservers();}} onContentSizeChange={resetObservers}
       onScrollBeginDrag={()=>{observingScrollGesture.current=true;}} onScrollEndDrag={()=>{observingScrollGesture.current=false;}}
       onMomentumScrollBegin={()=>{observingScrollGesture.current=true;}} onMomentumScrollEnd={()=>{observingScrollGesture.current=false;}}
       onTouchStart={()=>{if(canInteract())inspectionResets.current.forEach(reset=>reset());}} scrollEventThrottle={100} onScroll={event=>{const {contentOffset,contentSize,layoutMeasurement}=event.nativeEvent;
         if(observationActive.current&&observingScrollGesture.current)observers.current.forEach(observer=>observer({offset:contentOffset.y,windowHeight:Dimensions.get('window').height}));
         if(canInteract()&&onEndReached&&contentOffset.y+layoutMeasurement.height>=contentSize.height-140)onEndReached();}}
       contentInsetAdjustmentBehavior="automatic"
-      automaticallyAdjustKeyboardInsets={keyboard && focused} keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled" contentContainerStyle={[styles.content,wide&&{maxWidth:foundation.layout.wideWidth}]}>
+      automaticallyAdjustKeyboardInsets={keyboard && focused} keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled" contentContainerStyle={[styles.content,wide&&{maxWidth:foundation.layout.wideWidth},horizontalContentInsets]}>
     <PageScrollObservationContext.Provider value={registerObserver}><ScrollInteractionContext.Provider value={lockPage}><PageInspectionResetContext.Provider value={registerReset}>{children}</PageInspectionResetContext.Provider></ScrollInteractionContext.Provider></PageScrollObservationContext.Provider>
   </ScrollView>;
 }

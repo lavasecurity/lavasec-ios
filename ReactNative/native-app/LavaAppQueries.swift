@@ -5,6 +5,8 @@ import LavaSecAppServices
 
 extension LavaAppBridge {
     func query(_ name: String, _ input: [String: Any]) async throws -> Any {
+        SecurityController.tracePresentation("query.begin")
+        defer { SecurityController.tracePresentation("query.end") }
         guard let policy = PresentationReadPolicy(rawValue: name) else { throw CommandError("Unknown query.") }
         let surface: SecurityProtectedSurface = [.activity, .domains, .network, .stats].contains(policy) ? .activityViewing : policy == .share ? .appUnlock : .filterEditing
         // `share.query` pins the module retirement epoch across BOTH of its
@@ -56,7 +58,12 @@ extension LavaAppBridge {
                 readDiagnostics: { try await self.freshQuery(name, input) }, compose: { $0 },
                 validate: { try self.presentationCache.validate($0, authorize: allowed) })
         } else { result = try await freshQuery(name, input) }
-        try presentationCache.validate(ticket, authorize: allowed)
+        do {
+            try presentationCache.validate(ticket, authorize: allowed)
+        } catch {
+            if policy == .domainReview { discardStandaloneDomainResult(result) }
+            throw error
+        }
         if policy.permitsEncryptedReuse {
             try presentationCache.store(JSONSerialization.data(withJSONObject: result), for: ticket, authorize: allowed)
         }
@@ -125,7 +132,8 @@ extension LavaAppBridge {
         case "activity.query", "domains.query":
             // Activity and domains need only local diagnostics. Tunnel-health
             // capture remains independently owned by the health/Feedback paths.
-            model.reports.refreshDiagnostics()
+            // query() refreshed the source before capturing its read ticket.
+            // Re-reading here repeats I/O and can change that pinned revision.
             let now = Date()
             let start = Date(timeIntervalSince1970: (input["start"] as? Double ?? now.timeIntervalSince1970 * 1000) / 1000)
             let end = Date(timeIntervalSince1970: (input["end"] as? Double ?? now.timeIntervalSince1970 * 1000) / 1000)
@@ -178,7 +186,7 @@ extension LavaAppBridge {
         case "domains.stage":
             guard let decision = input["decision"] as? String, ["allowed", "blocked"].contains(decision) else { throw CommandError("Choose an allowed or blocked domain action.") }
             let result = model.stageDomainHistoryDomainAction(input["domain"] as? String ?? "", target: input["decision"] as? String == "allowed" ? .allowed : .blocked)
-            guard result.isAccepted else { return ["rejection": ["title": result.title, "message": result.message]] }
+            guard result.isAccepted else { return ["rejection": ["title": result.title, "message": result.message, "limitReached": result.limitReached && !model.configuration.hasLavaSecurityPlus]] }
             guard let draft = model.filterEditDraft else { throw CommandError("Start editing this filter first.") }
             let id = model.filterEditTargetID ?? model.activeFilterID
             let token = UUID().uuidString
@@ -220,8 +228,8 @@ extension LavaAppBridge {
                     ["id": row.id, "title": row.title.lavaLocalized, "value": row.value.lavaLocalized]
                 }] as [String: Any]
             },
-            "tiers": [["T0 · VPN chaining", vpnTier()], ["1 · Primary DNS", resolverTier(ladder.resolver, enabled: true)],
-            ["2 · Fallback DNS", resolverTier(ladder.configuredFallbackResolver, enabled: ladder.isConfiguredFallbackEnabled)],
+            "tiers": [["T0 · VPN chaining", vpnTier()], ["1 · Primary DNS", resolverTier(ladder.resolver, enabled: true, customName: m.configuration.customResolverName)],
+            ["2 · Fallback DNS", resolverTier(ladder.configuredFallbackResolver, enabled: ladder.isConfiguredFallbackEnabled, customName: m.configuration.fallbackCustomResolverName)],
             ["S · System DNS", systemDNS]],
             "app": [["Version", VersionInfo.appVersion], ["Platform", VersionInfo.platformVersion]] + (VersionInfo.sourceRevision.isEmpty ? [] : [["Source", VersionInfo.displayedSourceRevision]])]
     }
@@ -245,10 +253,11 @@ extension LavaAppBridge {
         case .dnsOverQUIC: return preset.doqEndpoints.map(\.displayAddress).joined(separator: ", ")
         }
     }
-    private func resolverTier(_ preset: DNSResolverPreset, enabled: Bool) -> String {
-        var rows = (enabled ? [] : ["Off"]) + [preset.settingsBasePreset.displayName]
+    private func resolverTier(_ preset: DNSResolverPreset, enabled: Bool, customName: String?) -> String {
+        var rows = (enabled ? [] : ["Off".lavaLocalized])
+            + [dnsResolverDisplayName(preset.settingsBasePreset, customName: customName)]
         if preset.transport != .deviceDNS {
-            rows.append(preset.transport.displayName)
+            rows.append(preset.transport.displayName.lavaLocalized)
             let addresses: [String]
             switch preset.transport {
             case .deviceDNS: addresses = []
@@ -259,6 +268,6 @@ extension LavaAppBridge {
             }
             if !addresses.isEmpty { rows.append(addresses.joined(separator: ", ")) }
         }
-        return rows.map(\.lavaLocalized).joined(separator: "\n")
+        return rows.joined(separator: "\n")
     }
 }

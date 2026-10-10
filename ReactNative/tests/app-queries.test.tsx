@@ -25,8 +25,8 @@ function setup(retainThroughInactivity=false,cacheable=false,initialCommand:AppC
   const hook=renderHook(({command,scope}:{command:AppCommand|null;scope:string})=>useAppQuery<string[]>(command,scope,retainThroughInactivity),{wrapper,initialProps:{command:initialCommand as AppCommand|null,scope:'blocked'}});
   return {...hook,requests,command,app,wrapper,live,unmountScreen:hook.unmount,unmount:()=>{hook.unmount();clearAppReadCache(app);}};
 }
-test('pagination retains rows and late older pages cannot replace the newest reply',async()=>{
-  const {result,rerender,requests}=setup();
+test.each([false,true])('pagination retains rows and late older pages cannot replace the newest reply (off=%p)',async optOut=>{
+  const {result,rerender,requests,unmount}=setup(false,true,blocked,optOut);
   await act(async()=>requests[0]!.resolve(['one']));
   rerender({command:{...blocked,limit:61},scope:'blocked'});
   expect(result.current.value).toEqual(['one']);expect(result.current.refreshing).toBe(true);
@@ -34,6 +34,32 @@ test('pagination retains rows and late older pages cannot replace the newest rep
   await act(async()=>requests[2]!.resolve(['one','two','three']));
   await act(async()=>requests[1]!.resolve(['one','two']));
   expect(result.current.value).toEqual(['one','two','three']);expect(result.current.refreshing).toBe(false);
+  unmount();
+});
+test.each(['search','catalog'])('all-off foreground %s updates retain their scoped rows until replacement',async change=>{
+  const initial:AppCommand=change==='catalog'?{type:'catalog.query',ids:['one']}:blocked;
+  const next:AppCommand=change==='catalog'?{type:'catalog.query',ids:['one','two']}:{...blocked,search:'one'};
+  const {result,rerender,requests,unmount}=setup(false,true,initial,true);
+  try {
+    await act(async()=>requests[0]!.resolve(['one']));
+    rerender({command:next,scope:'blocked'});
+    expect(result.current.value).toEqual(['one']);expect(result.current.refreshing).toBe(true);
+    await act(async()=>requests[1]!.resolve(['one','two']));
+    expect(result.current.value).toEqual(['one','two']);expect(result.current.refreshing).toBe(false);
+  } finally {unmount();}
+});
+test('first loads and changed retention scopes stay pending until a result or error settles',async()=>{
+  const {result,rerender,requests,unmount}=setup(false,true,{type:'catalog.query',ids:['one']},true);
+  try {
+    expect(result.current.refreshing).toBe(true);
+    await act(async()=>requests[0]!.resolve(['one']));
+    rerender({command:{type:'catalog.query',ids:['two']},scope:'another-filter'});
+    expect(result.current.value).toBeUndefined();expect(result.current.refreshing).toBe(true);
+    await act(async()=>requests[1]!.reject(new Error('Temporary read failure.')));
+    expect(result.current.error).toBe('Temporary read failure.');expect(result.current.refreshing).toBe(false);
+    rerender({command:null,scope:'another-filter'});
+    expect(result.current.value).toBeUndefined();expect(result.current.refreshing).toBe(false);
+  } finally {unmount();}
 });
 test('changing the data scope or disabling logs clears retained rows immediately',async()=>{
   const {result,rerender,requests}=setup();
@@ -114,6 +140,36 @@ function lifecycle() {
     restore(){AppState.addEventListener=originalListener;Object.defineProperty(AppState,'currentState',{configurable:true,value:'active'});},
   };
 }
+
+test.each(['blur','inactive'])('a pending all-off scoped update cannot carry its older rows through %s',async boundary=>{
+  const events=lifecycle();const {result,rerender,requests,unmount}=setup(false,true,blocked,true);
+  const next:AppCommand={...blocked,limit:61};
+  try {
+    await act(async()=>requests[0]!.resolve(['old-page']));
+    rerender({command:next,scope:'blocked'});
+    expect(result.current.value).toEqual(['old-page']);
+    if(boundary==='blur'){mockFocused=false;rerender({command:next,scope:'blocked'});}
+    else events.emit('inactive');
+    expect(result.current.value).toBeUndefined();
+    if(boundary==='blur'){mockFocused=true;rerender({command:next,scope:'blocked'});}
+    else events.emit('active');
+    await act(async()=>requests[1]!.resolve(['interrupted-page']));
+    expect(result.current.value).toBeUndefined();
+    await act(async()=>requests[2]!.resolve(['fresh-page']));
+    expect(result.current.value).toEqual(['fresh-page']);
+  } finally {unmount();mockFocused=true;events.restore();}
+});
+test('a failed all-off search retains foreground rows without promoting them to its background frame',async()=>{
+  const events=lifecycle();const {result,rerender,requests,unmount}=setup(false,true,blocked,true);
+  try {
+    await act(async()=>requests[0]!.resolve(['last-accepted']));
+    rerender({command:{...blocked,search:'missing'},scope:'blocked'});
+    await act(async()=>requests[1]!.reject(new Error('Temporary read failure.')));
+    expect(result.current.value).toEqual(['last-accepted']);expect(result.current.refreshing).toBe(false);
+    events.emit('inactive');expect(result.current.value).toBeUndefined();
+    events.emit('active');expect(result.current.value).toBeUndefined();
+  } finally {unmount();events.restore();}
+});
 
 const activity:AppCommand={type:'activity.query',start:100,end:200};
 const network:AppCommand={type:'network.query'};

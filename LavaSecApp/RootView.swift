@@ -55,6 +55,11 @@ struct RootView: View {
         // Larger Text setting flows through untouched; a fixed size otherwise. Applied app-wide here
         // so every screen — including sheets/covers presented from it — inherits it.
         .lavaTextSizeOverride(customization.textSizeOverride)
+        #if LAVA_REACT_NATIVE
+        .onChange(of: hasSeenLavaOnboarding) { _, completed in
+            if !completed { LavaAppBridge.shared.beginOnboarding(mock: false) }
+        }
+        #endif
         // A review anchor was earned: present the native prompt, but ONLY while the scene is active.
         // StoreKit needs a foreground-active scene to present from, and an eligible moment can be armed
         // from an async path (a filter apply or VPN connect finishing) after the user has left the app —
@@ -65,14 +70,16 @@ struct RootView: View {
         .onChange(of: viewModel.pendingReviewRequest) { _, _ in
             presentReviewRequestIfActive()
         }
-        .accessibilityHidden(!hasSeenLavaOnboarding)
-        .allowsHitTesting(hasSeenLavaOnboarding)
+        .accessibilityHidden(!rootPresentationAllowsInteraction)
+        .allowsHitTesting(rootPresentationAllowsInteraction)
         .overlay {
+            #if !LAVA_REACT_NATIVE
             if !hasSeenLavaOnboarding {
                 LavaOnboardingView(hasSeenOnboarding: $hasSeenLavaOnboarding,
                     installDNSProfile: { try await LavaAppBridge.shared.updateManagedDNSPatch(create: true) },
                     supportsDNSProfile: ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 27)
             }
+            #endif
         }
         .overlay {
             RageShakeDetector {
@@ -81,21 +88,8 @@ struct RootView: View {
             .allowsHitTesting(false)
             .accessibilityHidden(true)
         }
-        .overlay {
-            if security.isAppUnlockBlockingUI && security.passcodeAuthenticationRequest == nil {
-                SecurityLockOverlay {
-                    Task {
-                        await security.authenticateAppUnlockIfNeeded()
-                    }
-                }
-            }
-        }
-        .overlay {
-            if security.isAppUnlockPrivacyMaskVisible && !security.isAppUnlockBlockingUI {
-                SecurityPrivacyMaskOverlay()
-            }
-        }
-
+        // The scene-owned security window presents lock/passcode UI above RN
+        // sheets. Root overlays would create a second, obscured Unlock control.
         .lavaConfirmationAlert { host in
             host.alert(
                 "Send feedback?",
@@ -151,14 +145,12 @@ struct RootView: View {
             }
 
             didRequestInitialAppUnlock = true
-            Task {
-                await security.authenticateAppUnlockIfNeeded()
-            }
+            if scenePhase == .active { security.sceneDidBecomeActive() }
         }
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .active:
-                security.hideAppUnlockPrivacyMask()
+                security.sceneDidBecomeActive()
                 viewModel.setAppForegroundActive(true)
                 viewModel.warmNonActiveFiltersOnAppForeground()
                 viewModel.reconcileTemporaryProtectionPause()
@@ -169,7 +161,6 @@ struct RootView: View {
                 Task {
                     await viewModel.refreshProtectionStatus(force: true)
                     await viewModel.reconcilePendingFilterSwitch()
-                    await security.authenticateAppUnlockIfNeeded()
                 }
             case .inactive:
                 security.showAppUnlockPrivacyMaskIfNeeded()
@@ -210,11 +201,23 @@ struct RootView: View {
         }
     }
 
+    private var rootPresentationAllowsInteraction: Bool {
+        #if LAVA_REACT_NATIVE
+        true // RN owns onboarding's body, interaction and accessibility cover.
+        #else
+        hasSeenLavaOnboarding
+        #endif
+    }
+
     @ViewBuilder
     private var rootPresentation: some View {
         // UIKit owns keyboard avoidance inside the embedded app. SwiftUI must
         // not shrink the React Native tab controller when a descendant field focuses.
         LavaAppHost().ignoresSafeArea(.all, edges: .bottom)
+            // The native navigation bar paints across the physical landscape
+            // viewport; UIKit and the shared RN page own their content insets.
+            // pinned: RNOnlyAppSourceTests.testNativeNavigationHostUsesThePhysicalHorizontalViewport
+            .ignoresSafeArea(.container, edges: .horizontal)
             .statusBarHidden(false)
             .onAppear { forwardReactExternalFlows() }
             .onReceive(LavaAppBridge.shared.$flow) { flow in

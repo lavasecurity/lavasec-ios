@@ -46,6 +46,17 @@ read/grant revisions, account-status messages and unrelated native mutations do
 not change the identity of the already painted all-off frame. An ordinary mounted-route blur pauses reads
 without discarding a same-scope all-off display; unmount still disposes it.
 
+While focused, active and currently authorized, an explicitly scoped catalog or
+domain list keeps its existing rows as selection totals, search or pagination
+updates. The read remains pending until the replacement result or error settles.
+This foreground continuity does not widen the inactive display scope: leaving
+the route or app before the changed query succeeds discards the older rows, and
+a failed changed query cannot promote those rows into its background frame.
+Catalog errors leave the choices editable, show the error in the footer and keep
+Save/Upgrade blocked until the current selection has successfully refreshed totals.
+History and network result-count changes preserve expanded pages; an accepted
+empty result resets pagination for the next populated log.
+
 ## Shared procedure
 
 `AppStore`, `LavaPresentation`/`LiveRenderBoundary`, `useAppQuery` and the native

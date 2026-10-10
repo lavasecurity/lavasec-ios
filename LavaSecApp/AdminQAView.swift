@@ -194,8 +194,12 @@ struct PhoneQAView: View {
         }
         .sheet(isPresented: $showingResult) { resultSheet }
         .fullScreenCover(isPresented: $showingMockOnboarding) {
+            #if LAVA_REACT_NATIVE
+            LavaAppHost(onboardingPreview: true).modifier(PhoneQAProtectionMask())
+            #else
             LavaOnboardingView(hasSeenOnboarding: .constant(false), supportsDNSProfile: true, isMock: true)
                 .modifier(PhoneQAProtectionMask())
+            #endif
         }
         .sheet(item: $condition) { value in PhoneQAConditionView(condition: value) }
         .sheet(item: $suite) { value in PhoneQASuiteView(suite: value) }

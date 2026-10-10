@@ -4,7 +4,7 @@ import LavaSecKit
 /// Persistent cache of parsed blocklist rules keyed by payload hash, parse format,
 /// and parser-rules version.
 ///
-/// Entries contain rules after protected-domain filtering. Source version identifiers
+/// Entries retain every supported, normalized source rule. Source version identifiers
 /// are not part of the cache key.
 public struct RuleSetCache: Sendable {
     package struct Entry: Equatable, Sendable {
@@ -224,7 +224,7 @@ public struct RuleSetCache: Sendable {
         }
 
         return Entry(
-            // Cached domains are post-normalization and post-filter; the
+            // Cached domains are already normalized and validated by the parser; the
             // set-based initializer trusts them without re-normalizing.
             ruleSet: DomainRuleSet(exactDomains: exactDomains, suffixDomains: suffixDomains),
             payloadByteSize: Int(payloadByteSize)

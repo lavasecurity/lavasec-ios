@@ -55,8 +55,9 @@ final class AppDeepLinkSourceTests: XCTestCase {
         // the Settings reason would misdescribe an Explore deep link.
         XCTAssertTrue(bridge.contains("if tab == \"SettingsTab\" || screen == \"Explore\" { try await authorize(.appSettings, screen == \"Explore\" ? \"Explore\" : \"Open Settings\", fresh: false) }"))
         // Revalidate both the request and the onboarding destination after auth.
-        XCTAssertTrue(bridge.contains("guard serial == navigationSerial,"))
-        XCTAssertTrue(bridge.contains("targetsGuard || !LavaOnboardingHandoff.shared.keepsGuardVisible else { return }"))
+        let postAuthentication = try sourceBlock(in: bridge, startingAt: "if screen == \"Security\"", endingBefore: "navigation = [\"serial\"")
+        XCTAssertTrue(postAuthentication.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .contains("guard serial == navigationSerial, targetsGuard || onboardingVisit?.keepsGuardVisible != true else { return }"))
     }
 
     func testDeepLinkHandlerStagesImportAndNeverMutates() throws {

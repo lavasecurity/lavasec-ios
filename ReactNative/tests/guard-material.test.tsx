@@ -103,3 +103,16 @@ test('rerenders and returning to a hidden hero do not replay engage',()=>{
     for(const call of timing.mock.calls)expect(call[1].duration).toBe(0);
   } finally {timing.mockRestore();AppState.currentState=originalState;}
 });
+
+
+test('first authorized material settles beneath concealment without replaying protection activation on reveal',()=>{
+  const timing=jest.spyOn(Animated,'timing');
+  const previous=AppState.currentState;AppState.currentState='active';
+  try {
+    const view=render(<GuardMaterial intent="rest" active={false}/>);
+    timing.mockClear();
+    view.rerender(<GuardMaterial intent="affirmed" active={false}/>);
+    view.rerender(<GuardMaterial intent="affirmed" active/>);
+    expect(timing).not.toHaveBeenCalled();
+  } finally {timing.mockRestore();AppState.currentState=previous;}
+});

@@ -116,6 +116,8 @@ struct FilterPreparationScreen: View {
     // Success is the bar's 4th quarter (3/4 → full). We let the bar sweep to a full 100% first, then
     // reveal the checkmark — so Success reads as the bar completing, not the bar vanishing at 75%.
     @State private var successGlyphShown = false
+    @State private var showingUpgrade = false
+    @State private var upgradeContext: String?
 
     init(origin: FilterReviewOrigin, returnToReview: (() -> Void)? = nil) {
         self.origin = origin
@@ -180,7 +182,10 @@ struct FilterPreparationScreen: View {
                         // A dead-end failure (switch target deleted/frozen mid-prepare) isn't
                         // retryable — retrying just re-fails — so "Keep Current Filter" is the
                         // only recovery there.
-                        if drafts.preparationFailureIsRetryable {
+                        if let reason = viewModel.filterPreparationUpgradeReason {
+                            Button("Upgrade") { upgradeContext = reason; showingUpgrade = true }
+                                .buttonStyle(LavaStandaloneActionButtonStyle())
+                        } else if drafts.preparationFailureIsRetryable || viewModel.filterPreparationCanResumeAfterUpgrade {
                             Button("Try Again") {
                                 viewModel.retryFilterPreparation()
                             }
@@ -224,6 +229,12 @@ struct FilterPreparationScreen: View {
             // can mount already-terminal — `.onChange` would never fire for that state. Announce
             // whatever terminal outcome is already on screen at mount; `.onChange` covers the rest.
             announceFilterPreparationOutcome(drafts.preparationState)
+        }
+        .sheet(isPresented: $showingUpgrade) {
+            LavaPlusUpgradeSheet(context: upgradeContext)
+        }
+        .onChange(of: viewModel.configuration.hasLavaSecurityPlus) { _, enabled in
+            if enabled { showingUpgrade = false }
         }
         .onChange(of: drafts.preparationState) { _, newState in
             // The result glyph / ticker title change in place inside the already-presented cover,

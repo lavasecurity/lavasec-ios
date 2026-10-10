@@ -12,6 +12,7 @@ import {foundation} from '../src/foundation';
 import {LavaAppearanceContext} from '../src/appearance';
 import {LavaActionButton} from '../src';
 import {Group,StableVariants} from '../review/scaffold';
+import {configurePresentation,localized} from '../app/presentation';
 
 let mockWindow={width:390,height:844,scale:3,fontScale:1};
 jest.mock('react-native/Libraries/Utilities/useWindowDimensions',()=>({__esModule:true,default:()=>mockWindow}));
@@ -25,6 +26,20 @@ const stages=connectionStages({session:{...session,activeFilterID:'mine',filterI
   connection:{dns:{primary:{name:'Device DNS',detail:'Wi-Fi',transport:'IP'}},vpn:{eligible:true,enabled:false}}} as unknown as AppSnapshot,session);
 const scene=(attention?:readonly import('../review/connection-model').ConnectionPart[])=><ConnectionScene stages={stages} selected="filter" attention={attention} onSelect={()=>{}}/>;
 beforeEach(()=>{mockWindow={width:390,height:844,scale:3,fontScale:1};});
+
+test('expanded connection summaries keep projected provider identities and metadata verbatim',()=>{
+  configurePresentation({locale:'zh-Hant',textScales:null});
+  mockWindow={...mockWindow,width:1024,height:768};
+  try {
+    const configured=connectionStages({connection:{dns:{primary:{name:'Cancel',detail:'Save',transport:'DoH'}},vpn:{eligible:true,enabled:false}}} as AppSnapshot,session);
+    render(<ConnectionPanel stages={configured} onSelect={()=>{}} onExplore={()=>{}}/>);
+    expect(screen.getByTestId('connection.dns').props.accessibilityLabel).toBe(`${localized('DNS settings')}, Cancel\nSave · DoH`);
+    expect(screen.getByText('Cancel\nSave · DoH')).toBeOnTheScreen();
+    expect(screen.queryByText(`${localized('Cancel')}\n${localized('Save')} · DoH`)).toBeNull();
+    expect(screen.getByText(localized('This device'))).toBeOnTheScreen();
+    expect(screen.getByText(localized('Disabled')+'\n'+localized('DNS fallback: unavailable'))).toBeOnTheScreen();
+  } finally {configurePresentation();}
+});
 
 test('a discovery dot expands the accessory while preserving the trailing chevron axis',()=>{
   render(<><RowAccessory testID="plain.accessory" intent="page"/><RowAccessory testID="new.accessory" intent="page" attention/></>);

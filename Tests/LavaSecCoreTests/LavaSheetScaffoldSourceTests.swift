@@ -71,9 +71,9 @@ final class LavaSheetScaffoldSourceTests: XCTestCase {
 
         XCTAssertTrue(scaffoldBlock.contains(".modifier(LavaSheetNavigationToolbarBackground(hasHeader: hasHeader))"))
         XCTAssertTrue(toolbarModifierBlock.contains("content.toolbarBackground(.hidden, for: .navigationBar)"))
-        XCTAssertTrue(toolbarModifierBlock.contains("content.toolbarBackground(LavaStyle.groupedBackground, for: .navigationBar)"))
+        XCTAssertFalse(toolbarModifierBlock.contains("toolbarBackground(LavaStyle.groupedBackground"))
         XCTAssertTrue(headerBlock.contains("Rectangle()"))
-        XCTAssertTrue(headerBlock.contains(".fill(LavaStyle.groupedBackground)"))
+        XCTAssertTrue(headerBlock.contains(".fill(.bar)"))
         XCTAssertTrue(headerBlock.contains(".ignoresSafeArea(edges: .top)"))
         XCTAssertFalse(headerBlock.contains(".background(LavaStyle.groupedBackground)"))
     }

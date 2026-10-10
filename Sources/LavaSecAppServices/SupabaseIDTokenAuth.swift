@@ -137,12 +137,10 @@ package enum SupabaseIDTokenAuthError: Error, Equatable, LocalizedError {
             LavaCoreStrings.localized("The Supabase Auth endpoint is not valid.")
         case .invalidResponse:
             LavaCoreStrings.localized("The Supabase Auth response was not valid.")
-        case .requestFailed(let statusCode, let message):
-            if let message, !message.isEmpty {
-                LavaCoreStrings.localizedFormat("Supabase Auth returned status %lld: %@", statusCode, message)
-            } else {
-                LavaCoreStrings.localizedFormat("Supabase Auth returned status %lld.", statusCode)
-            }
+        case .requestFailed(let statusCode, _):
+            // Server prose is diagnostic data, not localized app copy. Keep it
+            // in the typed error while presenting the translated status.
+            LavaCoreStrings.localizedFormat("Supabase Auth returned status %lld.", statusCode)
         }
     }
 }

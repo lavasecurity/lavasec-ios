@@ -38,6 +38,7 @@ export const foundation = {
   },
   type: {
     title: {fontSize: 32, fontWeight: '700', dynamicTypeRamp: 'largeTitle'},
+    setupHeading: {fontSize:28,fontWeight:'700',dynamicTypeRamp:'title1'},
     heading: lavaTokens.typography.primaryValue,
     identityEmoji: {...lavaTokens.typography.primaryValue,fontSize:lavaTokens.filterIdentity.emojiPointSize},
     section: lavaTokens.typography.sectionLabel,

@@ -26,7 +26,7 @@ final class BlocklistSelectionSourceTests: XCTestCase {
 
     func testFilterDraftBlocklistSheetStartsFromCurrentDraftSelection() throws {
         let source = try readSource(.reactNativeFilterScreens)
-        XCTAssertTrue(source.contains("const [selected,setSelected]=useState(session.blocklists)"))
+        XCTAssertTrue(source.contains("const [selected,setSelected]=useRouteViewState(session.blocklists)"))
     }
 
     func testFilterDraftBlocklistSheetUsesTheSaveAvailabilityPolicy() throws {

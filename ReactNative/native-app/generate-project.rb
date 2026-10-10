@@ -22,7 +22,7 @@ components.each { |file| app['sources'] << {'path' => "ReactNative/ios/LavaSecUI
 %w[LavaShareCardSurfaceView.h LavaShareCardSurfaceView.mm LavaShareQrView.h LavaShareQrView.mm LavaShareCardCapture.swift].each do |file|
   app['sources'] << {'path' => "ReactNative/ios/LavaSecUIReview/#{file}"}
 end
-%w[LavaNativePageContent.swift LavaAppGuard.swift LavaAppHost.swift LavaAppPresentation.swift LavaAppBridge.swift LavaAppSettings.swift LavaAppQueries.swift LavaAppShareCard.swift LavaAppFilters.swift LavaAppFlows.swift LavaAppModule.h LavaAppModule.mm AppearanceBridge.swift].each do |file|
+%w[LavaNativePageContent.swift LavaAppGuard.swift LavaAppHost.swift LavaAppPresentation.swift LavaAppBridge.swift LavaAppSettings.swift LavaAppQueries.swift LavaAppShareCard.swift LavaAppFilters.swift LavaAppFlows.swift LavaAppFeedback.swift LavaAppWireGuardEditor.swift LavaAppOnboarding.swift LavaAppModule.h LavaAppModule.mm AppearanceBridge.swift].each do |file|
   app['sources'] << {'path' => "ReactNative/native-app/#{file}"}
 end
 app['sources'] << {'path' => 'ReactNative/.artifacts/LavaUIReview.js', 'buildPhase' => 'resources'}

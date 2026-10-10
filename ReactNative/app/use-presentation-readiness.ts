@@ -1,5 +1,7 @@
-import {useLayoutEffect,useRef,useSyncExternalStore} from 'react';
-import {AppState} from 'react-native';
+import {useLayoutEffect,useRef,useState,useSyncExternalStore} from 'react';
+import {AppState,type LayoutChangeEvent} from 'react-native';
+import {useIsFocused} from '@react-navigation/native';
+import {useOptionalReview} from '../review/ReviewContext';
 import type {AppStore} from './store';
 import type {PresentationReadTicket} from './presentation-hydration';
 
@@ -25,4 +27,13 @@ export function usePresentationReadiness(app:AppStore|undefined,required:boolean
     if(required&&ready&&authoritative)app?.settlePresentationRead?.(ticket.current);
   },[app,required,ready,scope,authoritative,epoch]);
   return authoritative;
+}
+
+/** The focused scaffold's actual native viewport must exist before first reveal.
+ * A same-visit retained viewport stays measured while its data is reauthorized. */
+export function usePresentationNativeLayout(required=true) {
+  const app=useOptionalReview()?.app;const focused=useIsFocused();
+  const [ready,setReady]=useState(false);
+  usePresentationReadiness(app,!!app&&focused&&required,ready,'native-scaffold-layout');
+  return (event:LayoutChangeEvent)=>setReady(event.nativeEvent.layout.width>0&&event.nativeEvent.layout.height>0);
 }

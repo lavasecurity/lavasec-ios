@@ -19,6 +19,8 @@ function run(t, args, options = {}) {
   mkdirSync(bin);
   copyFileSync(new URL('../scripts/build-full-app.sh', import.meta.url), join(app, 'scripts/build-full-app.sh'));
   copyFileSync(new URL('../scripts/simulator-cleanup.sh', import.meta.url), join(app, 'scripts/simulator-cleanup.sh'));
+  copyFileSync(new URL('../scripts/simulator-signing-fixture.py', import.meta.url), join(app, 'scripts/simulator-signing-fixture.py'));
+  copyFileSync(new URL('../scripts/full-app-journey-lanes.json', import.meta.url), join(app, 'scripts/full-app-journey-lanes.json'));
   writeFileSync(join(app, 'scripts/prepare-full-app.sh'), 'set -eu\nprintf prepared > "$2/prepared"\n');
   writeFileSync(join(app, 'scripts/test-native-containment.sh'), 'set -eu\nprintf \'{"passed":true,"checks":26}\' > "$2/native-scaffold-results.json"\nexit "${LAVA_CI_TEST_SCAFFOLD_EXIT:-0}"\n');
   // Old journey evidence must never survive a compile or failed retry.
@@ -26,19 +28,41 @@ function run(t, args, options = {}) {
   writeFileSync(join(evidence, 'Lava-RN-Full-Simulator.zip'), 'stale');
   const toolBody = `
 import {appendFileSync, mkdirSync, writeFileSync} from 'node:fs';
-import {join} from 'node:path';
+import {dirname, join} from 'node:path';
 const args=process.argv.slice(2);
 appendFileSync(process.env.LAVA_CI_TEST_TRACE, JSON.stringify({tool,args})+'\\n');
 const value = flag => args[args.indexOf(flag)+1];
 if (tool==='xcodebuild') {
   mkdirSync(value('-resultBundlePath'), {recursive:true});
-  if (!process.env.LAVA_CI_TEST_MISSING_APP) mkdirSync(join(value('-derivedDataPath'),'Build/Products/Debug-iphonesimulator/LavaSec.app'), {recursive:true});
-  process.exit(Number((args.includes('test-without-building') ? process.env.LAVA_CI_TEST_IPAD_XCODE_EXIT : process.env.LAVA_CI_TEST_XCODE_EXIT) || 0));
+  if (!process.env.LAVA_CI_TEST_MISSING_APP) {
+    const products=join(value('-derivedDataPath'),'Build/Products/Debug-iphonesimulator');
+    mkdirSync(join(products,'LavaSec.app'), {recursive:true});
+    if(!args.includes('test-without-building')) {
+      const xml=value=>typeof value==='string'?'<string>'+value+'</string>':Array.isArray(value)?'<array>'+value.map(xml).join('')+'</array>':'<dict>'+Object.entries(value).map(([key,item])=>'<key>'+key+'</key>'+xml(item)).join('')+'</dict>';
+      const plist=(path,data)=>{mkdirSync(dirname(path),{recursive:true});writeFileSync(path,'<?xml version="1.0"?><plist version="1.0">'+xml(data)+'</plist>');};
+      const qualified='ABCDE12345.com.lavasec.app.chained-upstream';
+      const prefix=args.find(arg=>arg.startsWith('LAVA_KEYCHAIN_SHARING_GROUP_PREFIX='))?.split('=')[1]??'';
+      const infoGroup=process.env.LAVA_CI_TEST_SIMULATOR_GROUP_MISMATCH&&prefix?'STALE.com.lavasec.app.chained-upstream':prefix+'.com.lavasec.app.chained-upstream';
+      const intermediate=join(value('-derivedDataPath'),'Build/Intermediates.noindex/LavaSecRN.build/Debug-iphonesimulator');
+      for(const [target,location] of [['LavaSec',''],['LavaSecTunnel','PlugIns'],['LavaSecWidget','PlugIns'],['LavaSecIntents','Extensions']]) {
+        const app=target==='LavaSec';const shared=app||target==='LavaSecTunnel';
+        const product=app?'LavaSec.app':target+'.appex';
+        const path=app?join(products,product):join(products,'LavaSec.app',location,product);
+        plist(join(path,'Info.plist'),{CFBundleIdentifier:app?'com.lavasec.app':'com.lavasec.app.'+target,...(shared?{LavaKeychainSharingGroup:infoGroup}:{})});
+        plist(join(intermediate,target+'.build',product+'-Simulated.xcent'),{'keychain-access-groups':shared?[process.env.LAVA_CI_TEST_UNQUALIFIED_SIMULATOR_GROUP?'.com.lavasec.app.chained-upstream':qualified]:[]});
+      }
+    }
+  }
+  const phase=value('-resultBundlePath');
+  process.exit(Number((phase.includes('ipad.xcresult') ? process.env.LAVA_CI_TEST_IPAD_XCODE_EXIT : phase.includes('preferences-') || phase.includes('reduced-motion') || phase.includes('crossfade') ? process.env.LAVA_CI_TEST_MOTION_XCODE_EXIT : process.env.LAVA_CI_TEST_XCODE_EXIT) || 0));
 }
 if (tool==='ditto') writeFileSync(args.at(-1), 'simulator app');
 if (tool==='xcrun' && args[0]==='simctl' && args[1]==='list') console.log(JSON.stringify({runtimes:[{isAvailable:true,identifier:'com.apple.CoreSimulator.SimRuntime.iOS-26-0',version:'26.0'}],devicetypes:[{name:'iPad Pro 11-inch (M4)',identifier:'com.apple.CoreSimulator.SimDeviceType.iPad-Pro-11-inch-M4'}]}));
 if (tool==='xcrun' && args[0]==='simctl' && args[1]==='create') console.log(args[2].includes('iPad') ? 'isolated-ipad-simulator' : 'isolated-test-simulator');
-if (tool==='xcrun' && args[0]==='xcresulttool' && args[1]==='get') console.log(value('--path').includes('ipad.xcresult') ? process.env.LAVA_CI_TEST_IPAD_SUMMARY : process.env.LAVA_CI_TEST_SUMMARY);
+if (tool==='xcrun' && args[0]==='xcresulttool' && args[1]==='get') {
+  const path=value('--path');
+  console.log(path.includes('ipad.xcresult') ? process.env.LAVA_CI_TEST_IPAD_SUMMARY : path.includes('preferences-') ? process.env.LAVA_CI_TEST_PREFERENCES_SUMMARY : path.includes('reduced-motion') || path.includes('crossfade') ? process.env.LAVA_CI_TEST_MOTION_SUMMARY : process.env.LAVA_CI_TEST_SUMMARY);
+}
 if (tool==='xcrun' && args[0]==='xcresulttool' && args[1]==='export') mkdirSync(value('--output-path'),{recursive:true});
 `;
   for (const tool of ['xcrun', 'xcodebuild', 'ditto']) {
@@ -48,8 +72,10 @@ if (tool==='xcrun' && args[0]==='xcresulttool' && args[1]==='export') mkdirSync(
     encoding: 'utf8', timeout: 120000,
     env: {...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: root,
       LAVA_CI_TEST_TRACE: trace,
-      LAVA_CI_TEST_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 19, failedTests: 0, skippedTests: 0}),
+      LAVA_CI_TEST_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 75, failedTests: 0, skippedTests: 0}),
       LAVA_CI_TEST_IPAD_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 2, failedTests: 0, skippedTests: 0}),
+      LAVA_CI_TEST_PREFERENCES_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 1, failedTests: 0, skippedTests: 0}),
+      LAVA_CI_TEST_MOTION_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 3, failedTests: 0, skippedTests: 0}),
       ...options},
   });
   assert.ifError(result.error);
@@ -65,6 +91,21 @@ function assertCleaned(calls) {
   const build = calls.find(call => call.tool === 'xcodebuild');
   if (build) assert.equal(existsSync(build.args[build.args.indexOf('-derivedDataPath') + 1]), false);
 }
+
+test('mandatory journey selectors exist and the normal minimum covers every ordinary case', () => {
+  const source = readFileSync(new URL('../native-app/tests/RNFullAppUITests.swift', import.meta.url), 'utf8');
+  const fullClass = source.split('final class RNFullAppUITests: XCTestCase {')[1];
+  const names = [...fullClass.matchAll(/^    func (test\w+)\(/gm)].map(match => match[1]);
+  const lanes = JSON.parse(readFileSync(new URL('../scripts/full-app-journey-lanes.json', import.meta.url)));
+  const separate = [...lanes.separateMotionTests, ...lanes.installedQAFixtureTests];
+  assert.equal(new Set(separate).size, separate.length);
+  for (const name of separate) assert.ok(names.includes(name), `Unknown separately qualified case: ${name}`);
+  assert.equal(lanes.normalSimulatorMinimumTests, names.filter(name => !separate.includes(name)).length);
+  const script = readFileSync(new URL('../scripts/build-full-app.sh', import.meta.url), 'utf8');
+  for (const [, name] of script.matchAll(/RNFullAppUITests\/(test\w+)/g)) {
+    assert.ok(names.includes(name), `Unknown mandatory motion/tablet selector: ${name}`);
+  }
+});
 
 test('routine compile keeps UIKit regressions and produces no journey or app ZIP evidence', t => {
   const {result, evidence, calls} = run(t, ['--compile']);
@@ -83,17 +124,29 @@ test('routine compile keeps UIKit regressions and produces no journey or app ZIP
 test('existing local default still runs journeys and retains review evidence', t => {
   const {result, evidence, calls} = run(t, []);
   assert.equal(result.status, 0, result.stderr);
-  const build = calls.find(call => call.tool === 'xcodebuild').args;
-  assert.equal(build.at(-1), 'test');
+  const builds = calls.filter(call=>call.tool==='xcodebuild');
+  assert.equal(builds[0].args.at(-1),'build-for-testing');
+  assert.equal(builds[1].args.at(-1),'build-for-testing');
+  assert.ok(builds[1].args.includes('LAVA_KEYCHAIN_SHARING_GROUP_PREFIX=ABCDE12345'));
+  const build = builds[2].args;
+  assert.equal(build.at(-1), 'test-without-building');
   assert.ok(build.includes('-only-testing:LavaSecUITests/RNFullAppUITests'));
   assert.ok(existsSync(join(evidence, 'native-scaffold-results.json')));
   assert.ok(existsSync(join(evidence, 'test-summary.json')));
   assert.ok(existsSync(join(evidence, 'Lava-RN-Full-Simulator.zip')));
   assert.ok(existsSync(join(evidence, 'ipad/test-summary.json')));
   assert.ok(existsSync(join(evidence, 'ipad/screenshots')));
-  const builds = calls.filter(call=>call.tool==='xcodebuild');
-  assert.equal(builds.length, 2);
-  const tablet = builds[1].args;
+  assert.equal(JSON.parse(readFileSync(join(evidence,'simulator-signing-fixture.json'))).appAndTunnelNamespaceMatches,true);
+  assert.equal(builds.length, 9);
+  for (const motion of builds.slice(3, 8)) {
+    assert.equal(motion.args.at(-1), 'test-without-building');
+    assert.equal(motion.args[motion.args.indexOf('-derivedDataPath')+1], build[build.indexOf('-derivedDataPath')+1]);
+    assert.ok(motion.args.includes('-collect-test-diagnostics'));
+  }
+  assert.deepEqual(builds.slice(3, 8).map(call => call.args[call.args.indexOf('-resultBundlePath')+1].split('/').at(-1)),
+    ['preferences-reduced.xcresult', 'reduced-motion.xcresult', 'preferences-crossfade.xcresult', 'crossfade.xcresult', 'preferences-reset.xcresult']);
+  assert.ok(builds[6].args.includes('-only-testing:LavaSecUITests/RNFullAppUITests/testExplicitCrossFadeNavigation'));
+  const tablet = builds[8].args;
   assert.equal(tablet.at(-1), 'test-without-building');
   assert.equal(tablet[tablet.indexOf('-derivedDataPath')+1],build[build.indexOf('-derivedDataPath')+1]);
   assert.deepEqual(tablet.filter(arg=>arg.startsWith('-only-testing:')), [
@@ -113,8 +166,16 @@ for (const [name, args, options] of [
   ['compile failure', ['--compile'], {LAVA_CI_TEST_XCODE_EXIT: '65'}],
   ['missing full app', ['--compile'], {LAVA_CI_TEST_MISSING_APP: '1'}],
   ['native scaffold failure', ['--compile'], {LAVA_CI_TEST_SCAFFOLD_EXIT: '1'}],
-  ['failed journeys', ['--journeys'], {LAVA_CI_TEST_SUMMARY: JSON.stringify({result: 'Failed', passedTests: 16, failedTests: 1, skippedTests: 0})}],
-  ['skipped journeys', ['--journeys'], {LAVA_CI_TEST_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 17, failedTests: 0, skippedTests: 1})}],
+  ['unqualified simulated namespace', ['--journeys'], {LAVA_CI_TEST_UNQUALIFIED_SIMULATOR_GROUP:'1'}],
+  ['mismatched simulated namespace', ['--journeys'], {LAVA_CI_TEST_SIMULATOR_GROUP_MISMATCH:'1'}],
+  ['failed journeys', ['--journeys'], {LAVA_CI_TEST_SUMMARY: JSON.stringify({result: 'Failed', passedTests: 75, failedTests: 1, skippedTests: 0})}],
+  ['skipped journeys', ['--journeys'], {LAVA_CI_TEST_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 75, failedTests: 0, skippedTests: 1})}],
+  ['missing ordinary journey', ['--journeys'], {LAVA_CI_TEST_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 74, failedTests: 0, skippedTests: 0})}],
+  ['motion execution failure', ['--journeys'], {LAVA_CI_TEST_MOTION_XCODE_EXIT: '65'}],
+  ['missing motion preference verification', ['--journeys'], {LAVA_CI_TEST_PREFERENCES_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 0, failedTests: 0, skippedTests: 0})}],
+  ['failed motion journeys', ['--journeys'], {LAVA_CI_TEST_MOTION_SUMMARY: JSON.stringify({result: 'Failed', passedTests: 2, failedTests: 1, skippedTests: 0})}],
+  ['skipped motion journeys', ['--journeys'], {LAVA_CI_TEST_MOTION_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 3, failedTests: 0, skippedTests: 1})}],
+  ['missing motion journey', ['--journeys'], {LAVA_CI_TEST_MOTION_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 2, failedTests: 0, skippedTests: 0})}],
   ['tablet execution failure', ['--journeys'], {LAVA_CI_TEST_IPAD_XCODE_EXIT: '65'}],
   ['failed tablet journeys', ['--journeys'], {LAVA_CI_TEST_IPAD_SUMMARY: JSON.stringify({result: 'Failed', passedTests: 1, failedTests: 1, skippedTests: 0})}],
   ['skipped tablet journeys', ['--journeys'], {LAVA_CI_TEST_IPAD_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 1, failedTests: 0, skippedTests: 1})}],

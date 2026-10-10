@@ -1,5 +1,6 @@
-import {useRef,useState} from 'react';
-import {ScrollView, StyleSheet, View} from 'react-native';
+import {useContext,useRef,useState} from 'react';
+import {ScrollView, StyleSheet, View,type LayoutChangeEvent} from 'react-native';
+import {SafeAreaInsetsContext} from 'react-native-safe-area-context';
 import {LavaActionButton, LavaCard, LavaChoice, LavaIconButton, LavaText, LavaToggleRow} from '../src';
 import {Copy,Row,Section} from '../review/primitives';
 import {AccessorySlot,Group,Info,ListRow} from '../review/scaffold';
@@ -11,12 +12,20 @@ import {initialSession} from '../review/session';
 import {foundation} from '../src/foundation';
 import {colors} from '../src/colors.ios';
 import {lavaTokens} from '../src/generated/tokens';
+import {ContextMenu} from '../review/ContextMenu';
 
 // Review fixtures, not product catalog strings or live protection state. No clock,
 // network, account, or random data participates in the component baseline.
-export function LavaComponentGallery() {
+export function LavaComponentGallery({onLayout}:{onLayout?:(event:LayoutChangeEvent)=>void}={}) {
+  const insets=useContext(SafeAreaInsetsContext);
+  const horizontalContentInsets=insets&&(insets.left!==0||insets.right!==0)?{
+    maxWidth:foundation.layout.readingWidth+insets.left+insets.right,
+    paddingLeft:lavaTokens.spacing.screenHorizontal+insets.left,paddingRight:lavaTokens.spacing.screenHorizontal+insets.right,
+  }:undefined;
   const [enabled, setEnabled] = useState(false);
   const [presses, setPresses] = useState(0);
+  const [contextPresses,setContextPresses]=useState(0);
+  const [contextSelections,setContextSelections]=useState(0);
   const [requestedChoice, setRequestedChoice] = useState('normal');
   const [disabledChoiceRequests, setDisabledChoiceRequests] = useState(0);
   const [confirmedAsyncChoice,setConfirmedAsyncChoice]=useState('normal');
@@ -29,8 +38,12 @@ export function LavaComponentGallery() {
   const [selectedFilter,setSelectedFilter]=useState('Core');
   const [lockedChoiceRequests,setLockedChoiceRequests]=useState(0);
   const choices = [{value: 'normal', label: 'Normal'}, {value: 'focused', label: 'Focused'}];
-  return <ScrollView testID="lava-component-gallery" contentInsetAdjustmentBehavior="automatic" style={styles.screen} contentContainerStyle={styles.content}>
+  return <ScrollView testID="lava-component-gallery" onLayout={onLayout} contentInsetAdjustmentBehavior="automatic" style={styles.screen} contentContainerStyle={[styles.content,horizontalContentInsets]}>
     <LavaCard><LavaText role="cardTitle">Lava component review</LavaText></LavaCard>
+    <ContextMenu actions={[{id:'pause',title:'Pause for 5 minutes',symbol:'pause.circle'}]} onAction={()=>setContextSelections(count=>count+1)}>
+      <LavaActionButton testID="gallery.context-button" stablePill title="Turn Off" subtitle="Long-press for pause options" onPress={()=>setContextPresses(count=>count+1)}/>
+    </ContextMenu>
+    <LavaText>{`Context button taps: ${contextPresses}; menu selections: ${contextSelections}`}</LavaText>
     <LavaCard role="panel"><LavaText role="cardTitle">Protection is on</LavaText></LavaCard>
     <LavaCard><View style={styles.stack}>
       <LavaText role="rowTitle">Row title</LavaText>

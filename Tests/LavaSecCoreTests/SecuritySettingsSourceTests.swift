@@ -28,7 +28,7 @@ final class SecuritySettingsSourceTests: XCTestCase {
         let entry = try sourceBlock(in: chaining, startingAt: "private func openDNSSettings()", endingBefore: "private func requestSaveDraftConfiguration()")
         XCTAssertTrue(entry.contains("guard await security.requireAuthentication(for: .appSettings"))
         let background = try sourceBlock(in: readSource(.securityController), startingAt: "func lockForBackgroundIfNeeded()", endingBefore: "func showAppUnlockPrivacyMaskIfNeeded()")
-        XCTAssertTrue(background.contains("resetForegroundSession()"))
+        XCTAssertTrue(background.contains("lockSession.suspend()"))
     }
 
     func testCredentialReadAndRemovalErrorsCannotEraseSecurityPreferences() throws {
@@ -51,7 +51,7 @@ final class SecuritySettingsSourceTests: XCTestCase {
         XCTAssertFalse(removal.contains("try? keychainStore.delete()"))
         for method in ["func requireAuthentication(", "func requireFreshAuthentication(",
                        "func requireCredentialAuthentication(", "func requirePasscodeAuthentication(",
-                       "func requireBiometricAuthentication("] {
+                       "func requireFreshCredentialAuthentication("] {
             let start = try XCTUnwrap(controller.range(of: method))
             let remainder = String(controller[start.lowerBound...])
             let end = remainder.range(of: "\n    func ")?.lowerBound ?? remainder.endIndex
@@ -193,8 +193,19 @@ final class SecuritySettingsSourceTests: XCTestCase {
         let bridge = try readSource(.reactNativeAppBridge)
         let settings = try readSource(.reactNativeAppSettings)
         XCTAssertTrue(bridge.contains("security.requirePasscodeAuthentication(reason: \"Turn off Security passcode\")"))
-        XCTAssertTrue(settings.contains("security.requireBiometricAuthentication(reason:"))
+        XCTAssertTrue(settings.contains("security.requireFreshCredentialAuthentication(reason:"))
         XCTAssertFalse(bridge.contains("requireCredentialAuthentication(reason: \"Turn off Security passcode\")"))
+    }
+
+    func testTemporaryBiometricUnavailabilityPreservesThePreferenceAndAllowsFreshPasscodeFallback() throws {
+        let controller = try readSource(.securityController)
+        let refresh = try sourceBlock(in: controller, startingAt: "func refreshBiometricKind()", endingBefore: "private let authenticationCoalescer")
+        XCTAssertFalse(refresh.contains("defaults.set(false"))
+        XCTAssertFalse(refresh.contains("isBiometricEnabled = false"))
+        XCTAssertTrue(controller.contains("biometricKind != .unavailable || isBiometricEnabled"))
+        let change = try sourceBlock(in: controller, startingAt: "func requireFreshCredentialAuthentication", endingBefore: "func verifyPasscode")
+        XCTAssertTrue(change.contains("authenticate(surface: nil, reason: reason)"))
+        XCTAssertFalse(change.contains("lockSession.credentialAuthorized"), "An existing visit is not fresh credential-change evidence")
     }
 
     func testPasscodeScreensFillFullScreenAndUseNativeNumberPadFirstResponder() throws {
@@ -273,14 +284,15 @@ final class SecuritySettingsSourceTests: XCTestCase {
         XCTAssertTrue(guardSource.contains(".protectionControl"))
         XCTAssertTrue(root.contains("security.resetForegroundSession()"))
         XCTAssertTrue((try readSource(.reactNativeAppHost)).contains("SecurityPasscodeAuthenticationView"))
-        XCTAssertTrue(root.contains("security.isAppUnlockBlockingUI && security.passcodeAuthenticationRequest == nil"))
+        XCTAssertFalse(root.contains("SecurityLockOverlay"), "Only the scene security window may present Unlock")
+        XCTAssertTrue((try readSource(.reactNativeAppHost)).contains("SecurityLockOverlay"))
     }
 
     func testPasscodeAuthenticationIsSingleFlight() throws {
         let controller = try readSource(.securityController)
 
-        XCTAssertTrue(controller.contains("private var isAuthenticatingAppUnlock = false"))
-        XCTAssertTrue(controller.contains("guard !isAuthenticatingAppUnlock else"))
+        XCTAssertTrue(controller.contains("private var appUnlockTask:"))
+        XCTAssertTrue(controller.contains("if let current = appUnlockTask, current.ticket == ticket"))
         XCTAssertTrue(controller.contains("passcodeContinuations[activeRequest.id, default: []].append(continuation)"))
         XCTAssertTrue(controller.contains("passcodeContinuations[request.id] = [continuation]"))
     }
@@ -288,23 +300,24 @@ final class SecuritySettingsSourceTests: XCTestCase {
     func testRetainedPageRevocationAndPasscodeCompletionsHaveExactTurnAndRequestOwnership() throws {
         let controller = try readSource(.securityController)
         XCTAssertTrue(controller.contains("@Published private(set) var viewAuthenticationRevision: UInt64 = 0"))
-        let reset = try sourceBlock(in: controller, startingAt: "func resetViewAuthenticationTurn()",
+        let reset = try sourceBlock(in: controller, startingAt: "func resetViewAuthenticationTurn(",
             endingBefore: "func lockForBackgroundIfNeeded()")
-        let clear = try XCTUnwrap(reset.range(of: "authenticatedSurfacesForCurrentTurn = []"))
-        let publish = try XCTUnwrap(reset.range(of: "viewAuthenticationRevision += 1"))
+        let clear = try XCTUnwrap(reset.range(of: "lockSession.endViewTurn("))
+        let publish = try XCTUnwrap(reset.range(of: "viewAuthenticationRevision = lockSession.viewRevision"))
         XCTAssertLessThan(clear.lowerBound, publish.lowerBound)
-        XCTAssertTrue(reset.contains("request.authenticationRevision != nil"), "View-turn reset preserves App Unlock ownership")
+        XCTAssertTrue(reset.contains("!isCurrentAuthenticationRevision(request.authenticationRevision)"), "Only retired tickets cancel their prompt")
         XCTAssertTrue(reset.contains("cancelPasscodeAuthentication(requestID: request.id)"))
         let complete = try sourceBlock(in: controller, startingAt: "func completePasscodeAuthentication(",
             endingBefore: "func cancelPasscodeAuthentication(")
         XCTAssertTrue(complete.contains("request.id == requestID"))
         XCTAssertTrue(complete.contains("isCurrentAuthenticationRevision(request.authenticationRevision)"))
-        XCTAssertTrue(complete.contains("markAuthenticated(surface: request.surface)"))
+        XCTAssertTrue(complete.contains("lockSession.authorize(request.surface, ticket: request.authenticationRevision)"),
+                      "Publish the owning request's grant before dismissing its credential window")
         let cancel = try sourceBlock(in: controller, startingAt: "func cancelPasscodeAuthentication(",
             endingBefore: "func resetForegroundSession()")
         XCTAssertTrue(cancel.contains("guard passcodeAuthenticationRequest?.id == requestID else { return }"))
         let request = try sourceBlock(in: controller, startingAt: "private func requestPasscode(",
-            endingBefore: "private func markAuthenticated(")
+            endingBefore: "private func saveProtectedSurfaces(")
         XCTAssertTrue(request.contains("activeRequest.authenticationRevision != authenticationRevision"))
         XCTAssertTrue(request.contains("return accepted && isCurrentAuthenticationRevision(authenticationRevision) && !Task.isCancelled"))
     }
@@ -323,9 +336,9 @@ final class SecuritySettingsSourceTests: XCTestCase {
             endingBefore: "func setPasscode"
         )
 
-        XCTAssertTrue(controller.contains("authenticatedSurfacesForCurrentTurn"))
+        XCTAssertTrue(controller.contains("lockSession.surfaces"))
         XCTAssertTrue(controller.contains("resetViewAuthenticationTurn()"))
-        XCTAssertTrue(setProtectionBlock.contains("resetViewAuthenticationTurn()"))
+        XCTAssertTrue(setProtectionBlock.contains("resetViewAuthenticationTurn(preservingCredentials: true)"))
         XCTAssertFalse(authenticateBlock.contains("isForegroundSessionAuthenticated"))
         XCTAssertTrue(root.contains("security.resetViewAuthenticationTurn()"))
     }
@@ -333,26 +346,17 @@ final class SecuritySettingsSourceTests: XCTestCase {
     func testAppUnlockOnlyUsesForegroundLifecycleNotViewTurns() throws {
         let controller = try readSource(.securityController)
         let root = try readSource(.rootView)
-        let markAuthenticatedBlock = try sourceBlock(
-            in: controller,
-            startingAt: "private func markAuthenticated(surface: SecurityProtectedSurface?)",
-            endingBefore: "private func saveProtectedSurfaces"
-        )
         let scenePhaseBlock = try sourceBlock(
             in: root,
             startingAt: ".onChange(of: scenePhase)",
             endingBefore: ".onReceive(NotificationCenter.default.publisher(for: .lavaOpenGuardFromNotification))"
         )
 
-        XCTAssertTrue(controller.contains("private var isAppUnlockSessionAuthenticated"))
+        XCTAssertTrue(controller.contains("private var lockSession = SecurityLockSession()"))
         XCTAssertTrue(root.contains("@State private var didRequestInitialAppUnlock = false"))
-        XCTAssertFalse(root.contains(".task {\n            await security.authenticateAppUnlockIfNeeded()"))
-        XCTAssertTrue(markAuthenticatedBlock.contains("if surface == .appUnlock"))
-        XCTAssertTrue(markAuthenticatedBlock.contains("isAppUnlockSessionAuthenticated = true"))
-        XCTAssertTrue(markAuthenticatedBlock.contains("return"))
-        let appUnlockIndex = try XCTUnwrap(markAuthenticatedBlock.range(of: "if surface == .appUnlock")?.lowerBound)
-        let cacheInsertIndex = try XCTUnwrap(markAuthenticatedBlock.range(of: "authenticatedSurfacesForCurrentTurn.insert(surface)")?.lowerBound)
-        XCTAssertLessThan(appUnlockIndex, cacheInsertIndex)
+        XCTAssertTrue(controller.contains("lockSession.ticket(appUnlock: true)"))
+        XCTAssertTrue(controller.contains("lockSession.authorize(surface, ticket: revision)"))
+        XCTAssertTrue(controller.contains("lockSession.claimAutomaticUnlock()"))
         XCTAssertTrue(scenePhaseBlock.contains("case .inactive:"))
         XCTAssertTrue(scenePhaseBlock.contains("case .background:"))
         XCTAssertTrue(scenePhaseBlock.contains("security.lockForBackgroundIfNeeded()"))
@@ -373,18 +377,18 @@ final class SecuritySettingsSourceTests: XCTestCase {
         let resetForegroundSessionBlock = try sourceBlock(
             in: controller,
             startingAt: "func resetForegroundSession()",
-            endingBefore: "func resetViewAuthenticationTurn()"
+            endingBefore: "func resetViewAuthenticationTurn("
         )
         let authenticateAppUnlockBlock = try sourceBlock(
             in: controller,
-            startingAt: "func authenticateAppUnlockIfNeeded() async",
+            startingAt: "func authenticateAppUnlockIfNeeded(",
             endingBefore: "func refreshBiometricKind()"
         )
 
         XCTAssertTrue(setProtectionBlock.contains("if surface == .appUnlock"))
-        XCTAssertTrue(setProtectionBlock.contains("isAppUnlockSessionAuthenticated = isProtected"))
-        XCTAssertTrue(resetForegroundSessionBlock.contains("isAppUnlockSessionAuthenticated = false"))
-        XCTAssertTrue(authenticateAppUnlockBlock.contains("guard !isAppUnlockSessionAuthenticated else"))
+        XCTAssertTrue(setProtectionBlock.contains("lockSession.setAppUnlockEnabled(isProtected)"))
+        XCTAssertTrue(resetForegroundSessionBlock.contains("lockSession.reset()"))
+        XCTAssertTrue(authenticateAppUnlockBlock.contains("if lockSession.appUnlocked"))
     }
 
     func testAppUnlockMasksInactiveSnapshotsWithoutForegroundPrompt() throws {
@@ -397,15 +401,16 @@ final class SecuritySettingsSourceTests: XCTestCase {
         )
 
         XCTAssertTrue(controller.contains("@Published private(set) var isAppUnlockPrivacyMaskVisible"))
-        XCTAssertTrue(controller.contains("private var isBiometricAuthenticationInProgress = false"))
+        XCTAssertTrue(controller.contains("@Published private(set) var isBiometricAuthenticationInProgress = false"))
         XCTAssertTrue(controller.contains("func showAppUnlockPrivacyMaskIfNeeded()"))
-        XCTAssertTrue(controller.contains("func hideAppUnlockPrivacyMask()"))
+        XCTAssertTrue(controller.contains("func sceneDidBecomeActive()"))
         XCTAssertTrue(controller.contains("guard !isBiometricAuthenticationInProgress else"))
-        XCTAssertTrue(root.contains("SecurityPrivacyMaskOverlay"))
+        XCTAssertFalse(root.contains("SecurityPrivacyMaskOverlay"))
+        XCTAssertTrue((try readSource(.reactNativeAppHost)).contains("SecurityPrivacyMaskOverlay"))
         XCTAssertTrue(scenePhaseBlock.contains("case .inactive:"))
         XCTAssertTrue(scenePhaseBlock.contains("security.showAppUnlockPrivacyMaskIfNeeded()"))
         XCTAssertFalse(try sourceBlock(in: scenePhaseBlock, startingAt: "case .inactive:", endingBefore: "case .background:").contains("authenticateAppUnlockIfNeeded()"))
-        XCTAssertTrue(scenePhaseBlock.contains("security.hideAppUnlockPrivacyMask()"))
+        XCTAssertTrue(scenePhaseBlock.contains("security.sceneDidBecomeActive()"))
     }
 
     func testFilterAndDomainHistoryActionsUseFilterEditingSurface() throws {
@@ -439,12 +444,12 @@ final class SecuritySettingsSourceTests: XCTestCase {
         let controller = try readSource(.securityController)
         let evaluateBlock = try sourceBlock(
             in: controller,
-            startingAt: "private func evaluateBiometrics(reason: String, authenticationRevision: UInt64?) async -> Bool",
+            startingAt: "private func evaluateBiometrics(reason: String, authenticationRevision: SecurityLockSession.Ticket) async -> Bool",
             endingBefore: "private func requestPasscode"
         )
 
         XCTAssertTrue(controller.contains("private let biometricCoalescer = BiometricAuthenticationCoalescer()"))
-        XCTAssertTrue(evaluateBlock.contains("await biometricCoalescer.authenticate(scope: authenticationRevision,"))
+        XCTAssertTrue(evaluateBlock.contains("await biometricCoalescer.authenticate(scope: authenticationRevision.token,"))
         // The LAContext prompt must sit INSIDE the coalesced closure — otherwise the gate wraps nothing
         // and every caller still prompts. A plain ordering check (`authenticate {` occurring before
         // `evaluatePolicy(`) stays true even if a refactor lifts the prompt OUT of the closure — the exact

@@ -52,21 +52,47 @@ final class SudokuPuzzleTests: XCTestCase {
     }
 
     func testGivenCountIsWithinDifficultyBand() {
+        // The target is sampled per seed from [28, 40]; greedy digging stops the moment the target
+        // is reached, so a puzzle's count is AT LEAST the sampled target and, if a plateau stops the
+        // dig early, a few clues more. No count can fall below the band's floor of 28.
         for seed in [UInt64](arrayLiteral: 3, 500, 50_000) {
             let puzzle = SudokuPuzzle.generate(seed: seed)
-            // Digging stops once the target of 40 clues is reached, so a generated puzzle always has
-            // AT LEAST 40 clues (greedy digging never overshoots below the target) and, in the rare
-            // event every remaining clue would break uniqueness before 40, a few more. The 17-clue
-            // theoretical minimum for a unique Sudoku is far below this floor and never a concern.
             XCTAssertGreaterThanOrEqual(
                 puzzle.givenCount,
-                40,
-                "seed \(seed): greedy digging never drops below the 40-clue target"
+                28,
+                "seed \(seed): a generated puzzle never drops below the 28-clue floor"
             )
             XCTAssertLessThanOrEqual(
                 puzzle.givenCount,
                 50,
                 "seed \(seed): a plateau above the target should leave only a few extra clues"
+            )
+        }
+    }
+
+    func testDifficultyTargetVariesAcrossSeeds() {
+        // The per-seed triangular draw must actually vary the clue count; a constant target would
+        // defeat the feature. Across a spread of seeds the observed counts span most of the band.
+        var counts = Set<Int>()
+        for seed in UInt64(1)...UInt64(100) {
+            counts.insert(SudokuPuzzle.generate(seed: seed).givenCount)
+        }
+        XCTAssertGreaterThan(counts.count, 4, "difficulty must vary across seeds; got \(counts.sorted())")
+        XCTAssertGreaterThanOrEqual(counts.min() ?? 99, 28)
+        XCTAssertLessThanOrEqual(counts.max() ?? 0, 40)
+    }
+
+    func testChallengePuzzleDropsBelowThirtyClues() {
+        // Challenge mode is the hidden below-30-clue board: it forces the 28-clue target and must
+        // stay uniquely solvable, and it must differ from the band board the same seed produces.
+        for seed in [UInt64](arrayLiteral: 1, 7, 42, 1234) {
+            let puzzle = SudokuPuzzle.generate(seed: seed, challenge: true)
+            XCTAssertLessThan(puzzle.givenCount, 30, "seed \(seed): challenge must be below 30 clues")
+            XCTAssertEqual(puzzle.solutionCount(limit: 2), 1, "seed \(seed): challenge must stay unique")
+            XCTAssertNotEqual(
+                puzzle.givens,
+                SudokuPuzzle.generate(seed: seed).givens,
+                "seed \(seed): challenge must differ from the band board"
             )
         }
     }

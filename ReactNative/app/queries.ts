@@ -28,8 +28,15 @@ export function useAppQuery<T>(command: AppCommand | null, retentionKey?: string
   const cacheKey = [command?.type ?? 'disabled', retentionKey ?? null, key, identity, invalidation];
   const cached = cache?.peek<T>(cacheKey);
   const [state,setState] = useState<{key: string; retentionKey?: string; identity: string; displayScope:string; displayAllowed:boolean; value?: T; error?: string}>({key,retentionKey,identity,displayScope,displayAllowed:false,value:cached});
-  usePresentationReadiness(app,focused&&!!command,state.identity===identity&&state.key===key&&state.retentionKey===retentionKey
-    &&(state.value!==undefined||state.error!==undefined),JSON.stringify([key,identity,retentionKey]));
+  // A mounted, authorized foreground list may keep its rows while selection,
+  // search or pagination changes within the caller's explicit retention scope.
+  // This does not widen the exact-query frame retained through inactivity.
+  const canRetainForeground=(previous:typeof state)=>focused&&authoritative&&AppState.currentState==='active'
+    &&!!command&&retentionKey!==undefined&&previous.retentionKey===retentionKey&&previous.identity===identity
+    &&(!previous.displayAllowed||displayAllowed);
+  const current = state.identity === identity && state.key === key && state.retentionKey === retentionKey;
+  const settled=current&&(state.value!==undefined||state.error!==undefined);
+  usePresentationReadiness(app,focused&&!!command,settled,JSON.stringify([key,identity,retentionKey]));
   useEffect(() => {
     const empty={key,retentionKey,identity,displayScope,displayAllowed:false};
     if (!app || !command) {setState(empty);return;}
@@ -38,7 +45,8 @@ export function useAppQuery<T>(command: AppCommand | null, retentionKey?: string
         ?{...previous,error:undefined}:empty);
       return;
     }
-    setState(previous=>previous.displayAllowed&&(!displayAllowed||previous.displayScope!==displayScope)?empty:previous);
+    setState(previous=>previous.displayAllowed&&(!displayAllowed
+      ||previous.displayScope!==displayScope&&!canRetainForeground(previous))?empty:previous);
     const cached = cache?.peek<T>(cacheKey);
     if (cached !== undefined) setState({...empty,value:cached});
     const canRead=()=>AppState.currentState==='active'&&(app.getSnapshot ? app.getSnapshot().snapshot!==null : true);
@@ -59,7 +67,9 @@ export function useAppQuery<T>(command: AppCommand | null, retentionKey?: string
             || retentionKey !== undefined && previous.retentionKey === retentionKey);
           const sameDisplay=displayAllowed&&previous.displayAllowed&&previous.displayScope===displayScope;
           const value = (sameDisplay||sameScope&&command.type!=='share.query')&&message!=='Authentication cancelled.' ? previous.value : undefined;
-          return {key,retentionKey,identity,displayScope,displayAllowed:value!==undefined&&displayAllowed,value,error:message};
+          // Rows from a failed foreground scope change are still the previous
+          // query's result; they cannot become the new query's inactive frame.
+          return {key,retentionKey,identity,displayScope,displayAllowed:value!==undefined&&sameDisplay,value,error:message};
         });
         if(message === 'Authentication cancelled.' || command.type === 'share.query') clearAppReadCache(app);
         // Cancelling the native credential UI ends this polling attempt. A new
@@ -99,8 +109,7 @@ export function useAppQuery<T>(command: AppCommand | null, retentionKey?: string
   },[app,focused,key,invalidation,retentionKey,retainThroughInactivity,cacheable,identity,authoritative,displayScope,displayAllowed]);
   // Retain only when the caller explicitly identifies the same data scope.
   // Different accounts, decisions, ranges or disabled logs must not reuse it.
-  const current = state.identity === identity && state.key === key && state.retentionKey === retentionKey;
-  const retained = !displayAllowed&&!state.displayAllowed&&state.identity === identity && command && retentionKey !== undefined && state.retentionKey === retentionKey;
+  const retained = canRetainForeground(state);
   const displayRetained=displayAllowed&&state.displayAllowed&&state.displayScope===displayScope;
   const visible=(focused||cacheable||displayRetained)&&command&&(AppState.currentState==='active'&&authoritative||displayRetained);
   // The delayed-read simulator fixture records lifecycle flags only. Never log
@@ -114,5 +123,5 @@ export function useAppQuery<T>(command: AppCommand | null, retentionKey?: string
     }));
   });
   return {key, refresh:()=>refreshHandle.current(), value: visible ? cached ?? ((current || retained || displayRetained) ? state.value : undefined) : undefined,
-    error: visible&&current&&authoritative ? state.error : undefined, refreshing: !current&&!displayRetained};
+    error: visible&&current&&authoritative ? state.error : undefined, refreshing: !!command&&!settled&&!displayRetained};
 }

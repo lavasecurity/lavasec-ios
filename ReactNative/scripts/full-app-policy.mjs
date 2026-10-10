@@ -3,7 +3,7 @@ import {createHash} from 'node:crypto';
 import {readFileSync} from 'node:fs';
 export const fullAppSources = [
   ...['LavaNativePageView.mm','LavaSwitchView.mm','ActivityDateBridge.swift','LavaAppearanceModule.mm','LavaChoiceView.mm','LavaControlTrackingGuard.m','LavaContextMenuView.mm','LavaDecorationContent.swift','LavaSymbolPalette.swift','LavaNativeContainment.swift','LavaDecorationView.mm','LavaReviewModule.mm','BundledNarrationPlayer.swift','LavaSliderView.mm','LavaTextFieldView.mm','ReviewDomainValidator.swift','ReviewReferenceContent.swift','LavaShareCardSurfaceView.mm','LavaShareQrView.mm','LavaShareCardCapture.swift'].map(file=>`ios/LavaSecUIReview/${file}`),
-  ...['LavaNativePageContent.swift','AppearanceBridge.swift','LavaAppBridge.swift','LavaAppGuard.swift','LavaAppFilters.swift','LavaAppFlows.swift','LavaAppHost.swift','LavaAppModule.mm','LavaAppPresentation.swift','LavaAppQueries.swift','LavaAppSettings.swift','LavaAppShareCard.swift'].map(file=>`native-app/${file}`),
+  ...['LavaNativePageContent.swift','AppearanceBridge.swift','LavaAppBridge.swift','LavaAppGuard.swift','LavaAppFilters.swift','LavaAppFlows.swift','LavaAppFeedback.swift','LavaAppWireGuardEditor.swift','LavaAppOnboarding.swift','LavaAppHost.swift','LavaAppModule.mm','LavaAppPresentation.swift','LavaAppQueries.swift','LavaAppSettings.swift','LavaAppShareCard.swift'].map(file=>`native-app/${file}`),
 ];
 const shareCardTestName='LavaRNShareCardTests';
 function reviewedShareCardTestTarget(policy){
@@ -89,7 +89,7 @@ export function validateFullAppProjects(projects, policy) {
     assert.deepEqual(target.frameworks,policy.podFrameworks[target.name.replace('Pods-LavaSec','Pods-LavaSecUIReview')]??policy.podFrameworks[target.name]??[]);
     assert.deepEqual(target.entitlements,[]);assert.deepEqual(target.rules,[]);assert.deepEqual(target.products,[]);assert.deepEqual(target.copies,[]);
     assert.ok(target.phases.every(p=>['PBXSourcesBuildPhase','PBXResourcesBuildPhase','PBXFrameworksBuildPhase','PBXHeadersBuildPhase','PBXShellScriptBuildPhase'].includes(p)));
-    for(const path of [...target.sources,...target.resources])assert.ok(!path.split('/').includes('..')&&['native-app/Pods/','native-app/build/generated/ios/','node_modules/react-native/','node_modules/react-native-screens/','node_modules/react-native-safe-area-context/'].some(prefix=>path.startsWith(prefix)),`Unexpected dependency source: ${path}`);
+    for(const path of [...target.sources,...target.resources])assert.ok(!path.split('/').includes('..')&&['native-app/Pods/','native-app/build/generated/ios/','node_modules/react-native/','node_modules/react-native-screens/','node_modules/react-native-safe-area-context/','node_modules/react-native-svg/'].some(prefix=>path.startsWith(prefix)),`Unexpected dependency source: ${path}`);
   }
   const scripts=pods.targets.flatMap(t=>t.scripts.map(s=>({project:pods.project,target:t.name,...s})));
   // Script bodies contain RN's literal generated/ios paths, so rename only the

@@ -3,7 +3,7 @@
 export type SudokuPuzzle = {readonly givens: readonly number[]; readonly solution: readonly number[]};
 export type SudokuGame = {readonly puzzle: SudokuPuzzle; readonly values: readonly number[]; readonly notes: readonly (readonly number[])[]};
 export const referencePuzzle: SudokuPuzzle = {
-  givens: '030900601700602030840500700064019000915000304008004096003008005180425903050763800'.split('').map(Number),
+  givens: '032000601090602030000500000360800000910200080070000096020090070100020900450703800'.split('').map(Number),
   solution: '532987641791642538846531729364819257915276384278354196623198475187425963459763812'.split('').map(Number),
 };
 export function newGame(puzzle: SudokuPuzzle = referencePuzzle): SudokuGame {
@@ -51,6 +51,28 @@ export function freshPuzzle(previous: SudokuPuzzle, random = Math.random): Sudok
     givens = givens.map(rotate); solution = solution.map(rotate);
   }
   return {givens,solution};
+}
+
+// Hidden challenge boards (native challenge target: 28 clues, always < 30) for the
+// UI-only host, which has no generator. Provenance is the native engine at seeds
+// 1, 7 and 42 with `challenge: true`; the connected app instead asks
+// `sudoku.new {challenge:true}` so production draws a fresh board.
+export const challengePuzzles: readonly SudokuPuzzle[] = [
+  {givens: '050002960321004000900850300030000008600000003400080010080005400000420000005109700'.split('').map(Number),
+   solution: '854372961321694875976851324537916248618247593492583617189765432763428159245139786'.split('').map(Number)},
+  {givens: '350914067000000000920000003030800094080040000000352800700001000000400020100000748'.split('').map(Number),
+   solution: '358914267617523489924768153231876594586149372479352816742681935895437621163295748'.split('').map(Number)},
+  {givens: '000405000000017800037600012642000000019000405705004200100090000000000690098700000'.split('').map(Number),
+   solution: '821435976956217843437689512642953187319872465785164239163598724574321698298746351'.split('').map(Number)},
+];
+export function freshChallengePuzzle(previous?: SudokuPuzzle, random = Math.random): SudokuPuzzle {
+  // Exclude the current board (when it is one of the bundled ones) so a repeat hold
+  // never promises a fresh challenge while redisplaying the identical puzzle.
+  const candidates = previous
+    ? challengePuzzles.filter(puzzle => puzzle.givens.join('') !== previous.givens.join(''))
+    : challengePuzzles;
+  const pool = candidates.length ? candidates : challengePuzzles;
+  return pool[Math.min(pool.length-1,Math.floor(random()*pool.length))]!;
 }
 
 export function cellAt(x: number, y: number, side: number): number | undefined {

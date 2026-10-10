@@ -1,6 +1,32 @@
 import XCTest
+import LavaSecKit
 
 final class LocalizationCatalogSourceTests: XCTestCase {
+    func testChainedSetupAndRunningRotationCopyCoversEveryAppLocale() throws {
+        let catalog = try Self.catalog(.localizableStringsCatalog)
+        let strings = try XCTUnwrap(catalog["strings"] as? [String: [String: Any]])
+        let expectedLocales = try Self.expectedAppLocales()
+        let warnings: [ChainedUpstreamRotationFreshness.Verdict] = [
+            .awaitingRestart(latched: 1, stored: 2), .runningRemovedRotation(latched: 1)
+        ]
+        // Resolve the actual model copy, including concatenated paragraphs,
+        // rather than duplicating their text in a second static key list.
+        let keys = ["Setting up VPN chaining.",
+                    "Protection was force-stopped to restore your connection. You may need to allow the VPN again the next time you turn it on."]
+            + warnings.flatMap { [$0.title, $0.detail] }
+        for key in keys {
+            let localizations = try XCTUnwrap(strings[key]?["localizations"] as? [String: Any], key)
+            XCTAssertEqual(Set(localizations.keys), expectedLocales, key)
+            for locale in expectedLocales.subtracting(["en"]) {
+                let localization = try XCTUnwrap(localizations[locale] as? [String: Any], "\(key)/\(locale)")
+                let unit = try XCTUnwrap(localization["stringUnit"] as? [String: Any], "\(key)/\(locale)")
+                let translated = try XCTUnwrap(unit["value"] as? String, "\(key)/\(locale)")
+                XCTAssertFalse(translated.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, "\(key)/\(locale)")
+                XCTAssertNotEqual(translated, key, "\(key)/\(locale)")
+            }
+        }
+    }
+
     func testLocalizableCatalogDoesNotMarkManualKeysStale() throws {
         let catalog = try Self.catalog(.localizableStringsCatalog)
         let strings = try XCTUnwrap(catalog["strings"] as? [String: [String: Any]])

@@ -2,13 +2,29 @@ import XCTest
 
 /// The app has one navigation owner. Native components/services still ship in its graph.
 final class RNOnlyAppSourceTests: XCTestCase {
+    func testNativeNavigationHostUsesThePhysicalHorizontalViewport() throws {
+        let root = try readSource(.rootView)
+        let presentation = try sourceBlock(in: root, startingAt: "private var rootPresentation: some View", endingBefore: "private func forwardReactExternalFlows()")
+        XCTAssertTrue(presentation.contains("LavaAppHost().ignoresSafeArea(.all, edges: .bottom)"))
+        XCTAssertTrue(presentation.contains(".ignoresSafeArea(.container, edges: .horizontal)"))
+        XCTAssertFalse(presentation.contains("edges: .all"), "Portrait top and keyboard regions retain their existing owners.")
+        let host = try readSource(.reactNativeAppHost)
+        let mount = try sourceBlock(in: host, startingAt: "private func mountReactRoot()", endingBefore: "private func updateNativeFlow()")
+        XCTAssertTrue(mount.contains("root.leadingAnchor.constraint(equalTo: view.leadingAnchor)"))
+        XCTAssertTrue(mount.contains("root.trailingAnchor.constraint(equalTo: view.trailingAnchor)"))
+        XCTAssertFalse(mount.contains("safeAreaLayoutGuide"), "Only content is inset; the native header host fills its allocated viewport.")
+    }
+
     func testAllOffNativeBootstrapWaitsForAnAuthorizedProjectionBeforeCreatingReact() throws {
         let host = try readSource(.reactNativeAppHost)
         let mount = try sourceBlock(in: host, startingAt: "private func mountReactRoot()", endingBefore: "private func updateNativeFlow()")
         let readiness = try XCTUnwrap(mount.range(of: "guard bridge.security.backgroundPrivacyCoverRequired || bridge.canReadPresentation(.appUnlock) else { return }"))
         let factory = try XCTUnwrap(mount.range(of: "RCTReactNativeFactory(delegate:"))
         XCTAssertLessThan(readiness.lowerBound, factory.lowerBound)
-        XCTAssertTrue(mount.contains("\"initialSnapshot\": LavaAppBridge.shared.snapshot()"))
+        XCTAssertTrue(mount.contains("LavaAppReactSurface(factory: factory"))
+        let surface = try sourceBlock(in: host, startingAt: "private final class LavaAppReactSurface", endingBefore: "private final class LavaAppReactDelegate")
+        XCTAssertTrue(surface.contains("properties[\"initialSnapshot\"] = bridge.snapshot()"))
+        XCTAssertTrue(surface.contains("bridge.mountPresentation(presentationID)"))
         XCTAssertTrue(host.contains("UIApplication.didBecomeActiveNotification, UIApplication.protectedDataDidBecomeAvailableNotification"))
     }
 

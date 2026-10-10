@@ -1,3 +1,6 @@
+import {mayInteractWithPresentation,presentationOwnerScope} from '../app/read-cache';
+import {useRouteViewState} from '../app/use-route-view-state';
+import {usePresentationAuthority,usePresentationNativeLayout} from '../app/use-presentation-readiness';
 import {useScrollInteractionController,useScrollInteractionLock} from '../src/interaction-lock';
 import {Alert, Text, localized} from '../app/presentation';
 import {useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ComponentRef} from 'react';
@@ -8,57 +11,93 @@ import {foundation} from '../src/foundation';
 import {SudokuBoard, SudokuFeedback, SudokuKeypad, SudokuRail, sudokuMetrics, sudokuStyles as styles, type SudokuTool} from './sudoku-scaffold';
 import {useFeedback} from '../src/feedback';
 import {useReview} from './ReviewContext';
-import {cellAt, editCell, freshPuzzle, isComplete, isSolved, keyAt, keyAtColumn, newGame, workingBoard, type SudokuGame} from './sudoku-model';
+import {cellAt, editCell, freshChallengePuzzle, freshPuzzle, isComplete, isSolved, keyAt, keyAtColumn, newGame, workingBoard, type SudokuGame} from './sudoku-model';
 import {REVEAL_EASING, REVEAL_FADE_MS, REVEAL_LINGER_MS, cellsBetween, revealEmojiFor} from './sudoku-reveal';
 
 /// Quiet lifetime of the two-player caption: long enough to read once, short
 /// enough that it never competes with play.
 const TWO_PLAYER_CAPTION_HOLD_MS = 2200;
 const TWO_PLAYER_CROSS_FADE_MS = 240;
+// Hidden challenge gesture: hold New puzzle for three seconds. The flash and
+// caption use the same quiet lifetime as the two-player caption.
+const CHALLENGE_LONG_PRESS_MS = 3000;
+const CHALLENGE_FLASH_MS = 700;
+const CHALLENGE_CAPTION_HOLD_MS = 2600;
 
 export function SudokuScreen() {
   return <SafeAreaProvider><SudokuContent /></SafeAreaProvider>;
 }
 function SudokuContent() {
   const {session,setSession,app} = useReview();
+  const authoritative=usePresentationAuthority(app);
+  const readEpoch=app?.getReadEpoch?.();
+  const isCurrentAction=()=>!app?.getSnapshot||(mayInteractWithPresentation(app)&&app.getReadEpoch()===readEpoch);
+  const generationOwner=useRef({mounted:true,revocation:0});
+  useEffect(()=>{
+    const owner=generationOwner.current;owner.mounted=true;
+    const unsubscribe=app?.subscribe?.(()=>{if(!app.getSnapshot().snapshot)owner.revocation++;});
+    return()=>{owner.mounted=false;unsubscribe?.();};
+  },[app]);
+  const generationAcceptance=()=>{const owner=generationOwner.current,revocation=owner.revocation;
+    const snapshot=app?.getSnapshot?.().snapshot,scope=snapshot?presentationOwnerScope(snapshot):undefined;
+    return()=>{const current=app?.getSnapshot?.().snapshot;
+      return owner.mounted&&owner.revocation===revocation&&(!app?.getSnapshot||(AppState.currentState==='active'&&!!current&&presentationOwnerScope(current)===scope));
+    };
+  };
   const navigation = useNavigation();
+  const onLayout=usePresentationNativeLayout();
   const insets = useSafeAreaInsets();
   // The provider sends frame and insets together. Using the window size here
   // can briefly pair a new orientation with the previous orientation's insets.
   const frame = useSafeAreaFrame();
   const [game,setGame] = useState(() => session.sudoku ?? newGame());
-  // A generation accepted by the native session can finish after this route was
-  // closed and reopened. Follow that committed puzzle while retaining local entry
-  // updates; never rehydrate an ordinary same-puzzle snapshot over active input.
-  useEffect(()=>{
-    if(app&&session.sudoku&&session.sudoku.puzzle.givens.join('')!==game.puzzle.givens.join('')) {
-      setGame(session.sudoku);clearSelection();
-    }
-  },[app,session.sudoku]);
   const [generationError,setGenerationError] = useState<string>();
   const [generation,setGeneration] = useState(0);
+  const initialGeneration=useRef<{app:NonNullable<typeof app>}|null>(null);
+  const [generationSettled,setGenerationSettled]=useState(0);
   const feedback=useFeedback();
   const feedbackSession=useId();
   const editSequence=useRef(0);
   const [loading,setLoading] = useState(!!app&&!session.sudoku);
   const [ready,setReady] = useState(!app||!!session.sudoku);
+  // Native may finish the first generation while this visit is covered. Admit
+  // its current saved game without generating again, while ordinary same-puzzle
+  // snapshots must not replace local input once preparation has finished.
+  useEffect(()=>{
+    if(app&&authoritative&&session.sudoku&&(!ready||session.sudoku.puzzle.givens.join('')!==game.puzzle.givens.join(''))) {
+      setGame(session.sudoku);clearSelection();setReady(true);setLoading(false);setGenerationError(undefined);
+    }
+  },[app,authoritative,session.sudoku,ready]);
   useEffect(() => {
-    if (!app || session.sudoku) return;
-    let current=true;setGenerationError(undefined);setLoading(true);
-    void app.command<SudokuGame>({type:'sudoku.new'}).then(next=>{if(current){setGame(next);setReady(true);setLoading(false);}})
-      .catch(error=>{if(current)setGenerationError(error.message);});
+    if (!app || !authoritative || ready || session.sudoku || initialGeneration.current?.app===app) return;
+    // Detached native work can still publish a saved game after authority is
+    // restored. Wait for that work rather than queueing a replacement behind it.
+    const flight={app};initialGeneration.current=flight;
+    let current=true;const accepted=generationAcceptance();setGenerationError(undefined);setLoading(true);
+    void app.command<SudokuGame>({type:'sudoku.new'}).then(next=>{if(current&&accepted()){setGame(next);clearSelection();setReady(true);setLoading(false);}})
+      .catch(error=>{if(current&&accepted())setGenerationError(error.message);})
+      .finally(()=>{
+        if(initialGeneration.current!==flight)return;
+        initialGeneration.current=null;
+        // Recheck the current native projection when an interrupted request
+        // settles. Progress off can retry; a published saved game wins instead.
+        if(generationOwner.current.mounted&&(!current||!accepted()))setGenerationSettled(value=>value+1);
+      });
     return()=>{current=false;};
-  },[app,generation]);
-  const [selected,setSelected] = useState<number>();
+  // Restore unfinished preparation only when native authority returns or Retry
+  // is requested. A successful read-revision advance is not a new preparation.
+  },[app,generation,authoritative,generationSettled]);
+  const [selected,setSelected,resetSelection] = useRouteViewState<number|undefined>(undefined);
+  const selectedRef=useRef(selected);selectedRef.current=selected;
   const [tracking,setTracking] = useState<number>();
-  const [notesMode,setNotesMode] = useState(false);
-  const [assist,setAssist] = useState(false);
+  const [notesMode,setNotesMode,resetNotesMode] = useRouteViewState(false);
+  const [assist,setAssist] = useRouteViewState(false);
   const [trackedKey,setTrackedKey] = useState<number>();
   const trackedKeyRef = useRef<number>(undefined);
   // Two-player mode is a landscape affordance with exactly one exit: leaving
   // landscape. The rail is replaced by a second, digits-only keypad, and rotating
   // back to portrait clears the mode so the next landscape entry starts 1P.
-  const [twoPlayer,setTwoPlayer] = useState(false);
+  const [twoPlayer,setTwoPlayer,resetTwoPlayer] = useRouteViewState(false);
   const [showsMenuRail,setShowsMenuRail] = useState(true);
   const twoPlayerMix = useRef(new Animated.Value(0)).current;
   const [twoPlayerTrackedKey,setTwoPlayerTrackedKey] = useState<number>();
@@ -66,6 +105,13 @@ function SudokuContent() {
   const [showsTwoPlayerCaption,setShowsTwoPlayerCaption] = useState(false);
   const twoPlayerCaptionOpacity = useRef(new Animated.Value(0)).current;
   const twoPlayerCaptionAnimation = useRef<Animated.CompositeAnimation|null>(null);
+  // Hidden challenge mode: a held New-puzzle press flashes the control and shows a
+  // quiet below-board caption. Per-board and transient — the fresh board is an
+  // ordinary game, so nothing is persisted and a normal New puzzle clears it.
+  const [showsChallengeCaption,setShowsChallengeCaption] = useState(false);
+  const challengeFlash = useRef(new Animated.Value(0)).current;
+  const challengeCaptionOpacity = useRef(new Animated.Value(0)).current;
+  const challengeCaptionAnimation = useRef<Animated.CompositeAnimation|null>(null);
   const trackingRef = useRef<number>(undefined);
   const boardRef = useRef<ComponentRef<typeof View>>(null);
   const boardGesture = useRef<{point:{x:number;y:number};start:{x:number;y:number};origin?:{x:number;y:number};side:number;released:boolean}|null>(null);
@@ -82,8 +128,9 @@ function SudokuContent() {
   useEffect(()=>{
     if(!twoPlayerActive){twoPlayerMix.setValue(0);setShowsMenuRail(true);return;}
     const animation=Animated.timing(twoPlayerMix,{toValue:1,duration:TWO_PLAYER_CROSS_FADE_MS,useNativeDriver:true});
-    animation.start(({finished})=>{if(finished)setShowsMenuRail(false);});
-    return()=>animation.stop();
+    let current=true;
+    animation.start(({finished})=>{if(current&&finished)setShowsMenuRail(false);});
+    return()=>{current=false;animation.stop();};
   },[twoPlayerActive,twoPlayerMix]);
   // Mirror the home-indicator inset and leave an extra gap at both edges.
   // Hiding the status bar does not remove the Control Center gesture.
@@ -144,7 +191,7 @@ function SudokuContent() {
     setRevealTiles(current=>current.filter(tile=>tile.index!==index));
     // Accessibility activation has no gesture finish; once its tile is gone the
     // solved-board selection must not stick (matching the physical path).
-    if(entry.clearSelection)setSelected(current=>current===index?undefined:current);
+    if(entry.clearSelection&&selectedRef.current===index)resetSelection();
   };
   const fadeRevealTile=(index:number,clearSelection=false)=>{
     const entry=revealTilesRef.current.get(index);
@@ -173,12 +220,14 @@ function SudokuContent() {
     revealTilesRef.current.set(index,{opacity});
     setRevealTiles(current=>[...current,{index,opacity}]);
   };
-  const save = (next: SudokuGame) => {
-    if(next!==game)feedback.emit({semantic:isSolved(next)&&!isSolved(game)?'succeeded':'selected',controlID:'sudoku.edit',value:`${feedbackSession}:${++editSequence.current}`});
+  const save = (next: SudokuGame, announceEdit = true) => {
+    // The challenge replacement suppresses the generic edit cue so the long-press
+    // produces the single affirmative challenge haptic, not a selection then success.
+    if(announceEdit && next!==game)feedback.emit({semantic:isSolved(next)&&!isSolved(game)?'succeeded':'selected',controlID:'sudoku.edit',value:`${feedbackSession}:${++editSequence.current}`});
     setGame(next);
     setSession({...session,sudoku:session.logs['Lava Guard Progress']?next:undefined});
   };
-  const clearSelection = () => {setSelected(undefined);setTracking(undefined);trackingRef.current=undefined;setNotesMode(false);setTrackedKey(undefined);trackedKeyRef.current=undefined;setTwoPlayerTrackedKey(undefined);twoPlayerTrackedKeyRef.current=undefined;clearReveal();};
+  const clearSelection = () => {resetSelection();setTracking(undefined);trackingRef.current=undefined;resetNotesMode();setTrackedKey(undefined);trackedKeyRef.current=undefined;setTwoPlayerTrackedKey(undefined);twoPlayerTrackedKeyRef.current=undefined;clearReveal();};
   const enter = (digit:number) => {if (canEnter && selected !== undefined) save(editCell(game,selected,digit,notesMode));};
   // Selection and tracking stay available on a solved board: the completion lock
   // covers entry (`canEnter`) and erasing (`canErase`), not navigation. The board
@@ -214,8 +263,8 @@ function SudokuContent() {
   // Keep the responder instances stable while selection/preview renders change.
   // Their actions read the latest game instead of resetting an in-flight gesture.
   const erase=()=>{if(canErase&&selected!==undefined)save(editCell(game,selected,0));};
-  const actions=useRef({locked,canEnter,side,choose,enter,trackKey,trackTwoPlayerKey,erase,revealTile,fadeRevealTile});
-  actions.current={locked,canEnter,side,choose,enter,trackKey,trackTwoPlayerKey,erase,revealTile,fadeRevealTile};
+  const actions=useRef({locked,canEnter,side,choose,enter,trackKey,trackTwoPlayerKey,erase,revealTile,fadeRevealTile,clearSelected:()=>setSelected(undefined)});
+  actions.current={locked,canEnter,side,choose,enter,trackKey,trackTwoPlayerKey,erase,revealTile,fadeRevealTile,clearSelected:()=>setSelected(undefined)};
   const chooseCell=useCallback((index:number)=>actions.current.choose(index),[]);
   const enterDigit=useCallback((digit:number)=>actions.current.enter(digit),[]);
   const eraseCell=useCallback(()=>actions.current.erase(),[]);
@@ -229,7 +278,7 @@ function SudokuContent() {
       if(state!=='background')return;
       // Backgrounding during an accessible activation's linger must still clear
       // its solved-board selection, or the next activation stays silent.
-      if(cancelRevealTiles())setSelected(undefined);
+      if(cancelRevealTiles())resetSelection();
       setRevealTiles([]);
     });
     return ()=>{subscription?.remove?.();cancelRevealTiles();};
@@ -271,7 +320,7 @@ function SudokuContent() {
       // and the last tile lingers through its own fade.
       if(actions.current.locked){
         if(trackingRef.current!==undefined)actions.current.fadeRevealTile(trackingRef.current);
-        setSelected(undefined);
+        actions.current.clearSelected();
       }
       boardGesture.current=null;trackingRef.current=undefined;setTracking(undefined);lastRevealPoint.current=undefined;lockScroll(false);
     };
@@ -348,7 +397,10 @@ function SudokuContent() {
   // No in-mode menu is added — with the rail gone, rotating back to portrait is
   // both the way to the menu and the reset to a 1P next landscape entry.
   const startTwoPlayer = () => {
-    if(twoPlayer)return;
+    if(twoPlayer||!isCurrentAction())return;
+    // The two transient captions share one absolute slot; they are mutually exclusive.
+    challengeCaptionAnimation.current?.stop();
+    setShowsChallengeCaption(false);
     setTwoPlayer(true);
     // The transient caption is decorative and fades before VoiceOver can reach
     // it, so announce its localized exit instruction when the mode starts.
@@ -365,27 +417,71 @@ function SudokuContent() {
     twoPlayerCaptionAnimation.current.start(({finished})=>{if(finished)setShowsTwoPlayerCaption(false);});
   };
   useEffect(()=>()=>twoPlayerCaptionAnimation.current?.stop(),[]);
+  useEffect(()=>()=>challengeCaptionAnimation.current?.stop(),[]);
   useEffect(()=>{
     if(landscape)return;
     // Leaving landscape is the mode's only exit: clear it (with its caption and
     // left-pad preview) so the next landscape entry starts single-player.
     twoPlayerCaptionAnimation.current?.stop();
     setShowsTwoPlayerCaption(false);
-    setTwoPlayer(false);
+    resetTwoPlayer();
     setTwoPlayerTrackedKey(undefined);twoPlayerTrackedKeyRef.current=undefined;
   },[landscape]);
-  const confirmReset = () => Alert.alert('Reset puzzle?','Your entries and notes will be removed. The puzzle will stay the same.',[
-    {text:'Cancel',style:'cancel'}, {text:'Reset',style:'destructive',onPress:()=>{save(newGame(game.puzzle));clearSelection();}},
-  ]);
-  const confirmNew = () => Alert.alert('New puzzle','Your entries and notes will be removed and a new puzzle will begin.',[
-    {text:'Cancel',style:'cancel'}, {text:'New puzzle',style:'destructive',onPress:()=>{if(app){setLoading(true);void app.command<SudokuGame>({type:'sudoku.new'}).then(next=>{save(next);clearSelection();}).catch(error=>Alert.alert('Lava',error.message)).finally(()=>setLoading(false));}else{save(newGame(freshPuzzle(game.puzzle)));clearSelection();}}},
-  ]);
+  const clearChallengeCaption = () => {
+    challengeCaptionAnimation.current?.stop();
+    setShowsChallengeCaption(false);
+  };
+  // Success feedback for a board that actually landed: the affirmative haptic, the
+  // orange flash, and the below-board caption. Fire it only from the success path,
+  // never at the gesture, or a rejected generation would read as an applied challenge.
+  const challengeApplied = () => {
+    // The two transient captions share one absolute slot; they are mutually exclusive.
+    twoPlayerCaptionAnimation.current?.stop();
+    setShowsTwoPlayerCaption(false);
+    feedback.emit({semantic:'succeeded',controlID:'sudoku.challenge'});
+    challengeFlash.setValue(1);
+    Animated.timing(challengeFlash,{toValue:0,duration:CHALLENGE_FLASH_MS,useNativeDriver:true}).start();
+    challengeCaptionAnimation.current?.stop();
+    challengeCaptionOpacity.setValue(0);
+    setShowsChallengeCaption(true);
+    challengeCaptionAnimation.current=Animated.sequence([
+      Animated.timing(challengeCaptionOpacity,{toValue:1,duration:160,useNativeDriver:true}),
+      Animated.delay(CHALLENGE_CAPTION_HOLD_MS),
+      Animated.timing(challengeCaptionOpacity,{toValue:0,duration:TWO_PLAYER_CROSS_FADE_MS,useNativeDriver:true}),
+    ]);
+    challengeCaptionAnimation.current.start(({finished})=>{if(finished)setShowsChallengeCaption(false);});
+    // The caption fades before VoiceOver can reach it, so announce it once.
+    AccessibilityInfo.announceForAccessibility(localized('Challenge mode applied to this board'));
+  };
+  // The hidden challenge gesture: a three-second hold on New puzzle. It generates a
+  // fresh board below 30 clues (the challenge contract) and only then presents the
+  // success signals, so a failed/refused generation shows the ordinary error instead.
+  const startChallenge = () => {
+    if(loading||!isCurrentAction())return;
+    if(app){
+      const accepted=generationAcceptance();setLoading(true);
+      void app.command<SudokuGame>({type:'sudoku.new',challenge:true})
+        .then(next=>{if(accepted()){save(next,false);clearSelection();challengeApplied();}})
+        .catch(error=>Alert.alert('Lava',error.message))
+        .finally(()=>setLoading(false));
+    }else{
+      save(newGame(freshChallengePuzzle(game.puzzle)),false);
+      clearSelection();
+      challengeApplied();
+    }
+  };
+  const confirmReset = () => {if(!isCurrentAction())return;Alert.alert('Reset puzzle?','Your entries and notes will be removed. The puzzle will stay the same.',[
+    {text:'Cancel',style:'cancel'}, {text:'Reset',style:'destructive',onPress:()=>{if(!isCurrentAction())return;save(newGame(game.puzzle));clearSelection();}},
+  ]);};
+  const confirmNew = () => {if(!isCurrentAction())return;Alert.alert('New puzzle','Your entries and notes will be removed and a new puzzle will begin.',[
+    {text:'Cancel',style:'cancel'}, {text:'New puzzle',style:'destructive',onPress:()=>{if(!isCurrentAction())return;clearChallengeCaption();if(app){const accepted=generationAcceptance();setLoading(true);void app.command<SudokuGame>({type:'sudoku.new'}).then(next=>{if(accepted()){save(next);clearSelection();}}).catch(error=>Alert.alert('Lava',error.message)).finally(()=>setLoading(false));}else{save(newGame(freshPuzzle(game.puzzle)));clearSelection();}}},
+  ]);};
   // One action list feeds the same rail in both orientations.
   const tools:SudokuTool[]=[
     {id:'sudoku-notes-toggle',label:`Notes mode ${notesMode?'on':'off'}`,icon:'notes',selected:notesMode,disabled:loading,
-      onPress:()=>{setNotesMode(!notesMode);feedback.emit({semantic:'selected',controlID:'sudoku.notes',value:String(!notesMode)});}},
+      onPress:()=>{if(!isCurrentAction())return;setNotesMode(!notesMode);feedback.emit({semantic:'selected',controlID:'sudoku.notes',value:String(!notesMode)});}},
     {id:'sudoku-correctness-toggle',label:`Puzzle assistance ${assist?'on':'off'}`,icon:assist?'assist':'hide',selected:assist,disabled:loading,
-      onPress:()=>{setAssist(!assist);feedback.emit({semantic:'selected',controlID:'sudoku.assist',value:String(!assist)});}},
+      onPress:()=>{if(!isCurrentAction())return;setAssist(!assist);feedback.emit({semantic:'selected',controlID:'sudoku.assist',value:String(!assist)});}},
     // Reset is a fresh restart of the same puzzle, not an undo: the glyph is the
     // counter-clockwise arrow the SwiftUI easter egg adopted in PR #783, not the
     // undo glyph the RN port inherited.
@@ -394,15 +490,15 @@ function SudokuContent() {
     // selected mode (the eyes-on fill), but as a visual-only prominence: the
     // action is one-shot, so it must not publish selection semantics to
     // VoiceOver. A solved board has no next digit, making it the next step.
-    {id:'sudoku-refresh',label:'New puzzle',icon:'add',prominent:locked,disabled:loading,onPress:confirmNew},
+    {id:'sudoku-refresh',label:'New puzzle',icon:'add',prominent:locked,disabled:loading,onPress:confirmNew,onLongPress:startChallenge,longPressDelayMs:CHALLENGE_LONG_PRESS_MS},
   ];
-  return <View testID="sudoku-screen" style={[styles.root,{paddingTop:topPadding,paddingBottom:bottomPadding,paddingLeft:insets.left,paddingRight:insets.right}]}>
+  return <View testID="sudoku-screen" onLayout={onLayout} style={[styles.root,{paddingTop:topPadding,paddingBottom:bottomPadding,paddingLeft:insets.left,paddingRight:insets.right}]}>
     {landscape ? <View style={styles.landscapeRow}>
       <View testID="sudoku-left-chrome" style={styles.landscapeLeftChrome}>
         {showsMenuRail&&<Animated.View testID="sudoku-menu-rail-layer" pointerEvents={twoPlayerActive?'none':'auto'}
           accessibilityElementsHidden={twoPlayerActive} importantForAccessibility={twoPlayerActive?'no-hide-descendants':'auto'}
           style={[styles.landscapeRailLayer,{opacity:twoPlayerMix.interpolate({inputRange:[0,1],outputRange:[1,0]})}]}>
-          <SudokuRail tools={tools} onClose={()=>navigation.goBack()} landscape availableHeight={band} onStartTwoPlayer={startTwoPlayer}/>
+          <SudokuRail tools={tools} onClose={()=>navigation.goBack()} landscape availableHeight={band} onStartTwoPlayer={startTwoPlayer} flash={{id:'sudoku-refresh',opacity:challengeFlash}}/>
         </Animated.View>}
         {twoPlayerActive&&<Animated.View testID="sudoku-p2-rail-layer" style={[styles.landscapeKeypadLayer,{opacity:twoPlayerMix}]}>
           <SudokuKeypad layout="column" edge="leading" testIDPrefix="sudoku-p2" showsEraser={false} game={game} width={width} height={side} selected={selected} notesMode={notesMode} assist={assist} trackedKey={twoPlayerTrackedKey}
@@ -421,6 +517,9 @@ function SudokuContent() {
           {showsTwoPlayerCaption&&<Animated.View pointerEvents="none" accessibilityElementsHidden style={[styles.twoPlayerCaption,{top:side+foundation.space.xs,opacity:twoPlayerCaptionOpacity}]}>
             <Text allowFontScaling={false} style={styles.twoPlayerCaptionText}>{localized('2P mode until landscape mode ends')}</Text>
           </Animated.View>}
+          {showsChallengeCaption&&<Animated.View pointerEvents="none" accessibilityElementsHidden style={[styles.twoPlayerCaption,{top:side+foundation.space.xs,opacity:challengeCaptionOpacity}]}>
+            <Text allowFontScaling={false} style={styles.twoPlayerCaptionText}>{localized('Challenge mode applied to this board')}</Text>
+          </Animated.View>}
         </View>
         {loading&&<View style={styles.landscapeOverlay}>
           <SudokuFeedback loading error={generationError} onRetry={()=>setGeneration(generation+1)} testID="sudoku-loading"/>
@@ -430,14 +529,21 @@ function SudokuContent() {
         canEnter={canEnter} canErase={canErase} onEnter={enterDigit} onErase={eraseCell} panHandlers={keypadPan.panHandlers}/>
     </View>
     : <>
-      <SudokuRail tools={tools} onClose={()=>navigation.goBack()}/>
+      <SudokuRail tools={tools} onClose={()=>navigation.goBack()} flash={{id:'sudoku-refresh',opacity:challengeFlash}}/>
       <ScrollView ref={scrollRef} bounces={side+sudokuMetrics.verticalChrome>portraitBand} scrollEnabled={side+sudokuMetrics.verticalChrome>portraitBand}
         contentInsetAdjustmentBehavior="never" automaticallyAdjustKeyboardInsets={false}
         contentContainerStyle={[styles.content,{minHeight:portraitBand}]}>
         <SudokuFeedback loading={loading} error={generationError} outcome={outcome} onRetry={()=>setGeneration(generation+1)}/>
-        <SudokuBoard game={game} side={side} selected={selected} tracking={tracking} notesMode={notesMode} assist={assist}
-          loading={loading} ready={ready} boardRef={boardRef} onChoose={chooseCell} panHandlers={boardPan.panHandlers}
-          revealEmoji={revealEmoji} revealTiles={revealTiles}/>
+        {/* Portrait mirrors the landscape caption slot: the challenge caption hangs
+            below the board, outside its layout, so the board never moves. */}
+        <View style={{width:side,alignSelf:'center'}}>
+          <SudokuBoard game={game} side={side} selected={selected} tracking={tracking} notesMode={notesMode} assist={assist}
+            loading={loading} ready={ready} boardRef={boardRef} onChoose={chooseCell} panHandlers={boardPan.panHandlers}
+            revealEmoji={revealEmoji} revealTiles={revealTiles}/>
+          {showsChallengeCaption&&<Animated.View pointerEvents="none" accessibilityElementsHidden style={[styles.twoPlayerCaption,{top:side+foundation.space.xs,opacity:challengeCaptionOpacity}]}>
+            <Text allowFontScaling={false} style={styles.twoPlayerCaptionText}>{localized('Challenge mode applied to this board')}</Text>
+          </Animated.View>}
+        </View>
         <View style={styles.flexible}/>
         <SudokuKeypad game={game} width={width} selected={selected} notesMode={notesMode} assist={assist} trackedKey={trackedKey}
           canEnter={canEnter} canErase={canErase} onEnter={enterDigit} onErase={eraseCell} panHandlers={keypadPan.panHandlers}/>

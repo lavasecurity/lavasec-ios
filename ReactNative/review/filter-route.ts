@@ -1,16 +1,20 @@
-import {useEffect, useState,useSyncExternalStore} from 'react';
+import {createContext,useContext,useEffect, useState,useSyncExternalStore} from 'react';
 import {usePresentationReadiness} from '../app/use-presentation-readiness';
 import {mayInteractWithPresentation} from '../app/read-cache';
 import {useIsFocused, useNavigation, useRoute} from '@react-navigation/native';
 import {useReview} from './ReviewContext';
 
+// Native visit teardown belongs to the navigation route, not its revocable body.
+export const FilterDetailOwnerContext=createContext<{id?:string}|undefined>(undefined);
+
 // Native filter selection is shared with automation and other tabs. A retained
 // detail owns its opened identity; editing sheets must never adopt a new target.
 export function useFilterRoute(restoreDetail=false) {
   const {app,live}=useReview();
+  const owner=useContext(FilterDetailOwnerContext);
   const route=useRoute();const navigation=useNavigation();const focused=useIsFocused();
   const [initialID]=useState(live?.session?.filterID);
-  const id=(route.params as {id?:string}|undefined)?.id??initialID;
+  const id=(route.params as {id?:string}|undefined)?.id??owner?.id??initialID;
   const exists=live?.newFilter?.id===id||live?.filters?.some(filter=>filter.id===id)!==false;
   const frozen=live?.filters?.find(filter=>filter.id===id)?.frozen??false;
   const editing=live?.session?.editing;
@@ -34,8 +38,8 @@ export function useFilterRoute(restoreDetail=false) {
     return()=>{current=false;};
   },[app,focused,id,exists,selected,restoreDetail,frozen,editing,live?.filterPreparationPresented,navigation,authoritative,interactive,failedScope,scope]);
   useEffect(()=>{
-    if(!app||!restoreDetail||!id)return;
+    if(!app||!restoreDetail||!id||owner)return;
     return()=>{void app.command({type:'filter.close',id}).catch(()=>{});};
-  },[app,restoreDetail,id]);
+  },[app,restoreDetail,id,owner]);
   return {id,ready};
 }

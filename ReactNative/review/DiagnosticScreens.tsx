@@ -1,3 +1,5 @@
+import {useRouteViewState} from '../app/use-route-view-state';
+import {usePlusEntry} from './plus-entry';
 import {SettingsIntro} from './settings-scaffold';
 import {foundation} from '../src/foundation';
 import {ContextMenu} from './ContextMenu';
@@ -20,7 +22,8 @@ import {reviewDNSProviders} from './session';
 import {useIsFocused, useRoute} from '@react-navigation/native';
 
 export function DomainListScreen({history=false}: {history?: boolean}) {
-  const {app,session,setSession,activityExample,live}=useReview(); const run=useAppAction(); const nav=useReviewNavigation();const [search,setSearch]=useState('');const [decision,setDecision]=useState('All');
+  const upgrade=usePlusEntry();
+  const {app,session,setSession,activityExample,live}=useReview(); const run=useAppAction(); const nav=useReviewNavigation();const [search,setSearch]=useRouteViewState('');const [decision,setDecision]=useRouteViewState('All');
   const focused=useIsFocused();const canOpenReview=useRef(focused);
   useEffect(()=>{canOpenReview.current=focused;return()=>{canOpenReview.current=false;};},[focused]);
   const enabled=session.logs['Domain logs'];
@@ -32,12 +35,13 @@ export function DomainListScreen({history=false}: {history?: boolean}) {
     void app.command({type:'domains.enableHistory'}).catch(error=>Alert.alert('Lava',error.message))
       .finally(()=>{enabling.current=false;setEnablePending(false);});
   };
-  const [limit,setLimit]=useState(30); const loadingMore=useRef(false);
-  useEffect(()=>{setLimit(30);loadingMore.current=false;},[search,decision,enabled,live?.domainHistoryCount]);
+  const [limit,setLimit]=useRouteViewState(30); const loadingMore=useRef(false);
+  // New history events refresh rows without retracting pages already opened.
+  useEffect(()=>{setLimit(30);loadingMore.current=false;},[search,decision,enabled]);
   const settledSearch=useSettledSearch(search);
   const range=useRoute().params as {start?:number;end?:number}|undefined;
   const query=useAppQuery<{id:string;domain:string;metadata:string;icon?:string;tone?:string}[]>(enabled?{type:'domains.query',history,decision,search:settledSearch,...range,limit:limit+1}:null, JSON.stringify([history,decision,range?.start,range?.end,enabled]));
-  useEffect(()=>{if(query.value)loadingMore.current=false;},[query.value]);
+  useEffect(()=>{if(query.value){loadingMore.current=false;if(!query.value.length)setLimit(30);}},[query.value]);
   const matching=query.value;
   const rows=app?(history?matching?.slice(0,limit):matching)??[]:enabled&&activityExample?previewDomains.filter(d=>d.includes(search.toLowerCase())).map((domain,i)=>({id:domain,domain,metadata:history?`${localized(decision)} · ${localizedFormat('%d minutes ago',i+1)}`:localizedFormat('%@ requests',String(120-i*32))})) : [];
   const clear=()=>{
@@ -49,8 +53,13 @@ export function DomainListScreen({history=false}: {history?: boolean}) {
     if(action==='copy'){run({type:'domains.copy',domain});return;}
     if(action!=='blocked'&&action!=='allowed')return;
     if(!app){previewNotice();return;}
-    void app.command<{id:string;standaloneReview:string}|{rejection:{title:string;message:string}}>({type:'domains.stage',domain,decision:action}).then(result=>{
-      if('rejection' in result){if(canOpenReview.current)Alert.alert(result.rejection.title,result.rejection.message);return;}
+    void app.command<{id:string;standaloneReview:string}|{rejection:{title:string;message:string;limitReached?:boolean}}>({type:'domains.stage',domain,decision:action}).then(result=>{
+      if('rejection' in result){if(!canOpenReview.current)return;
+        if(result.rejection.limitReached)upgrade(action==='blocked'?'blockedDomains':'allowedDomains',async()=>{
+          const retry=await app.command<{id:string;standaloneReview:string}|{rejection:{title:string;message:string}}>({type:'domains.stage',domain,decision:action});
+          if('rejection' in retry){Alert.alert(retry.rejection.title,retry.rejection.message);return;}
+          return {name:'Review',params:retry};
+        });else Alert.alert(result.rejection.title,result.rejection.message);return;}
       if(canOpenReview.current)nav.navigate('Review',result);else return app.command({type:'domains.cancel',token:result.standaloneReview});
     }).catch(error=>{if(canOpenReview.current&&error.message!=='Authentication cancelled.')Alert.alert('Lava',error.message);});
   };
@@ -87,9 +96,11 @@ function NetworkRow({row}:{row:NetworkRecord}) {
 export function NetworkScreen() {
   const nav=useReviewNavigation();const {app,session}=useReview(); const run=useAppAction();
   const query=useAppQuery<NetworkRecord[]>({type:"network.query"});
-  const [limit,setLimit]=useState(30);
+  const [limit,setLimit]=useRouteViewState(30);
   const count=query.value?.length??0;
-  useEffect(()=>setLimit(30),[count]);
+  // Arrival/expiry and a pending read preserve the user's expanded page. An
+  // accepted empty log starts the next populated log at the first page.
+  useEffect(()=>{if(query.value?.length===0)setLimit(30);},[query.value?.length]);
   useToolbar({unstable_headerRightItems:()=>[toolbarButton('Clear network activity','trash',()=>Alert.alert('Clear local network activity?','This removes saved network activity entries from this phone. Filtering counts and domain history are unchanged.',[{text:'Cancel',style:'cancel'},{text:'Clear Activity',style:'destructive',onPress:()=>run({type:'logs.clear',kind:'Clear network activity',surface:'activityViewing'})}]),!query.value?.length)]},[query.value?.length??0]);
   return <Screen onRefresh={app?()=>query.refresh():undefined} onEndReached={()=>{if(count>limit)setLimit(Math.min(limit+30,count));}}><SettingsIntro summary="Connection and protection events stay on this device for 7 days. Share them only when you choose to attach a bug report."/>
     <View testID={query.value?"network.loaded":"network.pending"}><Group>{query.value?.length?query.value.slice(0,limit).map(row=><NetworkRow key={row.id} row={row}/>):<ListRow title={query.error??(app&&!query.value?'Loading network activity…':session.logs['Network activity']?'No network activity yet':'Network activity is off')} />}</Group></View>
@@ -100,8 +111,8 @@ type Notice={id:string;displayName:string;noticeText:string;plannedUse:string;so
 type LegalContent={disclaimer:string;sections:{title:string;notices:Notice[]}[]};
 export function LegalScreen() {
   const run=useAppAction();
-  const [expanded,setExpanded]=useState<string>();
-  const [search,setSearch]=useState('');
+  const [expanded,setExpanded]=useRouteViewState<string|undefined>(undefined);
+  const [search,setSearch]=useRouteViewState('');
   const data=useMemo<LegalContent|null>(()=>{try{return JSON.parse(NativeReview.getLegalNotices());}catch{return null;}},[]);
   if(!data)return <Screen><Info title="Legal notices unavailable" description="The local notice catalog could not be read." /></Screen>;
   const sections=data.sections.map(section=>({...section,notices:section.notices.filter(notice=>`${localized(notice.displayName)} ${localized(section.title)} ${localized(notice.noticeText)}`.toLocaleLowerCase().includes(search.toLocaleLowerCase()))})).filter(section=>section.notices.length);

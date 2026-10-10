@@ -23,3 +23,19 @@ test('the actual UISwitch retains the public hint and remains the only accessibi
   expect(source).toContain('- (BOOL)isAccessibilityElement { return NO; }');
   expect(source).toContain('_control.accessibilityHint = nil;');
 });
+
+test('unrelated prop publications cannot reverse an unacknowledged UIKit gesture',()=>{
+  const update=source.slice(source.indexOf('- (void)updateProps:'),source.indexOf('- (BOOL)isAccessibilityElement'));
+  expect(update).toContain('std::static_pointer_cast<const LavaSwitchProps>(_props)');
+  expect(update).not.toContain('std::static_pointer_cast<const LavaSwitchProps>(oldProps)');
+  expect(update).toContain('next.value != previous.value || next.resetRevision != previous.resetRevision');
+  expect(update).toContain('if (reconcile && _control.on != next.value)');
+  expect(update).toContain('if (reconcile || next.pending) _awaitingAcknowledgement = NO;');
+  const changed=source.slice(source.indexOf('- (void)changed {'),source.indexOf('- (void)prepareForRecycle'));
+  const acknowledge=changed.indexOf('_awaitingAcknowledgement = YES;');
+  const emit=changed.indexOf('emitter->onValueChange');
+  expect(acknowledge).toBeGreaterThan(0);
+  expect(emit).toBeGreaterThan(acknowledge);
+  expect(changed).toContain('if (_awaitingAcknowledgement)');
+  expect(source.slice(source.indexOf('- (void)prepareForRecycle'))).toContain('_awaitingAcknowledgement = NO;');
+});

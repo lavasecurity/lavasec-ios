@@ -8,6 +8,65 @@ import XCTest
 /// direct-`.lproj` mechanism the notification posters use. Values assert against the
 /// committed catalogs in `Sources/LavaSecKit/Resources/*.lproj/Localizable.strings`.
 final class LavaCoreStringsTests: XCTestCase {
+    func testShippingWireGuardRecoveryCopyResolvesInEveryTranslatedLanguage() {
+        let keys = [
+            "Couldn't open that file. Try moving it to Files first.",
+            "That file isn't text, so it isn't a WireGuard config.",
+            "This build can't save a WireGuard configuration. Update Lava and try again.",
+            "This WireGuard configuration uses a setting Lava doesn't support.",
+            "A required WireGuard setting is missing or repeated.",
+            "A WireGuard setting is in the wrong section.",
+            "A WireGuard setting has an invalid value.",
+            "This WireGuard configuration isn't valid. Check its addresses, routes, MTU, and public key.",
+            "Your WireGuard configuration couldn't be read. Try again after unlocking your device.",
+            "The saved WireGuard configuration is no longer usable. Import it again.",
+            "Lava couldn't access the saved WireGuard keys. Unlock your device and try again.",
+            "Lava couldn't save the WireGuard configuration. Try again in a moment.",
+            "The WireGuard private key isn't valid. Import your configuration again.",
+            "The WireGuard pre-shared key isn't valid. Import your configuration again.",
+            "This WireGuard configuration uses the server's key. Import your device's configuration instead."
+        ]
+        for language in ["ja", "zh-Hant", "zh-Hans", "de", "fr", "es", "ko", "pt-BR", "it"] {
+            for key in keys {
+                let value = LavaCoreStrings.localized(key, languageCode: language)
+                XCTAssertFalse(value.isEmpty, "\(key)/\(language)")
+                XCTAssertNotEqual(value, key, "WireGuard copy must resolve from the package bundle: \(key)/\(language)")
+            }
+            let size = LavaCoreStrings.localizedFormat(
+                "That file is %lld KB — far too big for a WireGuard config. Wrong file?", languageCode: language, 128)
+            XCTAssertTrue(size.contains("128"), language)
+            XCTAssertFalse(size.contains("%lld"), language)
+            XCTAssertFalse(size.contains("That file is"), language)
+        }
+    }
+
+    func testShippingWireGuardErrorsDoNotExposeDiagnosticPayloads() {
+        let marker = "PRIVATE_CONFIGURATION_SENTINEL"
+        let storeFailures: [ChainedUpstreamSecretStoreFailure] = [
+            .configurationUnreadable(marker), .configurationUnusable, .keychainRefused(-12345),
+            .entropyUnavailable, .malformedPrivateKey, .malformedPresharedKey,
+            .unusablePrivateKey, .privateKeyBelongsToThePeer, .accessGroupUnavailable,
+            .writerExclusionUnavailable
+        ]
+        let parserFailures: [ChainedUpstreamStagingRefusal] = [
+            .buildMayNotStage(.production), .buildIdentityIsInconsistent(identity: .qa, group: marker),
+            .unsupportedDirective(marker), .missingOrRepeatedKey(marker),
+            .directiveInWrongSection(directive: marker, section: marker), .malformedValue(marker),
+            .configurationRefused(.malformedAllowedIPs), .rotationRefused(.malformedPrivateKey)
+        ]
+        for failure in storeFailures {
+            XCTAssertFalse(failure.localizedDescription.contains(marker))
+            XCTAssertFalse(failure.localizedDescription.contains("-12345"))
+            XCTAssertFalse(failure.localizedDescription.contains("ChainedUpstreamSecretStoreFailure"))
+            XCTAssertFalse(failure.localizedDescription.isEmpty)
+        }
+        for failure in parserFailures {
+            XCTAssertFalse(failure.localizedDescription.contains(marker))
+            XCTAssertFalse(failure.localizedDescription.contains("ChainedUpstreamStagingRefusal"))
+            XCTAssertFalse(failure.localizedDescription.isEmpty)
+        }
+    }
+
     func testSharedErrorAndBackupCopyResolvesInEveryShippedLanguage() {
         let languages = ["ja", "zh-Hant", "zh-Hans", "de", "fr", "es", "ko", "pt-BR", "it"]
         let keys = [

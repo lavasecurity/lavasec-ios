@@ -210,7 +210,7 @@ extension AppViewModel {
     /// no visible trace; and the tunnel latched `dns-only / chaining-disabled` while an
     /// upstream sat correctly stored, which from the old QA sheet was indistinguishable
     /// from a staging failure.
-    struct ChainedUpstreamSurfaceStatus {
+    struct ChainedUpstreamSurfaceStatus: Sendable {
         /// The user's stored PREFERENCE. Not the outcome — the tunnel latches separately.
         var chainingEnabled: Bool
         /// Non-nil when the device cannot chain regardless of the toggle.
@@ -279,8 +279,14 @@ extension AppViewModel {
     /// than caching: the tunnel, the QA surface and a restore can all change it underneath
     /// the app, and a stale "configured" badge is the failure this surface exists to end.
     var chainedUpstreamSurfaceStatus: ChainedUpstreamSurfaceStatus {
+        Self.readChainedUpstreamSurfaceStatus(chainingEnabled: configuration.chainedUpstreamEnabled,
+            hasLavaSecurityPlus: configuration.hasLavaSecurityPlus)
+    }
+
+    /// Storage work can run away from UIKit; callers capture and revalidate model inputs.
+    nonisolated static func readChainedUpstreamSurfaceStatus(chainingEnabled: Bool, hasLavaSecurityPlus: Bool) -> ChainedUpstreamSurfaceStatus {
         var status = ChainedUpstreamSurfaceStatus(
-            chainingEnabled: configuration.chainedUpstreamEnabled,
+            chainingEnabled: chainingEnabled,
             ineligibility: nil,
             storedConfigurationSummary: nil,
             storedConfigurationSelectionFingerprint: nil,
@@ -329,7 +335,7 @@ extension AppViewModel {
         switch eligibilityStore.read() {
         case .snapshot(let snapshot):
             status.ineligibility = ChainedAvailability.ineligibilityReason(
-                hasLavaSecurityPlus: configuration.hasLavaSecurityPlus,
+                hasLavaSecurityPlus: hasLavaSecurityPlus,
                 physicalMemoryBytes: ProcessInfo.processInfo.physicalMemory,
                 experimentalOverrideEnabled: snapshot.experimentalOverrideEnabled,
                 hasStartupCrashLoopTripped: snapshot.backoffState.hasTripped)

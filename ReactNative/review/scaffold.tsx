@@ -1,11 +1,16 @@
 import {useHeldActionScrollLock} from '../src/interaction-lock';
 import NativeTextField from '../specs/LavaTextFieldNativeComponent';
+import {BufferedInput,type BufferedInputHandle} from './BufferedInput';
+import NativeDecoration from '../specs/LavaDecorationNativeComponent';
+import {useLavaColorScheme} from '../src/appearance';
 import {useTextScale} from '../app/text-metrics';
 import {localized, Text} from '../app/presentation';
-import {Children, createContext, isValidElement, useContext, useLayoutEffect,useSyncExternalStore,useRef, useState, type PropsWithChildren, type Ref, type ReactNode} from 'react';
-import {KeyboardAvoidingView, Pressable, SafeAreaView, ScrollView, StyleSheet, TextInput, View, useWindowDimensions, type ScrollViewInstance, type ColorValue} from 'react-native';
-import {useNavigation} from '@react-navigation/native';
-import type {NativeStackNavigationOptions, NativeStackHeaderItem} from '@react-navigation/native-stack';
+import {Children, createContext, isValidElement, useContext, useImperativeHandle, useLayoutEffect,useSyncExternalStore,useRef, useState, type ComponentRef,type PropsWithChildren, type Ref, type ReactNode} from 'react';
+import {KeyboardAvoidingView, Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, TextInput, View, useWindowDimensions, type ScrollViewInstance, type ColorValue} from 'react-native';
+import {useNavigation,type ParamListBase} from '@react-navigation/native';
+import {HeaderHeightContext} from '@react-navigation/elements';
+import {SafeAreaInsetsContext} from 'react-native-safe-area-context';
+import type {NativeStackNavigationOptions, NativeStackHeaderItem, NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {colors} from '../src/colors.ios';
 import {LavaActionButton, LavaCard, LavaControlContent, LavaIconButton, LavaRowLabel, LavaSelectionAccessory, LavaToggleRow, type LavaIconAction} from '../src';
 import {foundation} from '../src/foundation';
@@ -13,11 +18,21 @@ import {Copy, Symbol} from './primitives';
 import {lavaTokens} from '../src/generated/tokens';
 import {symbolPresentation} from '../src/icon-presentation.ios';
 import {mayInteractWithPresentation} from '../app/read-cache';
-import {useOptionalReview} from './ReviewContext';
+import {useOptionalReview,useRouteBodyConcealed} from './ReviewContext';
+import {usePresentationNativeLayout} from '../app/use-presentation-readiness';
 import type {AppStore} from '../app/store';
 import type {AppSnapshot} from '../app/contract';
+import {ordinaryPageHeader} from './navigation-scaffold';
 
 const ExplanationLinkContext=createContext(false);
+
+export function nativeFlowHeader(dark:boolean){
+  const rgb=(color:readonly number[])=>`rgb(${color.map(value=>Math.round(value*255)).join(',')})`;
+  return {...nativeInlineHeader,headerShown:true,headerTintColor:rgb(lavaTokens.colors.navigationForeground[dark?'dark':'light']),
+    contentStyle:{backgroundColor:rgb(lavaTokens.colors.groupedBackground[dark?'dark':'light'])}};
+}
+
+export const onboardingHeaderOptions={headerTransparent:true,headerStyle:{backgroundColor:'transparent'},contentStyle:{backgroundColor:'transparent'},gestureEnabled:false};
 
 // These are the semantic counterparts of LavaInfoPanel, LavaCondensedList,
 // lavaRow and LavaSheetScaffold. Screens choose an anatomy instead of inventing
@@ -66,13 +81,13 @@ export function AddAction({title, onPress, disabled=false}: {title: string; onPr
 export function SwapOrderAction({onPress,disabled=false}: {onPress:()=>void;disabled?:boolean}) {
   return <LavaActionButton title="Swap order" role="panel" icon="swap" disabled={disabled} onPress={onPress}/>;
 }
-export function InputRow({title, children}: PropsWithChildren<{title: string}>) {
-  return <View style={{gap:6}}><Copy role="fieldLabel" color={colors.secondaryText}>{title}</Copy>{children}</View>;
+export function InputRow({title,labelTestID,children}: PropsWithChildren<{title:string;labelTestID?:string}>) {
+  return <View style={{gap:6}}><Copy role="fieldLabel" testID={labelTestID} color={colors.secondaryText}>{title}</Copy>{children}</View>;
 }
-export function DomainInput({label,placeholder,onChange,onSubmit}: {label:string;placeholder:string;onChange:(value:string)=>void;onSubmit:(value:string)=>void}) {
+export function DomainInput({label,placeholder,onChange,onSubmit,editable=true}: {label:string;placeholder:string;onChange:(value:string)=>void;onSubmit:(value:string)=>void;editable?:boolean}) {
   const scale=useTextScale();
   const [measured,setMeasured]=useState({scale:0,height:0});
-  return <NativeTextField autoFocus inputLabel={localized(label)} placeholder={localized(placeholder)} resetRevision={0} fontPointSize={17*scale}
+  return <NativeTextField autoFocus editable={editable} inputLabel={localized(label)} placeholder={localized(placeholder)} resetRevision={0} fontPointSize={17*scale}
     onChange={event=>onChange(event.nativeEvent.text)} onSubmit={event=>onSubmit(event.nativeEvent.text)}
     onSizeChange={event=>setMeasured({scale,height:event.nativeEvent.height})}
     style={{height:measured.scale===scale?Math.max(22,measured.height):22*scale}} />;
@@ -151,14 +166,24 @@ export function ListRow({title, subtitle, metadata, icon, leading, trailing, tra
   return onPress||onLongPress ? <Pressable accessibilityHint={accessibilityHint?localized(accessibilityHint):undefined} testID={testID} {...accessibility} disabled={disabled} onPress={onPress} onLongPress={onLongPress} {...hold} style={({pressed}) => [...style, pressed && {opacity:foundation.interaction.pressedOpacity}]}>{content}{selection}{accessory}</Pressable>
     : <View testID={testID} style={style}>{content}{selection}{accessory}</View>;
 }
-export function Toggle({title, summary, value, onChange, disabled = false, standalone = false, optimistic = true, accessibilityHint,testID}: {
-  title: string; summary?:string; accessibilityHint?:string; value: boolean; onChange: (next: boolean) => void | Promise<unknown>; disabled?: boolean; standalone?: boolean; optimistic?:boolean;testID?:string;
+export function Toggle({title, summary, titleRole, value, onChange, disabled = false, pending = false, standalone = false, optimistic = true, accessibilityHint,testID}: {
+  title: string; summary?:string; titleRole?:'rowTitle'|'cardTitle'; accessibilityHint?:string; value: boolean; onChange: (next: boolean) => void | Promise<unknown>; disabled?: boolean; pending?: boolean; standalone?: boolean; optimistic?:boolean;testID?:string;
 }) {
-  return <View style={standalone?s.group:undefined}><LavaToggleRow testID={testID} title={title} summary={summary} accessibilityHint={accessibilityHint?localized(accessibilityHint):undefined} value={value} onValueChange={onChange} disabled={disabled} optimistic={optimistic}/></View>;
+  return <View style={standalone?s.group:undefined}><LavaToggleRow testID={testID} title={title} summary={summary} titleRole={titleRole} accessibilityHint={accessibilityHint?localized(accessibilityHint):undefined} value={value} onValueChange={onChange} disabled={disabled} pending={pending} optimistic={optimistic}/></View>;
 }
-export function Search({value, onChange, label = 'Search domains'}: {value: string; onChange: (value: string) => void; label?: string}) {
+// Catalog controls own their native capsule material. The shared sticky strip
+// stays clear while rows passing beneath each control are diffused by UIKit.
+export function CatalogControlMaterial() {
+  const scheme=useLavaColorScheme();
+  return <NativeDecoration symbol="catalog.control.material" colorScheme={scheme} pointerEvents="none" accessible={false} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={StyleSheet.absoluteFill}/>;
+}
+export function Search({ref,value, onChange, label = 'Search domains',resetRevision=0,surface='card'}: {ref?:Ref<BufferedInputHandle>;value: string; onChange: (value: string) => void; label?: string;resetRevision?:number;surface?:'card'|'catalog'}) {
   const scale=useTextScale();
-  return <View style={s.search}><Symbol name="magnifyingglass" size={18} tone="secondary" /><TextInput allowFontScaling={false} accessibilityLabel={localized(label)} placeholder={localized(label)} value={value} onChangeText={onChange} autoCapitalize="none" autoCorrect={false} clearButtonMode="while-editing" style={[s.searchInput,{fontSize:17*scale,minHeight:Math.max(48,26*scale+16)}]} placeholderTextColor={colors.secondaryText} /></View>;
+  const catalog=surface==='catalog';
+  const target=catalog?foundation.control.target:48;
+  // Filtering can be slower than typing. Keep the native edit buffer as the
+  // typing owner; only an explicit external reset writes text back into it.
+  return <View style={[s.search,catalog&&s.catalogControl]}>{catalog&&<CatalogControlMaterial/>}<Symbol name="magnifyingglass" size={18} tone={catalog?'primary':'secondary'} /><BufferedInput ref={ref} allowFontScaling={false} accessibilityLabel={localized(label)} placeholder={localized(label)} value={value} resetRevision={resetRevision} onChangeText={onChange} autoCapitalize="none" autoCorrect={false} clearButtonMode="while-editing" selectionColor={colors.safeGreen} style={[s.searchInput,{fontSize:17*scale,minHeight:Math.max(target,26*scale+16)}]} placeholderTextColor={colors.secondaryText} /></View>;
 }
 // The isolated review host uses the same centered credential composition. The
 // full app continues to present its native authenticated credential flow.
@@ -175,19 +200,21 @@ export function PasscodeEntry({value,onChange,topInset}:{value:string;onChange:(
 // Native inline bars share the domain-list header's clear background. UIKit
 // owns the toolbar buttons and material; content controls retain their layout.
 export const nativeInlineHeader:NativeStackNavigationOptions = {
-  headerLargeTitleEnabled:false,headerStyle:{backgroundColor:'transparent'},
+  headerStyle:{backgroundColor:'transparent'},...ordinaryPageHeader(),headerLargeTitleEnabled:false,
 };
 // The navigation stack owns every full-sheet bar. Content retains the same
 // direct ScrollView structure required by react-native-screens form sheets.
 export const fullSheetPresentation:NativeStackNavigationOptions = {
-  ...nativeInlineHeader,presentation:'formSheet',headerShown:true,headerTransparent:false,
+  ...nativeInlineHeader,headerLargeTitleEnabled:false,
+  presentation:'formSheet',headerShown:true,
   sheetAllowedDetents:[1],sheetGrabberVisible:false,
 };
 // Full-screen modals keep the same native-bar ownership without a grabber. The
 // consuming screen adds the scaffold Close action as its only left item; its
 // immersive content owns the screen and may clear the bar title.
 export const fullScreenModalPresentation:NativeStackNavigationOptions = {
-  presentation:'fullScreenModal',headerShown:true,headerLargeTitleEnabled:false,headerTransparent:false,headerBackVisible:false,
+  ...nativeInlineHeader,headerLargeTitleEnabled:false,
+  presentation:'fullScreenModal',headerShown:true,headerBackVisible:false,
 };
 // UIKit mounts its footer outside the screen's React subtree. Subscribe here so
 // an already-published native footer follows revocation before its owning body
@@ -203,29 +230,91 @@ function NativeSheetFooter({app,live,owner,children}:{app?:AppStore;live?:AppSna
     <View style={[s.sheetFooter,concealed&&{opacity:0}]}>{children}</View>
   </SafeAreaView>;
 }
-export function Sheet({children, footer, header, scrollRef}: PropsWithChildren<{footer?: ReactNode; header?: ReactNode; scrollRef?: Ref<ScrollViewInstance>}>) {
-  const navigation = useNavigation();
+export function useSheetHeaderInset(){
+  const height=useContext(HeaderHeightContext)??0;
+  return Platform.OS==='ios'?height:0;
+}
+export function Sheet({children, footer, header, scrollRef,headerMaterial=true,scrollMode='form'}: PropsWithChildren<{footer?: ReactNode; header?: ReactNode; scrollRef?: Ref<ScrollViewInstance>;headerMaterial?:boolean;scrollMode?:'form'|'list'}>) {
+  const nativeLayout=usePresentationNativeLayout();
+  const navigation = useNavigation<NativeStackNavigationProp<ParamListBase>>();
+  const scheme=useLavaColorScheme();
+  const insets=useContext(SafeAreaInsetsContext);
+  const horizontalPadding=insets&&(insets.left!==0||insets.right!==0)?{
+    paddingLeft:foundation.space.screenHorizontal+insets.left,paddingRight:foundation.space.screenHorizontal+insets.right,
+  }:undefined;
+  const horizontalReadingInsets=horizontalPadding?{...horizontalPadding,maxWidth:foundation.layout.readingWidth+insets!.left+insets!.right}:undefined;
+  const nativeHeaderInset=useSheetHeaderInset();
+  const [viewportHeight,setViewportHeight]=useState(0);
+  const [controlsHeight,setControlsHeight]=useState(0);
+  const nativeScroll=useRef<ScrollViewInstance>(null);
+  const initializedOffset=useRef(false);
+  useImperativeHandle(scrollRef,()=>nativeScroll.current!,[]);
+  const pinnedOffset=useRef({x:0,y:-nativeHeaderInset});
+  const latestOffset=useRef(pinnedOffset.current);
+  const previousInset=useRef(nativeHeaderInset);
+  if(previousInset.current!==nativeHeaderInset){
+    const atTop=latestOffset.current.y<=-previousInset.current+1;
+    pinnedOffset.current={x:latestOffset.current.x,y:atTop?-nativeHeaderInset:latestOffset.current.y+previousInset.current-nativeHeaderInset};
+    previousInset.current=nativeHeaderInset;
+  }
+  useLayoutEffect(()=>{
+    if(scrollMode==='list')return;
+    return navigation.addListener('transitionEnd',event=>{
+      // UIKit's form-sheet presentation can adjust the initial offset after
+      // Fabric lays out the body. Settle it once when that transition finishes.
+      if(!event.data.closing&&!initializedOffset.current){
+        initializedOffset.current=true;
+        nativeScroll.current?.scrollTo({...pinnedOffset.current,animated:false});
+      }
+    });
+  },[navigation,scrollMode]);
   const owner=useRef<SheetOwner>({mounted:true,listeners:new Set()});
   useLayoutEffect(()=>{owner.current.mounted=true;return()=>{
     owner.current.mounted=false;for(const listener of owner.current.listeners)listener();
     navigation.setOptions({unstable_sheetFooter:undefined});
   };},[navigation]);
   const review=useOptionalReview();
-  const canInteract=()=>mayInteractWithPresentation(review?.app);
+  const concealed=useRouteBodyConcealed();
+  const canInteract=()=>!concealed&&mayInteractWithPresentation(review?.app);
   const interactive=useSyncExternalStore(review?.app?.subscribe??(()=>()=>{}),canInteract);
   useLayoutEffect(() => {
     navigation.setOptions({unstable_sheetFooter: footer ? () => owner.current.mounted?<NativeSheetFooter app={review?.app} live={review?.live} owner={owner.current}>{footer}</NativeSheetFooter>:null : undefined});
   }, [navigation, footer, review?.app,review?.live, interactive]);
-  // RNScreens 4.27 sizes form-sheet scroll views only when they are direct
-  // children of its content wrapper (optionally after one non-collapsing header).
-  // A wrapping View triggers its legacy frame correction and doubles the sheet
-  // origin. Its native footer slot also keeps controls pinned above the safe area.
-  return <>
-    {header&&<View collapsable={false} testID="sheet.pinned-header" pointerEvents={interactive?'auto':'none'} accessibilityElementsHidden={!interactive} importantForAccessibility={interactive?'auto':'no-hide-descendants'}>
-      {header&&<View style={s.sheetHeader}>{header}</View>}
+  // Native-stack makes its first scroll descendant use automatic safe-area
+  // insets on iOS. Start the list viewport below the bar, so its content starts
+  // at zero with no duplicated inset or negative scrollTo correction (RN clamps
+  // commands using raw rather than adjusted insets). Fixed controls are siblings,
+  // so neither a pan nor keyboard adjustment can move them. Only their measured
+  // height is reserved in the natural-sized results; rows still pass underneath
+  // the individual glass capsules. Keep the scroll view first for sheet sizing.
+  if(scrollMode==='list')return <View onLayout={nativeLayout} pointerEvents={interactive?'auto':'none'} accessibilityElementsHidden={!interactive} importantForAccessibility={interactive?'auto':'no-hide-descendants'} style={{flex:1,backgroundColor:colors.groupedBackground,...(concealed?{opacity:0}:{})}}>
+    <ScrollView testID="sheet.results" ref={nativeScroll} style={{flex:1,marginTop:nativeHeaderInset}} bounces={false} alwaysBounceVertical={false} automaticallyAdjustKeyboardInsets contentInsetAdjustmentBehavior="automatic" keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive" scrollIndicatorInsets={{top:controlsHeight}} contentContainerStyle={s.sheetPinnedContent}>
+      <View style={{height:controlsHeight}}/>
+      <View style={[s.sheetPinnedBody,horizontalReadingInsets]}>{children}</View>
+    </ScrollView>
+    {header&&<View collapsable={false} testID="sheet.pinned-header" pointerEvents="box-none" onLayout={event=>setControlsHeight(event.nativeEvent.layout.height)} style={{position:'absolute',top:nativeHeaderInset,left:0,right:0}}>
+      {headerMaterial&&<NativeDecoration symbol="sheet.header.material" colorScheme={scheme} pointerEvents="none" style={StyleSheet.absoluteFill}/>}
+      <View style={[s.sheetHeader,horizontalPadding]}>{header}</View>
     </View>}
-    <ScrollView ref={scrollRef} pointerEvents={interactive?'auto':'none'} accessibilityElementsHidden={!interactive} importantForAccessibility={interactive?'auto':'no-hide-descendants'} style={{flex:1,backgroundColor:colors.groupedBackground}} automaticallyAdjustKeyboardInsets contentInsetAdjustmentBehavior="automatic" keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive" contentContainerStyle={[s.sheetContent,!!header&&{paddingTop:8}]}>{children}</ScrollView>
-  </>;
+  </View>;
+  // Keep the direct ScrollView required by native form sheets. A sticky child
+  // lets content pass behind the picker controls instead of reserving an opaque
+  // strip above the scroll surface. The native footer still owns bottom actions.
+  // RN's sticky-header animation only reads the explicit contentInset. Use the
+  // navigator's measured bar height so its controls don't slide behind the bar.
+  // Keep ordinary editor sheets viewport-sized while their fields resize.
+  // Start at the inset's top, then preserve the scrolled position when rotation
+  // changes the native bar height. Ordinary scrolling remains owned by UIKit.
+  // Keep the material's scroll viewport full-width. Safe edges belong to its
+  // content, with the cap expanded by that padding to retain the reading band.
+  // The detached native footer already has its own native SafeAreaView.
+  return <ScrollView ref={nativeScroll} onLayout={event=>{nativeLayout(event);setViewportHeight(event.nativeEvent.layout.height);}} stickyHeaderIndices={header?[0]:undefined} pointerEvents={interactive?'auto':'none'} accessibilityElementsHidden={!interactive} importantForAccessibility={interactive?'auto':'no-hide-descendants'} style={{flex:1,backgroundColor:colors.groupedBackground,...(concealed?{opacity:0}:{})}} automaticallyAdjustKeyboardInsets automaticallyAdjustContentInsets={false} contentInset={{top:nativeHeaderInset}} contentOffset={pinnedOffset.current} onScroll={event=>{latestOffset.current=event.nativeEvent.contentOffset;}} scrollEventThrottle={16} contentInsetAdjustmentBehavior="never" scrollIndicatorInsets={{top:nativeHeaderInset}} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive" contentContainerStyle={[header?s.sheetPinnedContent:[s.sheetContent,horizontalReadingInsets],{minHeight:Math.max(0,viewportHeight-nativeHeaderInset)}]}>
+    {header&&<View collapsable={false} testID="sheet.pinned-header" pointerEvents={interactive?'auto':'none'} accessibilityElementsHidden={!interactive} importantForAccessibility={interactive?'auto':'no-hide-descendants'}>
+      {headerMaterial&&<NativeDecoration symbol="sheet.header.material" colorScheme={scheme} pointerEvents="none" style={StyleSheet.absoluteFill}/>}
+      <View style={[s.sheetHeader,horizontalPadding]}>{header}</View>
+    </View>}
+    {header?<View style={[s.sheetPinnedBody,horizontalReadingInsets]}>{children}</View>:children}
+  </ScrollView>;
 }
 const toolbarSymbols={'chevron.left':'back',xmark:'close',checkmark:'confirm',trash:'delete','square.and.pencil':'edit',moon:'automatic','arrow.clockwise':'refresh','arrow.triangle.2.circlepath':'refresh','arrow.counterclockwise':'reset',plus:'add','square.and.arrow.up':'share','square.and.arrow.down':'import',calendar:'calendar',pencil:'notes',eye:'assist','eye.slash':'hide','arrow.uturn.backward':'undo'} as const satisfies Readonly<Record<string,LavaIconAction>>;
 export type ToolbarSymbol = keyof typeof toolbarSymbols;
@@ -264,12 +353,13 @@ export function useToolbar(options: NativeStackNavigationOptions, dependencies: 
   const review=useOptionalReview();
   const canInteract=()=>mayInteractWithPresentation(review?.app);
   const interactive=useSyncExternalStore(review?.app?.subscribe??(()=>()=>{}),canInteract);
+  const readEpoch=review?.app?.getReadEpoch?.();
   useLayoutEffect(() => {
     // UIKit owns these controls outside the retained React content view. Check
     // authority when a queued callback arrives, while keeping its visual state.
     const guardCallback=<Arguments extends unknown[]>(callback:((...args:Arguments)=>void)|undefined)=>
-      callback?(...args:Arguments)=>{if(owner.current.mounted&&canInteract())callback(...args);}:undefined;
-    const guardContent=(content:ReactNode)=><View pointerEvents={canInteract()?'auto':'none'} accessibilityElementsHidden={!canInteract()} importantForAccessibility={canInteract()?'auto':'no-hide-descendants'}>{content}</View>;
+      callback?(...args:Arguments)=>{if(owner.current.mounted&&canInteract()&&review?.app?.getReadEpoch?.()===readEpoch)callback(...args);}:undefined;
+    const guardContent=(content:ReactNode)=>{const current=canInteract()&&review?.app?.getReadEpoch?.()===readEpoch;return <View pointerEvents={current?'auto':'none'} accessibilityElementsHidden={!current} importantForAccessibility={current?'auto':'no-hide-descendants'} style={!current?{opacity:0}:undefined}>{content}</View>;};
     const guardMenu=(items:import('@react-navigation/native-stack').NativeStackHeaderItemMenu['menu']['items']):typeof items=>items.map(item=>
       item.type==='action'?{...item,onPress:guardCallback(item.onPress)!}:{...item,items:guardMenu(item.items)});
     const guardItems=(items:NativeStackHeaderItem[]):NativeStackHeaderItem[]=>items.map(item=>{
@@ -292,7 +382,7 @@ export function useToolbar(options: NativeStackNavigationOptions, dependencies: 
       ...(options.headerRight?{headerRight:(...args:Parameters<NonNullable<NativeStackNavigationOptions['headerRight']>>)=>owner.current.mounted?guardContent(options.headerRight!(...args)):null}:{}),
       ...(search?{headerSearchBarOptions:{...search,onChangeText:guardCallback(search.onChangeText),onCancelButtonPress:guardCallback(search.onCancelButtonPress),onSearchButtonPress:guardCallback(search.onSearchButtonPress),onFocus:guardCallback(search.onFocus),onBlur:guardCallback(search.onBlur),onOpen:guardCallback(search.onOpen),onClose:guardCallback(search.onClose)}}:{}),
       ...(options.title&&!verbatimTitle?{title:localized(options.title)}:{})});
-  }, [navigation, verbatimTitle, review?.app, interactive, ...dependencies]);
+  }, [navigation, verbatimTitle, review?.app, interactive, readEpoch, ...dependencies]);
 }
 const s = StyleSheet.create({
   pairPart:foundation.layout.horizontalPart,
@@ -304,8 +394,11 @@ const s = StyleSheet.create({
   listRow: {minHeight: foundation.row.standard, paddingHorizontal: foundation.row.horizontalInset, flexDirection: 'row', alignItems: 'center', gap: foundation.row.gap},
   listRowContent: {flex:1,minWidth:0,paddingVertical:foundation.row.verticalInset,flexDirection:'row',alignItems:'center',gap:foundation.row.gap},
   search: {minHeight: 48, paddingHorizontal: foundation.row.horizontalInset, gap: foundation.space.sm, flexDirection: 'row', alignItems: 'center', borderRadius: foundation.radius.control, backgroundColor: colors.cardBackground},
+  catalogControl: {minHeight:foundation.control.target,borderRadius:foundation.radius.circle,overflow:'hidden',backgroundColor:'transparent'},
   searchInput: {flex: 1, minHeight: 48, fontSize: 17, color: colors.primaryText},
   sheetContent: {width:'100%',maxWidth:foundation.layout.readingWidth,alignSelf:'center',paddingHorizontal: foundation.space.screenHorizontal, paddingTop: foundation.space.xl, paddingBottom: foundation.control.target, gap: foundation.space.xl},
+  sheetPinnedContent: {paddingBottom:foundation.control.target},
+  sheetPinnedBody: {width:'100%',maxWidth:foundation.layout.readingWidth,alignSelf:'center',paddingHorizontal:foundation.space.screenHorizontal,paddingTop:foundation.space.sm,gap:foundation.space.xl},
   sheetHeader: {paddingHorizontal: foundation.space.screenHorizontal, paddingTop: foundation.space.md, paddingBottom: foundation.row.verticalInset},
   sheetFooter: {width:'100%',maxWidth:foundation.layout.readingWidth,alignSelf:'center',paddingHorizontal: foundation.space.screenHorizontal, paddingTop: foundation.space.md, paddingBottom: foundation.space.md, backgroundColor: colors.groupedBackground},
 });

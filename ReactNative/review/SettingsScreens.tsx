@@ -1,8 +1,13 @@
+import {usePlusEntry} from './plus-entry';
+import {protectedActionNames,logNames,notificationNames} from './session';
+import {plusMessages,usePlusIntents,type PlusReason} from './plus-intents';
+import {mayInteractWithPresentation} from '../app/read-cache';
+import type {ReviewRoutes} from './navigation';
 import {Alert} from '../app/presentation';
 import {useAppAction,useExclusiveAppAction} from '../app/actions';
 import {useEffect, useRef, useState, useSyncExternalStore} from 'react';
 import {AccessibilityInfo, AppState, Linking, View} from 'react-native';
-import {useIsFocused} from '@react-navigation/native';
+import {StackActions,useRoute,type RouteProp,useIsFocused} from '@react-navigation/native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {LavaChoice} from '../src';
 import {colors} from '../src/colors.ios';
@@ -82,13 +87,18 @@ export function AccountScreen() {
   const disable=()=>{if(signedIn&&enablement?.canDisable&&!backup.isBusy())maintain('Turn off & delete backup','backup.disable');};
   return <Screen>
     <SettingsIntro summary="Use Lava without an account, or sign in to back up your settings securely."/>
-    <SettingsGroup title="Account">
-      <SettingsStatus icon="person.crop.circle" title={live?.account.status??'Not signed in'} description={live?.account.message||live?.account.detail||undefined}/>
-      <ListRow action title={live?.account.appleTitle??'Sign in with Apple'} disabled={signIn.busy} leading={<SettingsGlyph name="apple.logo" busy={live?.account.appleBusy}/>}
-        onPress={()=>signIn.run(live?.account.appleConnected?{type:'native.flow',flow:'account'}:{type:'account.apple'})}/>
-      <ListRow action title={live?.account.googleTitle??'Sign in with Google'} disabled={signIn.busy} leading={<SettingsGlyph name="google.signin" busy={live?.account.googleBusy}/>}
-        onPress={()=>signIn.run(live?.account.googleConnected?{type:'native.flow',flow:'account'}:{type:'account.google'})}/>
-    </SettingsGroup>
+    <Section title="Account">
+      <SettingsSurface tone={signedIn?'green':'neutral'}>
+        <SettingsStatus icon="person.crop.circle" title={live?.account.status??'Not signed in'} description={live?.account.message||live?.account.detail||undefined}
+          leading={signedIn?<Symbol name="checkmark.circle.fill" tone="white"/>:undefined}/>
+      </SettingsSurface>
+      <SettingsSurface>
+        <ListRow action title={live?.account.appleTitle??'Sign in with Apple'} disabled={signIn.busy} leading={<SettingsGlyph name="apple.logo" busy={live?.account.appleBusy}/>}
+          onPress={()=>signIn.run(live?.account.appleConnected?{type:'native.flow',flow:'account'}:{type:'account.apple'})}/>
+        <ListRow action title={live?.account.googleTitle??'Sign in with Google'} disabled={signIn.busy} leading={<SettingsGlyph name="google.signin" busy={live?.account.googleBusy}/>}
+          onPress={()=>signIn.run(live?.account.googleConnected?{type:'native.flow',flow:'account'}:{type:'account.google'})}/>
+      </SettingsSurface>
+    </Section>
     <Section title="Encrypted Backup">
       <SettingsSurface>
         {enabled===null
@@ -122,7 +132,7 @@ export function CustomizationScreen() {
   const {snapshot, error} = useSyncExternalStore(appearance.subscribe, appearance.getSnapshot);
   return <Screen>
     <SettingsIntro summary="Change Lava's look and feel. Protection stays the same."/>
-    <SettingsGuardPreview look={look} title={live?.guards?.find(g=>g.id===look)?.title??'Original'} subtitle={live?.guards?.find(g=>g.id===look)?.subtitle||undefined} onPress={()=>nav.navigate('Guardian')}/>
+    <SettingsGuardPreview look={look} title={live?.guards?.find(g=>g.id===look)?.title??localized('Original')} subtitle={live?.guards?.find(g=>g.id===look)?.subtitle||undefined} onPress={()=>nav.navigate('Guardian')}/>
     <Section title="Appearance">
       <Choice label="Appearance" options={['Light','Dark','System']} value={snapshot?.preference==='light'?'Light':snapshot?.preference==='dark'?'Dark':'System'} onChange={value=>app?run({type:'settings.set',key:'appearance',value:value.toLowerCase()}):appearance.setPreference(value.toLowerCase() as 'system'|'light'|'dark')}/>
       {error&&<SettingsInset><SettingsMessage warning>{error}</SettingsMessage></SettingsInset>}
@@ -133,7 +143,7 @@ export function CustomizationScreen() {
       {!session.matchTextSize&&<SettingsTextSlider value={session.textSize} disabled={false} onChange={value=>setSession({...session,textSize:value})}/>}
     </SettingsGroup>
     <SettingsGroup title="Notifications & haptics">
-      <Toggle title="App Haptics" value={session.haptics} onChange={value=>setSession({...session,haptics:value})}/>{Object.entries(session.notifications).map(([title,value])=><Toggle key={title} title={title} value={value} onChange={next=>setSession({...session,notifications:{...session.notifications,[title]:next}})}/>)}</SettingsGroup>
+      <Toggle title="App Haptics" value={session.haptics} onChange={value=>setSession({...session,haptics:value})}/>{notificationNames.map(title=><Toggle key={title} title={title} value={session.notifications[title]===true} onChange={next=>setSession({...session,notifications:{...session.notifications,[title]:next}})}/>)}</SettingsGroup>
     {(!live||live.liveActivityPause.available)&&<SettingsGroup title="Live Activities (beta)" footer="Shows Lava status on the Lock Screen and Dynamic Island when available.">
       <Toggle title="Use Live Activities" accessibilityHint="Shows Lava status on the Lock Screen and Dynamic Island when available." value={session.liveActivities} onChange={value=>setSession({...session,liveActivities:value})}/>
       {session.liveActivities&&<SettingsControl title={live?.liveActivityPause.label??localizedFormat('Pause length: %d min',5)}><LavaChoice presentation="stepper" testID="Live Activity pause length" label={live?.liveActivityPause.label??localizedFormat('Pause length: %d min',5)} options={(live?.liveActivityPause.minutes??Array.from({length:30},(_,i)=>i+1)).map(minutes=>({value:String(minutes),label:String(minutes)}))} value={String(live?.liveActivityPauseMinutes??5)} onValueChange={value=>run({type:'settings.set',key:'liveActivityPauseMinutes',value:Number(value)})}/></SettingsControl>}
@@ -143,6 +153,7 @@ export function CustomizationScreen() {
 }
 
 export function GuardianScreen() {
+  const upgrade=usePlusEntry();
   const nav = useReviewNavigation(); const {session,setSession,app,live,look,setLook} = useReview();
   const selectionPending=useRef(false);const iconPending=useRef(false);const [changingIcon,setChangingIcon]=useState(false);
   const select=(id:string)=>{
@@ -153,17 +164,17 @@ export function GuardianScreen() {
     if(!app){setSession({...session,matchIcon:value});return;}if(iconPending.current)return;iconPending.current=true;setChangingIcon(true);
     return app.command({type:'settings.set',key:'matchIcon',value}).catch(error=>{if(error.message!=='Authentication cancelled.')Alert.alert('Lava',error.message);}).finally(()=>{iconPending.current=false;setChangingIcon(false);});
   };
-  const variants=live?.guards??[{id:'original',title:'Original',description:'A Lava a day keeps bad domains away.',tip:'Keep Lava protecting you to unlock more Guards, or upgrade to unlock them all.'}];
+  const variants=live?.guards??[{id:'original',title:localized('Original'),description:localized('A Lava a day keeps bad domains away.'),tip:localized('Keep Lava protecting you to unlock more Guards, or upgrade to unlock them all.')}];
   return <Sheet>
     <SettingsGuardSpotlight look={look} variants={variants}/>
     <SettingsGroup title="Choose your Guard" testID="guardian.options">{live?live.guards.map(guard=><SettingsGuardRow
       key={guard.id} testID={`guardian.option.${guard.id}`} look={guard.id} title={guard.title} subtitle={guard.subtitle||undefined}
-      selected={look===guard.id} locked={!guard.selectable} onPress={()=>select(guard.id)}/>):[0,3,7,14,30,60,90,120].map(days=><SettingsGuardRow
+      selected={look===guard.id} locked={!guard.selectable} onPress={()=>guard.selectable?select(guard.id):upgrade('guards')}/>):[0,3,7,14,30,60,90,120].map(days=><SettingsGuardRow
       key={days} look="original" title={days?localizedFormat('Use Lava %d days',days):localized('Original')} subtitle={days?localizedFormat('Currently at: %d days',0):undefined}
-      selected={days===0} locked={days>0} onPress={()=>{}}/>)}</SettingsGroup>
+      selected={days===0} locked={days>0} onPress={()=>{if(days)upgrade('guards');}}/>)}</SettingsGroup>
     <SettingsSurface><Toggle title="Match App Icon to Lava Guard" value={session.matchIcon} disabled={changingIcon} onChange={matchIcon}/></SettingsSurface>
     {!live?.plus?.enabled&&<>
-      <QuietFooter note="Keep Lava protecting you to unlock more Guards, or upgrade to unlock them all." title="Upgrade" onPress={()=>nav.navigate('Upgrade')}/>
+      <QuietFooter note="Keep Lava protecting you to unlock more Guards, or upgrade to unlock them all." title="Upgrade" onPress={()=>upgrade('guards')}/>
       <QuietFooter note="Lava Guard progress requires local logs." title="Review Privacy & Data" onPress={()=>nav.navigate('Privacy')}/>
     </>}
   </Sheet>;
@@ -213,7 +224,7 @@ export function PrivacyScreen() {
   };
   return <Screen>
     <SettingsIntro summary="Domain history and network activity stay on this device for 7 days. Counts and Guard progress last longer."/>
-    <SettingsGroup title="Local Logs">{Object.entries(session.logs).map(([title,value])=><Toggle key={title} title={title} value={value} optimistic={false} onChange={next=>setLog(title,next)}/>)}</SettingsGroup>
+    <SettingsGroup title="Local Logs">{logNames.map(title=><Toggle key={title} title={title} value={session.logs[title]===true} optimistic={false} onChange={next=>setLog(title,next)}/>)}</SettingsGroup>
     <SettingsSurface footer="Anyone with this ZIP can read its diagnostics and settings.">
       <ListRow action icon="square.and.arrow.up" title="Export local logs" accessibilityHint="Anyone with this ZIP can read its diagnostics and settings." disabled={exportBusy} onPress={exportLogs}/>
     </SettingsSurface>
@@ -238,12 +249,12 @@ export function SecurityScreen() {
   return <Screen>
     <SettingsIntro summary="Choose which parts of Lava need a passcode or Face ID."/>
     <SettingsGroup title="Authentication method">
-      <Toggle title="Passcode" disabled={live?.security.unavailable} value={session.passcode} onChange={()=>app?run({type:'native.flow',flow:'passcode'}):nav.navigate('Passcode')}/>
-      {(!live||live.security.showBiometrics)&&<Toggle title={live?.security.biometricTitle??'Face ID'} value={session.biometrics} disabled={live?!live.security.canEnableBiometrics:!session.passcode} onChange={value=>setSession({...session,biometrics:value})}/>}
+      <Toggle title="Passcode" optimistic={false} disabled={live?.security.unavailable} value={session.passcode} onChange={()=>app?run({type:'native.flow',flow:'passcode'}):nav.navigate('Passcode')}/>
+      {(!live||live.security.showBiometrics)&&<Toggle title={live?.security.biometricTitle??'Face ID'} optimistic={false} value={session.biometrics} disabled={live?live.security.unavailable||!session.biometrics&&!live.security.canEnableBiometrics:!session.passcode} onChange={value=>setSession({...session,biometrics:value})}/>}
       {!!live?.security.status&&<SettingsInset><SettingsMessage>{live.security.status}</SettingsMessage></SettingsInset>}
     </SettingsGroup>
     <SettingsGroup title="Use authentication for" footer="Choose which actions ask for authentication. All choices start off.">
-      {Object.entries(session.protectedActions).map(([title,value])=><Toggle key={title} title={title} value={hasMethod&&value} disabled={!hasMethod||updating||live?.security.updatingSurface} onChange={next=>setProtection(title,next)}/>)}
+      {protectedActionNames.map(title=><Toggle key={title} title={title} value={hasMethod&&session.protectedActions[title]} disabled={!hasMethod} pending={updating||live?.security.updatingSurface} onChange={next=>setProtection(title,next)}/>)}
     </SettingsGroup>
   </Screen>;
 }
@@ -257,10 +268,31 @@ export function PasscodeScreen() {
 }
 
 export function UpgradeScreen() {
+  const route=useRoute<RouteProp<ReviewRoutes,'Upgrade'>>();const nav=useReviewNavigation();
+  const {app,live}=useReview();const focused=useIsFocused();const intents=usePlusIntents();
+  const resumed=useRef(false);const current=useRef(focused);current.current=focused;
+  useEffect(()=>{if(!focused||route.params?.embedded||!route.params?.reason||!live?.plus.enabled||resumed.current||!mayInteractWithPresentation(app))return;
+    resumed.current=true;const resume=route.params.intent?intents.take(route.params.intent):undefined;
+    void Promise.resolve().then(()=>resume?.()).then(destination=>{
+      if(!current.current||!mayInteractWithPresentation(app)){
+        if(destination?.name==='CustomEntry')void app?.command({type:'customEntry.dismiss',id:destination.params.id}).catch(()=>{});
+        if(destination?.name==='Review')void app?.command({type:'domains.cancel',token:destination.params.standaloneReview}).catch(()=>{});
+        return;
+      }
+      if(destination)nav.dispatch(StackActions.replace(destination.name,destination.params));else nav.goBack();
+    }).catch(error=>{if(current.current&&mayInteractWithPresentation(app)&&error.message!=='Authentication cancelled.')Alert.alert('Lava',error.message);});
+  },[focused,live?.plus.enabled,app,intents,route.params]);
+  useEffect(()=>()=>{current.current=false;},[]);
+  useEffect(()=>()=>{if(route.params?.intent)intents.remove(route.params.intent);},[intents,route.params?.intent]);
+  return <LavaPlusPage reason={route.params?.reason}/>;
+}
+
+export function LavaPlusPage({reason}:{reason?:PlusReason}) {
   const {app,live,look}=useReview();const {run,busy}=useExclusiveAppAction('purchase',!!live?.plus.busy);
   const focused=useIsFocused();
   useEffect(()=>{if(!app||!focused)return;void app.command({type:'purchase.refresh'}).catch(error=>Alert.alert('Lava',error.message));return()=>{void app.command({type:'purchase.clearMessage'}).catch(()=>{});};},[app,focused]);
   return <Screen>
+    {reason&&<SettingsSurface tone="green"><ListRow title={plusMessages[reason]} testID="plus.context"/></SettingsSurface>}
     <LavaPlusStory/>
     {live?.plus.enabled ? <><SettingsSubscriptionStatus look={live.look} expiration={live.plus.expiration}/><SettingsSurface><ListRow action title="Manage Subscription" icon="creditcard.circle" disabled={busy} onPress={()=>run({type:'purchase.manage'})}/><ListRow action title="Restore Purchase" icon="arrow.clockwise.circle" disabled={busy} onPress={()=>run({type:'purchase.restore'})}/></SettingsSurface></> : live?.plus.checking ? <SettingsLoading title="Checking Lava Security Plus"/> : <SettingsStack><SettingsStack><Copy role="heading">Choose a plan</Copy><Copy color={colors.secondaryText}>... and a pitch for your parent</Copy></SettingsStack>
       {(!app&&([['Yearly','"Paying by the year beats paying by the month."','$29.99'],['Monthly','"We already saved this by unplugging appliances."','$3.99']] as const).map(([title,pitch,price]) => <SettingsSurface key={title}><ListRow action title={title} subtitle={pitch} trailing={<Copy weight="600" color={colors.safeGreen}>{price}</Copy>} onPress={previewNotice} /></SettingsSurface>))}

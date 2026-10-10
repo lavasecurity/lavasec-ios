@@ -64,7 +64,362 @@ final class RNInstalledQAGuardUITests: XCTestCase {
 }
 
 @MainActor
+final class RNMotionPreferenceUITests: XCTestCase {
+    func testEnableReducedMotionWithoutCrossFade() throws { try configure(reduced: true, crossFade: false) }
+    func testEnableCrossFade() throws { try configure(reduced: true, crossFade: true) }
+    func testResetMotionPreferences() throws { try configure(reduced: false, crossFade: false) }
+
+    private func configure(reduced: Bool, crossFade: Bool) throws {
+        #if !targetEnvironment(simulator)
+        throw XCTSkip("Motion preference qualification requires the task-private simulator.")
+        #else
+        continueAfterFailure = false
+        let settings = XCUIApplication(bundleIdentifier: "com.apple.Preferences")
+        settings.launchArguments = ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        settings.launch()
+        func open(_ title: String) {
+            let row = settings.staticTexts[title].firstMatch
+            for _ in 0..<12 where !row.isHittable { settings.swipeUp() }
+            XCTAssertTrue(row.isHittable, settings.debugDescription)
+            row.tap()
+        }
+        open("Accessibility")
+        open("Motion")
+        func toggle(_ title: String, to enabled: Bool) {
+            let row = settings.switches[title].firstMatch
+            XCTAssertTrue(row.waitForExistence(timeout: 10), settings.debugDescription)
+            if row.value as? String != (enabled ? "1" : "0") {
+                let control = row.switches.firstMatch
+                (control.exists ? control : row).tap()
+            }
+            let accepted = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                row.value as? String == (enabled ? "1" : "0")
+            }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [accepted], timeout: 10), .completed)
+        }
+        // Cross-fade is exposed while Reduce Motion is on. Use the actual
+        // Settings UI and verify UIKit; no guessed preference keys or mocks.
+        toggle("Reduce Motion", to: true)
+        toggle("Prefer Cross-Fade Transitions", to: crossFade)
+        if !reduced { toggle("Reduce Motion", to: false) }
+        let preference = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            UIAccessibility.isReduceMotionEnabled == reduced && UIAccessibility.prefersCrossFadeTransitions == crossFade
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [preference], timeout: 10), .completed)
+        let receipt = XCTAttachment(string: "reduceMotion=\(UIAccessibility.isReduceMotionEnabled) crossFade=\(UIAccessibility.prefersCrossFadeTransitions)")
+        receipt.name = "Verified UIKit motion preferences"
+        receipt.lifetime = .keepAlways
+        add(receipt)
+        settings.terminate()
+        #endif
+    }
+}
+
+/// Separate opt-in lane: the host enrolls simulated Face ID and supplies exactly
+/// one match per printed phase. Never auto-approve repeatedly: a second request
+/// must leave this test waiting and fail. This exercises real LAContext callbacks.
+@MainActor
+final class RNSecurityBiometricUITests: XCTestCase {
+    func testOneFaceIDPerEntryResumeAndColdLaunch() throws {
+        #if !targetEnvironment(simulator)
+        throw XCTSkip("Requires the task-private simulator and biometric driver.")
+        #else
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["LAVA_UI_TEST_BIOMETRIC_DRIVER"] == "1",
+                          "Requires the host driver that approves each phase exactly once.")
+        continueAfterFailure = false
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        app.launchArguments = ["-hasSeenLavaOnboarding", "YES", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launchEnvironment["LAVA_UI_TEST_TRACE_PRESENTATION"] = "1"
+        app.launchEnvironment["LAVA_UI_TEST_RESET_SECURITY"] = "1"
+        app.launchEnvironment["LAVA_UI_TEST_PLAN"] = "free"
+        app.launch()
+        XCTAssertTrue(app.otherElements["lava.full-app"].waitForExistence(timeout: 30))
+        app.tabBars.buttons["Settings"].tap()
+        app.buttons["row.Security"].tap()
+        let passcode = app.switches["Passcode"]
+        XCTAssertTrue(passcode.waitForExistence(timeout: 10))
+        passcode.tap()
+        XCTAssertTrue(app.staticTexts["Set passcode"].waitForExistence(timeout: 10))
+        app.typeText("1234")
+        XCTAssertTrue(app.staticTexts["Confirm passcode"].waitForExistence(timeout: 10))
+        app.typeText("1234")
+        let biometric = app.switches["Face ID"]
+        XCTAssertTrue(biometric.waitForExistence(timeout: 10))
+        biometric.tap()
+        NSLog("LAVA_FACEID_PHASE=enable")
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            biometric.exists && biometric.value as? String == "1"
+        }, object: nil)], timeout: 15), .completed)
+        let unlock = app.switches["Open Lava"]
+        func assertSettingsOrder() {
+            let expected = ["Open Lava", "Turn protection on or off", "Pause protection", "Edit filters", "View Activity", "Change settings"]
+            let labels = app.switches.allElementsBoundByIndex.map(\.label).filter { expected.contains($0) }
+            XCTAssertEqual(labels, expected, "Snapshot updates must never reorder security controls")
+        }
+        assertSettingsOrder()
+        unlock.tap()
+        XCTAssertEqual(unlock.value as? String, "1")
+        assertSettingsOrder()
+        app.switches["Change settings"].tap()
+        assertSettingsOrder()
+        app.switches["View Activity"].tap()
+        assertSettingsOrder()
+
+        func assertRevealed(_ element: XCUIElement, phase: String) {
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                element.exists && element.isHittable && !app.otherElements["securityLockOverlay"].exists
+                    && !app.otherElements["lavaPrivacyShield"].exists
+            }, object: nil)], timeout: 15), .completed, app.debugDescription)
+            XCTAssertFalse(app.staticTexts["Enter passcode"].waitForExistence(timeout: 1), "No fallback or second prompt")
+            XCTAssertTrue(element.isHittable, "The revealed screen must remain usable")
+            let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            capture.name = "One Face ID reveals \(phase)"
+            capture.lifetime = .keepAlways
+            add(capture)
+        }
+        let back = app.navigationBars.buttons["BackButton"].firstMatch
+        (back.exists ? back : app.navigationBars.buttons["Back"].firstMatch).tap()
+        app.tabBars.buttons["Guard"].tap()
+        app.buttons["guard.today"].tap()
+        NSLog("LAVA_FACEID_PHASE=activity")
+        assertRevealed(app.buttons["row.Top domains"], phase: "Activity entry")
+        let activityBack = app.navigationBars.buttons["BackButton"].firstMatch
+        (activityBack.exists ? activityBack : app.navigationBars.buttons["Back"].firstMatch).tap()
+        app.tabBars.buttons["Settings"].tap()
+        NSLog("LAVA_FACEID_PHASE=settings")
+        assertRevealed(app.buttons["row.Security"], phase: "Settings entry")
+        app.buttons["row.Security"].tap()
+        NSLog("LAVA_FACEID_PHASE=entry")
+        assertRevealed(passcode, phase: "Security entry")
+        assertSettingsOrder()
+        for cycle in 1...3 {
+            XCUIDevice.shared.press(.home)
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                app.state == .runningBackground || app.state == .runningBackgroundSuspended
+            }, object: nil)], timeout: 10), .completed)
+            app.activate()
+            NSLog("LAVA_FACEID_PHASE=resume-%d", cycle)
+            assertRevealed(passcode, phase: "Security resume \(cycle)")
+            assertSettingsOrder()
+        }
+        app.launchEnvironment["LAVA_UI_TEST_RESET_SECURITY"] = "0"
+        app.terminate()
+        app.launch()
+        NSLog("LAVA_FACEID_PHASE=cold")
+        assertRevealed(app.buttons["guard.today"], phase: "cold Guard launch")
+        app.terminate()
+        app.launchArguments = ["-hasSeenLavaOnboarding", "YES", "-AppleLanguages", "(zh-Hant)", "-AppleLocale", "zh_TW"]
+        app.launch()
+        NSLog("LAVA_FACEID_PHASE=cold-zh")
+        assertRevealed(app.buttons["guard.today"], phase: "Traditional Chinese cold Guard launch")
+        #endif
+    }
+}
+
+@MainActor
 final class RNFullAppUITests: XCTestCase {
+    private var restoreSystemTextSizeAfterCase = false
+
+    override func tearDown() async throws {
+        if restoreSystemTextSizeAfterCase {
+            restoreSystemTextSizeAfterCase = false
+            let app = XCUIApplication()
+            app.activate()
+            if !app.navigationBars["Customization"].exists {
+                nativeTab(app, "Settings").tap()
+                if !app.navigationBars["Customization"].exists {
+                    let entry = app.buttons["row.Customization"]
+                    XCTAssertTrue(entry.waitForExistence(timeout: 10), app.debugDescription)
+                    scrollFullyIntoView(app, entry)
+                    entry.tap()
+                }
+            }
+            XCTAssertTrue(app.navigationBars["Customization"].waitForExistence(timeout: 10), app.debugDescription)
+            let system = app.switches["Match system"]
+            XCTAssertTrue(system.waitForExistence(timeout: 10), app.debugDescription)
+            scrollFullyIntoView(app, system)
+            if system.value as? String == "0" { system.tap() }
+            let restored = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                system.value as? String == "1"
+            }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [restored], timeout: 10), .completed,
+                           "Text-size qualification must restore the real system preference even after a failed assertion.")
+        }
+        try await super.tearDown()
+    }
+
+    func testNormalMotionPreferenceForFullTour() {
+        XCTAssertFalse(UIAccessibility.isReduceMotionEnabled, "The default tour must qualify ordinary motion.")
+        XCTAssertFalse(UIAccessibility.prefersCrossFadeTransitions, "Explicit cross-fade has a separate mandatory pass.")
+    }
+    func testImportSheetUsesNativeScrollHeaderAcrossMethodChanges() throws {
+        #if !targetEnvironment(simulator)
+        throw XCTSkip("Sheet navigation is checked on an isolated simulator.")
+        #else
+        defer { XCUIDevice.shared.orientation = .portrait }
+        // iOS 18's compact landscape content can fit at the default text size.
+        // Larger text makes the native scroll edge observable on that runtime.
+        let category: String?
+        if #available(iOS 26.0, *) { category = nil }
+        else { category = "UICTContentSizeCategoryAccessibilityXXXL" }
+        let app = launch(contentSizeCategory: category)
+        let entry = app.buttons["guard.filter"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 10))
+        scrollFullyIntoView(app, entry)
+        waitForSettledFrame(entry)
+        entry.tap()
+        let importButton = app.navigationBars["Filters"].buttons["Import"]
+        XCTAssertTrue(importButton.waitForExistence(timeout: 10))
+        importButton.tap()
+        let header = fullSheetHeader(app, title: "Import a filter")
+        XCTAssertTrue(header.waitForExistence(timeout: 10))
+        let scroll = app.scrollViews.containing(.button, identifier: "Enter a code").firstMatch
+        XCTAssertTrue(scroll.waitForExistence(timeout: 10))
+        waitForSettledFrame(header)
+        XCTAssertLessThan(scroll.frame.minY, header.frame.maxY - 10,
+                          "The import scroll surface must extend under its native navigation bar.")
+        XCUIDevice.shared.orientation = .landscapeLeft
+        assertWindowOrientation(app, landscape: true)
+        let introduction = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Check who shared this filter")).firstMatch
+        XCTAssertTrue(introduction.waitForExistence(timeout: 10))
+        let initialY = introduction.frame.minY
+        scroll.swipeUp()
+        XCTAssertLessThan(introduction.frame.minY, initialY - 20)
+        XCTAssertTrue(header.buttons["Close"].isHittable)
+        capture(app, "Import sheet content beneath native translucent header")
+        if #unavailable(iOS 26.0) {
+            XCUIDevice.shared.orientation = .portrait
+            assertWindowOrientation(app, landscape: false)
+        }
+        let enterCode = app.buttons["Enter a code"]
+        waitForSettledFrame(enterCode)
+        XCTAssertTrue(enterCode.isHittable)
+        enterCode.tap()
+        let codeHeader = fullSheetHeader(app, title: "Enter a code")
+        XCTAssertTrue(codeHeader.waitForExistence(timeout: 10))
+        let input = app.textViews.firstMatch
+        XCTAssertTrue(input.waitForExistence(timeout: 10))
+        if #unavailable(iOS 26.0) {
+            let codeScroll = app.scrollViews.containing(.staticText, identifier: "Setup code").firstMatch
+            let continueButton = app.buttons["Continue"]
+            XCTAssertTrue(codeScroll.exists)
+            for _ in 0..<3 where input.frame.maxY > continueButton.frame.minY - 8 {
+                codeScroll.swipeUp()
+            }
+        }
+        input.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        let draft = "LF1-unsaved-header-check"
+        input.typeText(draft)
+        XCTAssertTrue((input.value as? String ?? "").contains(draft))
+        XCTAssertTrue(codeHeader.buttons["Back"].isHittable)
+        capture(app, "Translucent code entry header with keyboard and draft")
+        codeHeader.buttons["Back"].tap()
+        XCTAssertTrue(header.waitForExistence(timeout: 10))
+        let scan = app.buttons["Scan a QR code"]
+        waitForSettledFrame(scan)
+        XCTAssertTrue(scan.isHittable)
+        scan.tap()
+        let scannerHeader = fullSheetHeader(app, title: "Scan a QR code")
+        XCTAssertTrue(scannerHeader.waitForExistence(timeout: 10))
+        let permission = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.firstMatch
+        if permission.waitForExistence(timeout: 2) {
+            let deny = permission.buttons.matching(NSPredicate(format: "label IN %@", ["Don’t Allow", "Don't Allow"])).firstMatch
+            XCTAssertTrue(deny.exists)
+            deny.tap()
+        }
+        // SwiftUI exposes its scroll surface separately from the navigation bar.
+        let scannerBody = app.scrollViews.containing(NSPredicate(format: "label IN %@", [
+            "Hold the shared QR code inside the frame.", "Camera access is off",
+        ])).firstMatch
+        XCTAssertTrue(scannerBody.waitForExistence(timeout: 10))
+        XCTAssertLessThan(scannerBody.frame.minY, scannerHeader.frame.maxY - 10)
+        capture(app, "QR import native translucent header")
+        scannerHeader.buttons["Back"].tap()
+        XCTAssertTrue(header.waitForExistence(timeout: 10))
+        header.buttons["Close"].tap()
+        XCTAssertTrue(importButton.waitForExistence(timeout: 10))
+        #endif
+    }
+
+    func testPushedFilterHeadersUseNativeTitleAndScrollGeometry() throws {
+        #if !targetEnvironment(simulator)
+        throw XCTSkip("Navigation geometry is checked on an isolated simulator.")
+        #else
+        let app = launch(contentSizeCategory: "UICTContentSizeCategoryXXXL")
+        let filterEntry = app.buttons["guard.filter"]
+        XCTAssertTrue(filterEntry.waitForExistence(timeout: 10))
+        scrollFullyIntoView(app, filterEntry)
+        filterEntry.tap()
+        let filtersHeader = app.navigationBars["Filters"]
+        XCTAssertTrue(filtersHeader.waitForExistence(timeout: 10))
+        waitForSettledFrame(filtersHeader)
+        let largeTitleHeight = filtersHeader.frame.height
+        let libraryEntry = app.buttons["row.Switch or manage filters"]
+        scrollFullyIntoView(app, libraryEntry)
+        libraryEntry.tap()
+        let libraryHeader = app.navigationBars["Your filters"]
+        XCTAssertTrue(libraryHeader.waitForExistence(timeout: 10))
+        waitForSettledFrame(libraryHeader)
+        XCTAssertEqual(libraryHeader.frame.height, largeTitleHeight, accuracy: 2,
+                       "Your filters must open with the same native large-title scaffold as Filters.")
+        capture(app, "Your filters native large title")
+        libraryHeader.buttons["Edit"].tap()
+        let closeEditing = libraryHeader.buttons["Close edit mode"]
+        XCTAssertTrue(closeEditing.waitForExistence(timeout: 10))
+        waitForSettledFrame(libraryHeader)
+        XCTAssertEqual(libraryHeader.frame.height, largeTitleHeight, accuracy: 2,
+                       "Entering library edit mode must retain its title mode.")
+        closeEditing.tap()
+        nativeBack(app).tap()
+        let activeFilter = app.buttons["row.Now filtering"]
+        scrollFullyIntoView(app, activeFilter)
+        activeFilter.tap()
+        let detailHeader = app.navigationBars.firstMatch
+        XCTAssertTrue(detailHeader.buttons["Edit"].waitForExistence(timeout: 10))
+        waitForSettledFrame(detailHeader)
+        let compactHeight = detailHeader.frame.height
+        XCTAssertLessThan(compactHeight, largeTitleHeight - 10)
+        let detailScroll = app.scrollViews.firstMatch
+        XCTAssertTrue(detailScroll.waitForExistence(timeout: 10))
+        XCTAssertLessThan(detailScroll.frame.minY, detailHeader.frame.maxY - 10,
+                          "Compact filter content must extend beneath the native bar.")
+        detailHeader.buttons["Edit"].tap()
+        XCTAssertTrue(detailHeader.buttons["Cancel editing"].waitForExistence(timeout: 10))
+        waitForSettledFrame(detailHeader)
+        XCTAssertEqual(detailHeader.frame.height, compactHeight, accuracy: 2)
+        app.swipeUp()
+        capture(app, "Filter edit content beneath native compact header")
+        detailHeader.buttons["Cancel editing"].tap()
+        nativeBack(app).tap()
+        let automation = app.buttons["row.Auto-switch filters"]
+        scrollFullyIntoView(app, automation)
+        automation.tap()
+        let automationHeader = app.navigationBars["Auto-switch filters"]
+        XCTAssertTrue(automationHeader.waitForExistence(timeout: 10))
+        waitForSettledFrame(automationHeader)
+        XCTAssertEqual(automationHeader.frame.height, compactHeight, accuracy: 2)
+        let automationPage = app.otherElements["auto-switch-page"]
+        XCTAssertTrue(automationPage.waitForExistence(timeout: 10))
+        let automationScrolls = app.scrollViews.containing(.other, identifier: "auto-switch-page")
+        let automationScroll = automationScrolls.firstMatch
+        XCTAssertTrue(automationScroll.waitForExistence(timeout: 10))
+        XCTAssertEqual(automationScrolls.count, 1)
+        waitForSettledFrame(automationScroll)
+        XCTAssertLessThan(automationScroll.frame.minY, automationHeader.frame.maxY - 10,
+                          "Shared automation scroll content must also extend beneath the parent bar.")
+        // Fabric can flatten the intro's accessibility leaf out of its layout
+        // container. Measure the unique rendered leaf on the actual page.
+        let introduction = try renderedStaticText(app, "Switch filters on a schedule or with a Focus.")
+        let introductionY = introduction.frame.minY
+        automationScroll.swipeUp()
+        XCTAssertLessThan(introduction.frame.minY, introductionY - 20,
+                          "The hosted content must actually scroll behind the native header.")
+        capture(app, "Auto-switch content beneath native compact header")
+        #endif
+    }
+
     func testNavigationScaffoldMatchesPageBackground() throws {
         #if !targetEnvironment(simulator)
         throw XCTSkip("Navigation geometry is checked on an isolated simulator.")
@@ -275,19 +630,23 @@ final class RNFullAppUITests: XCTestCase {
         mock.tap()
         let primary = app.buttons["onboarding.primary"]
         XCTAssertTrue(primary.waitForExistence(timeout: 10))
+        // The full-window modal's first native safe-area measurement can arrive
+        // after its accessibility element appears. Compare settled page frames.
+        waitForSettledFrame(primary)
         let welcomeButtonFrame = primary.frame
         capture(app, "Onboarding welcome")
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND enabled == true"), object: primary)], timeout: 10), .completed)
         primary.tap()
         XCTAssertTrue(app.staticTexts["Lava stands guard here"].waitForExistence(timeout: 10))
+        waitForSettledFrame(primary)
         capture(app, "Benefits with Settings outline glyphs")
-        let featureTitleTop = app.staticTexts["Lava stands guard here"].frame.minY
+        let featureTitleTop = try renderedStaticText(app, "Lava stands guard here").frame.minY
         XCTAssertEqual(primary.frame, welcomeButtonFrame, "The inward welcome border must preserve the filled button's geometry.")
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND enabled == true"), object: primary)], timeout: 10), .completed)
         primary.tap()
         let vpn = app.descendants(matching: .any).matching(identifier: "onboarding.install-vpn").firstMatch
         XCTAssertTrue(vpn.waitForExistence(timeout: 10))
-        XCTAssertEqual(app.staticTexts["First, let’s get Lava ready to help."].frame.minY,
+        XCTAssertEqual(try renderedStaticText(app, "First, let’s get Lava ready to help.").frame.minY,
                        featureTitleTop, accuracy: 1, "Page 2 and page 3 headings share the same top position.")
         XCTAssertFalse(primary.isEnabled)
         XCTAssertEqual(primary.label, "Install VPN first")
@@ -347,7 +706,8 @@ final class RNFullAppUITests: XCTestCase {
             predicate: NSPredicate { _, _ in finaleDots.count == 0 }, object: nil
         )], timeout: 5), .completed, "After the outgoing transition, hidden finale dots must leave accessibility.")
         XCTAssertEqual(app.otherElements["onboarding.ready"].value as? String, "Your next step to a safer internet.")
-        waitForSettledFrame(app.otherElements["onboarding.mascot"])
+        // Decorative art has no hit target; its measured drawing slot must settle.
+        waitForSettledFrame(app.otherElements["onboarding.mascot"], requiresHittable: false)
         let finalMascot = app.otherElements["onboarding.mascot"].frame
         print("LAVA_HANDOFF_FRAMES mock=\(finalMascot) canonical=\(canonicalMascot)")
         XCTAssertEqual(finalMascot.minX, canonicalMascot.minX, accuracy: 1)
@@ -372,7 +732,7 @@ final class RNFullAppUITests: XCTestCase {
         XCTAssertTrue(app.buttons["onboarding.notifications"].isEnabled)
         app.buttons["onboarding.notifications"].tap()
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "Notifications enabled"), object: app.descendants(matching: .any).matching(identifier: "onboarding.notifications").firstMatch)], timeout: 10), .completed)
-        XCTAssertEqual(app.otherElements["onboarding.mascot"].value as? String, "sleeping")
+        XCTAssertTrue(vpn.label.contains("Install local VPN"), "Notifications alone must leave VPN setup incomplete.")
         XCTAssertFalse(primary.isEnabled)
         app.buttons["Close"].tap()
         XCTAssertTrue(mock.waitForExistence(timeout: 10))
@@ -411,6 +771,16 @@ final class RNFullAppUITests: XCTestCase {
         narration.tap()
         XCTAssertEqual(narration.value as? String, "0")
         capture(app, "Explore native narration switch after repeated mock dismissal")
+        nativeTab(app, "Settings").tap()
+        XCTAssertTrue(app.navigationBars["Device QA"].waitForExistence(timeout: 10))
+        app.navigationBars.buttons["Back"].tap()
+        let feedback = app.buttons["row.Feedback"]
+        scrollFullyIntoView(app, feedback)
+        feedback.tap()
+        XCTAssertTrue(app.buttons["1. Topic"].waitForExistence(timeout: 10), "A dismissed preview must leave the main foreground factory usable.")
+        capture(app, "Shared feedback sheet remains usable after repeated mock dismissal")
+        app.navigationBars.buttons["Cancel"].tap()
+        XCTAssertTrue(app.buttons["1. Topic"].waitForNonExistence(timeout: 10))
         #endif
     }
 
@@ -427,10 +797,14 @@ final class RNFullAppUITests: XCTestCase {
         app.buttons["guard.explore"].tap()
         let dns = app.buttons["connection.dns"]
         XCTAssertTrue(dns.waitForExistence(timeout: 10))
+        waitForSettledFrame(dns)
         dns.tap()
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in dns.isSelected }, object: dns
+        )], timeout: 10), .completed, "The settled DNS step must be selected before revealing its setup links.")
         let patch = app.buttons["explore.dns-patch"]
-        scrollFullyIntoView(app, patch)
         XCTAssertTrue(patch.waitForExistence(timeout: 10))
+        scrollFullyIntoView(app, patch, throughGutter: true)
         patch.tap()
         XCTAssertTrue(app.navigationBars["DNS patch for iOS 27"].waitForExistence(timeout: 10))
         capture(app, "DNS patch shared scaffold introduction")
@@ -483,13 +857,13 @@ final class RNFullAppUITests: XCTestCase {
         #endif
     }
 
-    func testRound40GuardPickerPinsSpotlightAndIconRow() throws {
+    func testRound40GuardPickerScrollsSpotlightChoicesAndIconRowTogether() throws {
         #if !targetEnvironment(simulator)
         throw XCTSkip("Read-only local simulator layout qualification; never operate the phone.")
         #else
         let app = XCUIApplication()
         app.launchArguments = ["-hasSeenLavaOnboarding", "YES", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
-        // No reset, entitlement fixture, setting mutation or accessibility override.
+        // Preserve the existing installation and its selected Guard.
         app.launch()
         XCTAssertTrue(nativeTab(app, "Settings").waitForExistence(timeout: 30))
         nativeTab(app, "Settings").tap()
@@ -498,33 +872,44 @@ final class RNFullAppUITests: XCTestCase {
         customization.tap()
         let choose = app.buttons["Choose Lava Guard"]
         XCTAssertTrue(choose.waitForExistence(timeout: 10))
+        waitForSettledFrame(choose)
         choose.tap()
-        XCTAssertTrue(fullSheetHeader(app, title: "Lava Guard").waitForExistence(timeout: 10))
-        let spotlight = app.descendants(matching: .any).matching(identifier: "sheet.pinned-header").firstMatch
-        let match = app.switches.matching(NSPredicate(format: "label ==[c] %@", "Match app icon to Lava Guard")).firstMatch
-        let list = app.scrollViews.containing(.any, identifier: "guardian.options").firstMatch
+        let header = fullSheetHeader(app, title: "Lava Guard")
+        XCTAssertTrue(header.waitForExistence(timeout: 10))
+        let selected = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND selected == true", "guardian.option.")).firstMatch
+        XCTAssertTrue(selected.waitForExistence(timeout: 10))
+        let title = selected.label
+        let spotlight = app.staticTexts[title].firstMatch
         XCTAssertTrue(spotlight.waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertTrue(match.waitForExistence(timeout: 10), app.debugDescription)
+        let match = app.switches.matching(NSPredicate(format: "label ==[c] %@", "Match app icon to Lava Guard")).firstMatch
+        let lists = app.scrollViews.containing(.any, identifier: "guardian.options")
+        let list = lists.firstMatch
         XCTAssertTrue(list.waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertTrue(match.isHittable)
-        XCTAssertGreaterThan(list.frame.height, 88, "The list must retain a usable independent viewport.")
-        waitForSettledFrame(match)
-        let headerFrame = spotlight.frame, footerFrame = match.frame
+        XCTAssertEqual(lists.count, 1)
+        XCTAssertTrue(list.staticTexts[title].exists, "The active spotlight belongs to the choices' shared scroll owner.")
+        XCTAssertTrue(list.switches.matching(NSPredicate(format: "label ==[c] %@", "Match app icon to Lava Guard")).firstMatch.exists)
+        XCTAssertTrue(match.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertGreaterThan(list.frame.height, 88)
         let first = app.buttons["guardian.option.original"]
         XCTAssertTrue(first.exists)
-        let firstY = first.frame.minY
-        capture(app, "R40 Guard picker initial pinned header and footer")
-        list.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.85))
-            .press(forDuration: 0.05, thenDragTo: list.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.15)))
-        Thread.sleep(forTimeInterval: 0.35)
-        XCTAssertEqual(spotlight.frame.minY, headerFrame.minY, accuracy: 1)
-        XCTAssertEqual(spotlight.frame.height, headerFrame.height, accuracy: 1)
-        XCTAssertEqual(match.frame.minY, footerFrame.minY, accuracy: 1)
+        waitForSettledFrame(first, requiresHittable: false)
+        let headerFrame = header.frame, spotlightY = spotlight.frame.minY
+        let firstY = first.frame.minY, matchY = match.frame.minY
+        let beforeMatch = match.value as? String
+        capture(app, "Guard picker active spotlight and choices share one page")
+        scrollFullyIntoView(app, match, in: list, throughGutter: true)
+        waitForSettledFrame(match)
+        let movement = first.frame.minY - firstY
+        XCTAssertLessThan(movement, -10, "The choices must move when revealing the icon row.")
+        XCTAssertEqual(spotlight.frame.minY - spotlightY, movement, accuracy: 1.5)
+        XCTAssertEqual(match.frame.minY - matchY, movement, accuracy: 1.5)
+        XCTAssertEqual(header.frame.minY, headerFrame.minY, accuracy: 1)
+        XCTAssertEqual(header.frame.height, headerFrame.height, accuracy: 1)
         XCTAssertTrue(match.isHittable)
-        XCTAssertTrue(!first.isHittable || first.frame.minY < firstY - 10,
-                      "Dragging the choices must move list content while fixed regions stay put.")
-        capture(app, "R40 Guard picker scrolled list with stationary icon row")
-        fullSheetHeader(app, title: "Lava Guard").buttons["Close"].tap()
+        XCTAssertEqual(match.value as? String, beforeMatch, "Scrolling cannot toggle icon matching.")
+        XCTAssertTrue(selected.isSelected, "Scrolling cannot change the selected Guard.")
+        capture(app, "Guard picker scrolls spotlight choices and icon row beneath its native header")
+        header.buttons["Close"].tap()
         #endif
     }
 
@@ -697,7 +1082,41 @@ final class RNFullAppUITests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
     }
-    private func launch(delayedQueries: Bool = false, guardPicker: Bool = false, largeText: Bool = false, rageShake: Bool = false, paidPlan: Bool = false, retainShareCardEvidence: Bool = false) -> XCUIApplication {
+    func testContextMenuConsumesButtonContactBeforeRelease() throws {
+        let app = launch()
+        nativeTab(app, "Settings").tap()
+        let gallery = app.buttons["row.Design system"]
+        for _ in 0..<6 where !gallery.isHittable { app.swipeUp() }
+        XCTAssertTrue(gallery.isHittable, app.debugDescription)
+        gallery.tap()
+        let button = app.buttons["gallery.context-button"]
+        XCTAssertTrue(button.waitForExistence(timeout: 10))
+        func assertCounts(taps: Int, selections: Int) {
+            XCTAssertTrue(app.staticTexts["Context button taps: \(taps); menu selections: \(selections)"].waitForExistence(timeout: 5), app.debugDescription)
+        }
+        button.tap()
+        assertCounts(taps: 1, selections: 0)
+        for duration in [0.7, 1.5, 0.7] {
+            button.press(forDuration: duration)
+            let pause = app.buttons["Pause for 5 minutes"]
+            XCTAssertTrue(pause.waitForExistence(timeout: 5), app.debugDescription)
+            // Dismiss without selecting. The same contact must not fall through
+            // into the React button when UIKit releases its native menu.
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.8)).tap()
+            XCTAssertTrue(pause.waitForNonExistence(timeout: 5))
+            assertCounts(taps: 1, selections: 0)
+        }
+        button.press(forDuration: 0.7)
+        let pause = app.buttons["Pause for 5 minutes"]
+        XCTAssertTrue(pause.waitForExistence(timeout: 5))
+        pause.tap()
+        assertCounts(taps: 1, selections: 1)
+        button.tap()
+        assertCounts(taps: 2, selections: 1)
+        capture(app, "Context menu consumes holds and restores the next intentional tap")
+    }
+
+    private func launch(delayedQueries: Bool = false, guardPicker: Bool = false, largeText: Bool = false, rageShake: Bool = false, paidPlan: Bool = false, retainShareCardEvidence: Bool = false, contentSizeCategory: String? = nil) -> XCUIApplication {
         XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()
         // Skip onboarding only for this test process; retain real app controllers,
@@ -705,8 +1124,11 @@ final class RNFullAppUITests: XCTestCase {
         app.launchArguments = ["-hasSeenLavaOnboarding", "YES", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         if retainShareCardEvidence { app.launchArguments.append("-LavaUITestRetainShareCardPNG") }
         if paidPlan { app.launchArguments += ["-LavaQAForcePaidPlan", "YES"] }
-        if largeText { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
+        if let category = contentSizeCategory {
+            app.launchArguments += ["-UIPreferredContentSizeCategoryName", category]
+        } else if largeText { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
         app.launchEnvironment["LAVA_UI_TEST_RESET_SECURITY"] = "1"
+        app.launchEnvironment["LAVA_UI_TEST_PLAN"] = paidPlan ? "paid" : "free"
         if delayedQueries { app.launchEnvironment["LAVA_UI_TEST_DELAY_QUERIES"] = "1" }
         if guardPicker { app.launchEnvironment["LAVA_UI_TEST_GUARD_PICKER"] = "1" }
         if rageShake { app.launchArguments.append("-lava-trigger-rage-shake") }
@@ -739,6 +1161,14 @@ final class RNFullAppUITests: XCTestCase {
     }
     private func nativeTab(_ app: XCUIApplication, _ name: String) -> XCUIElement {
         precondition(name == "Guard" || name == "Settings")
+        // iOS minimizes the floating tab bar after scrolling. Its sole button
+        // expands the bar; it does not select/reselect a destination. Complete
+        // that native interaction before addressing either real tab.
+        let collapsed = app.tabBars.buttons.matching(NSPredicate(format: "value CONTAINS %@", "Collapsed")).firstMatch
+        if collapsed.exists && collapsed.isHittable {
+            collapsed.tap()
+            XCTAssertTrue(app.tabBars.buttons[name].waitForExistence(timeout: 10))
+        }
         let bottomTab = app.tabBars.buttons[name].firstMatch
         if bottomTab.exists { return bottomTab }
 
@@ -848,8 +1278,17 @@ final class RNFullAppUITests: XCTestCase {
         // Scope to the actual sheet title: authentication can cover a retained
         // sheet, so querying every header or every Close button is ambiguous.
         // Keep .element: multiple matching owners must fail, not be hidden.
-        return headers.containing(NSPredicate(format: "identifier == %@ AND label == %@",
-                                             "full-sheet.title", title)).element
+        let legacyHeader = headers.containing(NSPredicate(format: "identifier == %@ AND label == %@",
+                                                          "full-sheet.title", title)).element
+        // Native service preparation can complete after the initiating tap.
+        // Resolve the actual header only after one supported owner appears;
+        // an early UIKit miss must not permanently select the legacy query.
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            navigationBar.exists || legacyHeader.exists
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 15), .completed,
+                       "The presented \(title) sheet must expose its owned header.")
+        return navigationBar.exists ? navigationBar : legacyHeader
     }
     private enum SheetControlEdge { case leading, trailing }
     private func assertFullSheetHeaderGeometry(_ header: XCUIElement, button: XCUIElement, edge: SheetControlEdge) {
@@ -896,8 +1335,13 @@ final class RNFullAppUITests: XCTestCase {
                                "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"]
         app.launchEnvironment["LAVA_UI_TEST_REPLAY_ONBOARDING"] = "1"
         app.launch()
-        let title = app.staticTexts["インターネットは溶岩だらけ"]
-        XCTAssertTrue(title.waitForExistence(timeout: 30), app.debugDescription)
+        let titleQuery = app.staticTexts.matching(identifier: "インターネットは溶岩だらけ")
+        XCTAssertTrue(titleQuery.firstMatch.waitForExistence(timeout: 30), app.debugDescription)
+        // Fabric exposes a paragraph container and its ink as nested static
+        // text nodes. Measure the innermost title in either renderer.
+        let title = try XCTUnwrap(titleQuery.allElementsBoundByIndex.first {
+            $0.children(matching: .staticText).matching(identifier: "インターネットは溶岩だらけ").count == 0
+        })
         XCTAssertGreaterThan(title.frame.height, 60, "Japanese headline must wrap rather than truncate.")
         XCTAssertLessThanOrEqual(title.frame.maxX, app.frame.maxX)
         capture(app, "Japanese welcome with fully wrapped heading")
@@ -965,9 +1409,16 @@ final class RNFullAppUITests: XCTestCase {
         expectPage("The internet is lava")
         capture(app, "Onboarding animated Lava welcome")
         advance(to: "Lava stands guard here")
-        let feature = app.staticTexts["Lava blocks your device’s access to malicious domains"]
+        let featureLabel = "Lava blocks your device’s access to malicious domains"
+        let feature = app.staticTexts.matching(identifier: featureLabel).allElementsBoundByIndex.first {
+            $0.children(matching: .staticText).matching(identifier: featureLabel).count == 0
+        } ?? app.staticTexts[featureLabel].firstMatch
         XCTAssertTrue(feature.waitForExistence(timeout: 10), app.debugDescription)
         waitForSettledFrame(feature)
+        retainFrames(["onboarding.surface": app.otherElements["onboarding.surface"].frame,
+                      "onboarding.mascot": app.otherElements["onboarding.mascot"].frame,
+                      "onboarding.header": app.navigationBars.firstMatch.frame,
+                      "onboarding.feature": feature.frame], name: "Onboarding setup geometry")
         capture(app, "Onboarding lava reveals Guard and benefits")
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND enabled == true"), object: primary)], timeout: 10), .completed)
         primary.tap()
@@ -1032,9 +1483,9 @@ final class RNFullAppUITests: XCTestCase {
         expectPage("Lastly, let’s keep your connection running smoothly.")
         waitForValue(fallback, "Off")
         advance(to: "Ready")
-        waitForSettledFrame(app.otherElements["onboarding.mascot"])
+        waitForSettledFrame(app.otherElements["onboarding.mascot"], requiresHittable: false)
         let arrivedMascot = app.otherElements["onboarding.mascot"].frame
-        XCTAssertEqual(app.otherElements["onboarding.mascot"].value as? String, "awake")
+        XCTAssertEqual(app.otherElements["onboarding.ready"].value as? String, "Your next step to a safer internet.")
         // External navigation cannot replace the measured Guard under the ready
         // cutout. The same DNS link must work normally after completion below.
         XCUIDevice.shared.system.open(URL(string: "lavasecurity://settings/dns-resolver")!)
@@ -1161,7 +1612,19 @@ final class RNFullAppUITests: XCTestCase {
             let connectionFooter = settingsContent.buttons["Explore this connection"]
             scrollFullyIntoView(app, connectionFooter)
             connectionFooter.tap()
-            let exploreContent = app
+            let destinationPlayback = app.buttons["explore.play"]
+            XCTAssertTrue(destinationPlayback.waitForExistence(timeout: 10))
+            waitForSettledFrame(destinationPlayback)
+            // Native pushes briefly retain the source controller's AX tree.
+            // Query the unique destination viewport, not a shared row ID in
+            // every controller, and verify the source cannot receive input.
+            let exploreContent = scrollView(app, containingButton: "explore.play")
+            waitForSettledFrame(exploreContent, requiresHittable: false)
+            let sourceSettings = app.scrollViews.containing(.button, identifier: "row.Account & Backup")
+            if sourceSettings.count > 0 {
+                XCTAssertEqual(sourceSettings.count, 1)
+                XCTAssertFalse(sourceSettings.element.buttons["connection.filter"].isHittable)
+            }
             let playback = exploreContent.buttons["explore.play"]
             XCTAssertTrue(playback.waitForExistence(timeout: 10))
             XCTAssertTrue(exploreContent.staticTexts["Welcome"].exists)
@@ -1170,18 +1633,21 @@ final class RNFullAppUITests: XCTestCase {
             XCTAssertEqual(exploreFilter.label, "Filter")
             XCTAssertFalse(exploreFilter.isSelected)
             assertConnectionAxis(exploreContent, expectedVertical: false)
-            scrollFullyIntoView(app, playback)
+            scrollFullyIntoView(app, playback, in: exploreContent, throughGutter: true)
             capture(app, "\(device) \(appearance) Explore \(name)")
             // Playback lifecycle is exercised by the dedicated one-shot demo
             // journey. Here rotation must preserve learning and its real target.
             for _ in 0..<6 where !exploreFilter.isHittable { app.swipeDown() }
             XCTAssertTrue(exploreFilter.isHittable)
             exploreFilter.tap()
-            let configure = exploreContent.buttons["explore.configure"]
+            let configure = app.buttons["explore.configure"]
             XCTAssertTrue(configure.waitForExistence(timeout: 10))
-            XCTAssertTrue(exploreFilter.isSelected)
-            XCTAssertFalse(exploreContent.staticTexts["Welcome"].exists)
-            scrollFullyIntoView(app, configure)
+            // Play is removed by selection, so reacquire the same destination
+            // through its current unique control before querying its rows.
+            let selectedExplore = scrollView(app, containingButton: "explore.configure")
+            XCTAssertTrue(selectedExplore.buttons["connection.filter"].isSelected)
+            XCTAssertFalse(selectedExplore.staticTexts["Welcome"].exists)
+            scrollFullyIntoView(app, configure, in: selectedExplore, throughGutter: true)
             XCTAssertEqual(configure.label, "Open Filters")
             configure.tap()
             XCTAssertTrue(app.buttons["row.Now filtering"].waitForExistence(timeout: 10))
@@ -1198,17 +1664,24 @@ final class RNFullAppUITests: XCTestCase {
         plus.tap()
         XCTAssertTrue(app.navigationBars["Lava Plus"].waitForExistence(timeout: 10))
         capture(app, "\(device) \(appearance) Plus story")
+        let carousel = app.descendants(matching: .any).matching(identifier: "carousel.scroll").firstMatch
+        XCTAssertTrue(carousel.waitForExistence(timeout: 10))
+        scrollFullyIntoView(app, carousel, throughGutter: true)
+        carousel.swipeLeft()
         let connectionScene = app.descendants(matching: .any).matching(identifier: "plus.scene.connection").firstMatch
         XCTAssertTrue(connectionScene.waitForExistence(timeout: 10), app.debugDescription)
-        scrollFullyIntoView(app, connectionScene)
+        scrollFullyIntoView(app, connectionScene, throughGutter: true)
         let connectionHeading = app.staticTexts["Choose how you connect"].firstMatch
-        let connectionCaption = app.staticTexts["Bring your own blocklists and choose the DNS providers you trust."].firstMatch
+        let connectionCaption = app.staticTexts["Keep the DNS and VPN you trust. Make Lava fit the setup you’ve sweated over."].firstMatch
         XCTAssertTrue(connectionHeading.isHittable)
         XCTAssertTrue(connectionCaption.isHittable)
         XCTAssertTrue(connectionScene.frame.contains(connectionCaption.frame), "The captured scene must include its caption with the illustration.")
         capture(app, "\(device) \(appearance) Plus connection choices")
+        carousel.swipeLeft()
         let guardHeading = app.staticTexts["Find your Lava"].firstMatch
-        scrollFullyIntoView(app, app.descendants(matching: .any).matching(identifier: "plus.scene.guards").firstMatch)
+        let guardScene = app.descendants(matching: .any).matching(identifier: "plus.scene.guards").firstMatch
+        XCTAssertTrue(guardScene.waitForExistence(timeout: 10))
+        scrollFullyIntoView(app, guardScene, throughGutter: true)
         XCTAssertTrue(guardHeading.isHittable, "Each Plus benefit must remain reachable before the purchase options.")
         capture(app, "\(device) \(appearance) Plus Guard portraits")
         let restore = app.buttons["Restore purchase"]
@@ -1293,6 +1766,25 @@ final class RNFullAppUITests: XCTestCase {
     func testResponsiveColumnsSharePageScrollAndRootHeaderSpace() throws {
         let app = launch()
         defer { XCUIDevice.shared.orientation = .portrait }
+        func assertPhysicalHeader(_ title: String) -> CGRect {
+            let bar = app.navigationBars[title]
+            XCTAssertTrue(bar.waitForExistence(timeout: 10), app.debugDescription)
+            waitForSettledFrame(bar, requiresHittable: false)
+            var window = CGRect.null
+            for element in app.windows.allElementsBoundByIndex {
+                let frame = element.frame
+                if !frame.isEmpty && (window.isNull || frame.width * frame.height > window.width * window.height) {
+                    window = frame
+                }
+            }
+            XCTAssertFalse(window.isNull, "The native header must be measured against an actual app window.")
+            XCTAssertEqual(bar.frame.minX, window.minX, accuracy: 1.5,
+                           "The native header frame must reach the physical leading edge, outside content safe-area insets.")
+            XCTAssertEqual(bar.frame.maxX, window.maxX, accuracy: 1.5,
+                           "The native header frame must reach the physical trailing edge.")
+            return window
+        }
+        _ = assertPhysicalHeader("Guard")
         XCUIDevice.shared.orientation = .landscapeLeft
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             app.frame.width > app.frame.height
@@ -1302,10 +1794,15 @@ final class RNFullAppUITests: XCTestCase {
         let right = app.otherElements["story.column.secondary"].firstMatch
         XCTAssertTrue(left.waitForExistence(timeout: 10))
         waitForSettledFrame(left)
-        XCTAssertTrue(app.navigationBars["Settings"].exists)
+        let window = assertPhysicalHeader("Settings")
         XCTAssertLessThanOrEqual(left.frame.maxX, right.frame.minX)
         let content = app.scrollViews.containing(.button, identifier: "row.Account & Backup").element
         XCTAssertEqual(app.scrollViews.containing(.button, identifier: "row.Account & Backup").count, 1)
+        XCTAssertGreaterThanOrEqual(content.frame.minX, window.minX)
+        XCTAssertLessThanOrEqual(content.frame.maxX, window.maxX)
+        XCTAssertGreaterThan(left.frame.minX, content.frame.minX)
+        XCTAssertLessThan(right.frame.maxX, content.frame.maxX,
+                          "Both columns must fit inside the full-width scroll viewport, without horizontal content overflow.")
         let beforeLeft = left.frame, beforeRight = right.frame
         content.swipeUp()
         XCTAssertLessThan(left.frame.minY, beforeLeft.minY)
@@ -1313,11 +1810,11 @@ final class RNFullAppUITests: XCTestCase {
         capture(app, "Landscape Settings scrolls as one page below its native root header")
         for _ in 0..<4 where !app.buttons["row.Account & Backup"].isHittable { content.swipeDown() }
         app.buttons["row.Account & Backup"].tap()
-        XCTAssertTrue(app.navigationBars["Account & backup"].waitForExistence(timeout: 10))
+        _ = assertPhysicalHeader("Account & backup")
         capture(app, "Landscape subpages retain their native title")
         nativeBack(app).tap()
         nativeTab(app, "Guard").tap()
-        XCTAssertTrue(app.navigationBars["Guard"].exists)
+        _ = assertPhysicalHeader("Guard")
         let explore = app.buttons["guard.explore"]
         for _ in 0..<4 where !explore.isHittable { app.swipeUp() }
         explore.tap()
@@ -1326,7 +1823,8 @@ final class RNFullAppUITests: XCTestCase {
         capture(app, "Landscape Explore columns share a native page scroll")
         nativeBack(app).tap()
         XCUIDevice.shared.orientation = .portrait
-        XCTAssertTrue(app.navigationBars["Guard"].waitForExistence(timeout: 10))
+        assertWindowOrientation(app, landscape: false)
+        _ = assertPhysicalHeader("Guard")
     }
 
     func testExploreDemoAndLearningStaySeparate() throws {
@@ -1335,40 +1833,82 @@ final class RNFullAppUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Welcome"].waitForExistence(timeout: 10))
         let device = app.buttons["connection.phone"]
         XCTAssertTrue(device.waitForExistence(timeout: 5))
-        device.tap()
+        waitForSettledFrame(device)
+        device.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         XCTAssertTrue(device.isSelected)
-        XCTAssertTrue(app.staticTexts["This device"].exists)
+        let inspectedTitle = app.staticTexts["explore.part.title"]
+        XCTAssertTrue(inspectedTitle.waitForExistence(timeout: 5))
+        XCTAssertEqual(inspectedTitle.label, "Device")
+        XCTAssertEqual(app.staticTexts["explore.part.summary"].label, "This device starts the request.")
         capture(app, "Explore learning uses an outline selection")
         XCTAssertFalse(app.buttons["explore.play"].exists)
-        device.tap()
-        app.buttons["explore.play"].tap()
-        let firstCaption = app.staticTexts["explore.demo.caption.device"]
-        XCTAssertTrue(firstCaption.waitForExistence(timeout: 5))
-        XCTAssertFalse(app.buttons["connection.dns"].exists)
+        device.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        let play = app.buttons["explore.play"]
+        XCTAssertTrue(play.waitForExistence(timeout: 5))
+        play.tap()
+        XCTAssertTrue(app.staticTexts["explore.demo.caption.device"].waitForExistence(timeout: 5))
+        XCTAssertFalse(inspectedTitle.exists)
         XCTAssertFalse(app.buttons["explore.configure"].exists)
-        let playingDNS = app.descendants(matching: .any).matching(identifier: "connection.dns").firstMatch
-        playingDNS.tap()
-        XCTAssertFalse(app.buttons["explore.configure"].exists, "Taps cannot replace or interrupt the lesson.")
-        capture(app, "Explore demo keeps one caption and dims unrelated steps")
+        capture(app, "Explore playback has its own caption and transport")
+
+        // Main deliberately permits physical inspection to interrupt playback.
+        // It must retire that transport and expose only the selected explanation.
+        let dns = app.buttons["connection.dns"]
+        XCTAssertTrue(dns.waitForExistence(timeout: 5))
+        dns.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        XCTAssertTrue(dns.isSelected)
+        XCTAssertTrue(inspectedTitle.waitForExistence(timeout: 5))
+        XCTAssertEqual(inspectedTitle.label, "DNS")
+        XCTAssertTrue(app.buttons["explore.transport.play"].waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["explore.configure"].waitForExistence(timeout: 5))
+        capture(app, "Physical DNS inspection retires the playing lesson")
+        dns.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        XCTAssertTrue(play.waitForExistence(timeout: 5))
+        play.tap()
+        let pause = app.buttons["explore.transport.play"]
+        XCTAssertTrue(pause.waitForExistence(timeout: 5))
+        pause.tap()
+        XCTAssertEqual(pause.label, "Resume demo")
+        let counter = app.staticTexts.matching(NSPredicate(format: "label MATCHES %@", "[0-9]+/[0-9]+")).firstMatch
+        XCTAssertTrue(counter.waitForExistence(timeout: 5))
+        let total = try XCTUnwrap(Int(counter.label.split(separator: "/").last.map(String.init) ?? ""))
+        XCTAssertGreaterThan(total, 1)
+        XCTAssertEqual(counter.label, "1/\(total)")
+        let next = app.buttons["explore.next"]
         let blockedCaption = app.staticTexts["explore.demo.caption.blocked-stop"]
-        XCTAssertTrue(blockedCaption.waitForExistence(timeout: 35))
-        capture(app, "Explore explains the blocked lookup at the filter")
-        XCTAssertTrue(app.staticTexts["Explore the steps"].waitForExistence(timeout: 35))
+        var observedBlockedExplanation = false
+        for _ in 1..<total {
+            next.tap()
+            if blockedCaption.exists {
+                observedBlockedExplanation = true
+                capture(app, "Explore explains the blocked lookup at the filter")
+            }
+        }
+        XCTAssertTrue(observedBlockedExplanation, "The lesson must include the blocked request stopping before DNS.")
+        XCTAssertEqual(counter.label, "\(total)/\(total)")
         XCTAssertTrue(app.staticTexts["explore.demo.caption.ending"].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.buttons["connection.filter"].exists, "The final narrated scene still excludes learning taps.")
-        XCTAssertTrue(app.buttons["explore.play"].waitForExistence(timeout: 10))
+        XCTAssertFalse(inspectedTitle.exists)
+        next.tap()
+        XCTAssertTrue(app.staticTexts["Explore the steps"].waitForExistence(timeout: 5))
+        XCTAssertTrue(play.waitForExistence(timeout: 5))
+        XCTAssertEqual(play.label, "Play again")
         XCTAssertTrue(app.staticTexts["Tap a step to see what it does."].exists)
         capture(app, "Explore completion offers the next learning step")
-        app.buttons["connection.filter"].tap()
-        XCTAssertTrue(app.buttons["connection.filter"].isSelected)
+        let filter = app.buttons["connection.filter"]
+        scrollFullyIntoView(app, filter, throughGutter: true)
+        filter.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        XCTAssertTrue(filter.isSelected)
         XCTAssertTrue(app.buttons["explore.configure"].exists)
-        // Starting a new demo and leaving must cancel all later scenes and speech.
-        app.buttons["connection.filter"].tap()
-        app.buttons["explore.play"].tap()
+        filter.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        XCTAssertTrue(play.waitForExistence(timeout: 5))
+        play.tap()
         nativeBack(app).tap()
-        app.buttons["guard.explore"].tap()
+        let explore = app.buttons["guard.explore"]
+        waitForSettledFrame(explore)
+        explore.tap()
         XCTAssertTrue(app.staticTexts["Welcome"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.buttons["explore.play"].exists)
+        XCTAssertTrue(play.exists)
+        XCTAssertFalse(app.buttons["explore.transport.play"].exists)
     }
 
     func testExploreTransportScrubsAndPauses() throws {
@@ -1513,8 +2053,11 @@ final class RNFullAppUITests: XCTestCase {
         for name in ["row.Top domains", "row.Domain History"] {
             waitForSettledFrame(app.buttons[name])
             app.buttons[name].tap()
-            let search = app.textFields["Search domains"]
+            // Latest main owns search in UISearchController, above the shared
+            // body. Its captured UIKit hierarchy exposes a SearchField.
+            let search = app.searchFields["Search domains"]
             XCTAssertTrue(search.waitForExistence(timeout: 10))
+            XCTAssertEqual(search.placeholderValue, "Search domains")
             let tabs = app.tabBars.firstMatch
             XCTAssertTrue(tabs.waitForExistence(timeout: 5))
             waitForSettledFrame(tabs)
@@ -1531,8 +2074,17 @@ final class RNFullAppUITests: XCTestCase {
             }
             XCTAssertFalse(app.tabBars.buttons["Settings"].isHittable)
             capture(app, "Domain search keyboard covers stationary tabs")
-            nativeBack(app).tap()
+            // UISearchController owns dismissal while its presentation hides
+            // the title. Current UIKit uses a Close glyph; earlier versions
+            // expose Cancel. Require exactly one native dismissal action.
+            let cancel = app.buttons.matching(NSPredicate(format: "label IN %@", ["Cancel", "Close"]))
+            XCTAssertEqual(cancel.count, 1, app.debugDescription)
+            XCTAssertTrue(cancel.firstMatch.waitForExistence(timeout: 5))
+            cancel.firstMatch.tap()
             XCTAssertTrue(keyboard.waitForNonExistence(timeout: 5))
+            XCTAssertTrue(nativeBack(app).waitForExistence(timeout: 5))
+            waitForSettledFrame(nativeBack(app))
+            nativeBack(app).tap()
             XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 5))
             XCTAssertEqual(app.tabBars.firstMatch.frame.minY, before.minY, accuracy: 2)
         }
@@ -1695,7 +2247,7 @@ final class RNFullAppUITests: XCTestCase {
         app.buttons["Enter a code"].tap()
         XCTAssertTrue(app.textViews.firstMatch.waitForExistence(timeout: 10))
         capture(app, "Native import code navigation")
-        app.navigationBars.buttons["Back"].tap()
+        app.navigationBars["Enter a code"].buttons["Back"].tap()
         XCTAssertTrue(app.buttons["Enter a code"].waitForExistence(timeout: 10))
         capture(app, "Native import menu navigation")
     }
@@ -2371,6 +2923,10 @@ final class RNFullAppUITests: XCTestCase {
                         mismatch.name = "\(region.name) unexpected resume pixels \(resume)"
                         mismatch.lifetime = .keepAlways
                         add(mismatch)
+                        let fullFrame = XCTAttachment(screenshot: rendered)
+                        fullFrame.name = "\(region.name) complete unexpected resume frame \(resume)"
+                        fullFrame.lifetime = .keepAlways
+                        add(fullFrame)
                         let geometry = XCTAttachment(string: String(format: "%.3fs %@ frame=%@", elapsed, region.name, String(describing: region.frame)))
                         geometry.name = "\(region.name) pixel comparison geometry"
                         geometry.lifetime = .keepAlways
@@ -2417,8 +2973,19 @@ final class RNFullAppUITests: XCTestCase {
     }
 
     func testGuardMascotHoldLocksPageScrollingThroughDrift() throws {
-        _ = try round8ReadOnlySyntheticSplitMetadata()
-        let app = try launchRound8ReadOnlyCloseout()
+        #if !targetEnvironment(simulator)
+        throw XCTSkip("Guard contact qualification requires an isolated simulator.")
+        #else
+        let app: XCUIApplication
+        if ProcessInfo.processInfo.environment["LAVA_QA_ENTITLED_VPN_EDITOR"] == "1" {
+            _ = try round8ReadOnlySyntheticSplitMetadata()
+            app = try launchRound8ReadOnlyCloseout()
+        } else {
+            // Guard contact does not require a saved VPN credential. The normal
+            // private simulator exercises the same gesture with protection off.
+            app = launch()
+            assertRound8GuardIsOff(app)
+        }
         let mascot = app.descendants(matching: .any).matching(identifier: "guard.mascot").firstMatch
         XCTAssertTrue(mascot.waitForExistence(timeout: 10), app.debugDescription)
         // This RN destination owns a real UIKit bar. Resolve that lazy query
@@ -2458,6 +3025,7 @@ final class RNFullAppUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 10), app.debugDescription)
         capture(app, "Settings native landscape root title")
         XCUIDevice.shared.orientation = .portrait
+        #endif
     }
 
     func testGuardPickerRetainsVisibleChoicesAcrossSelectionAndIconConfirmation() throws {
@@ -2477,8 +3045,8 @@ final class RNFullAppUITests: XCTestCase {
         capture(app, "Guard choices begin without extra card padding")
         let aquamarine = app.buttons["guardian.option.aquamarine"]
         for _ in 0..<5 where !aquamarine.isHittable { app.swipeUp() }
-        // Put the spotlight above the viewport: its variable-length text must
-        // not move the visible option when changing the selection.
+        // Main fits the spotlight to the active Guard's prose. Its natural
+        // height may change, while the options retain their internal geometry.
         app.swipeUp()
         waitForSettledFrame(aquamarine)
         XCTAssertEqual(aquamarine.frame.maxY, options.frame.maxY, accuracy: 1.5,
@@ -2487,19 +3055,24 @@ final class RNFullAppUITests: XCTestCase {
         XCTAssertTrue(match.waitForExistence(timeout: 10))
         for withIcon in [false, true] {
             if withIcon {
-                match.tap()
+                scrollFullyIntoView(app, match, throughGutter: true)
+                waitForSettledFrame(match)
+                tapNativeSwitch(match)
                 let confirmation = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.firstMatch
                 XCTAssertTrue(confirmation.waitForExistence(timeout: 10), XCUIApplication(bundleIdentifier: "com.apple.springboard").debugDescription)
                 capture(app, "System icon confirmation after enabling icon matching")
                 confirmation.buttons["OK"].tap()
                 XCTAssertTrue(confirmation.waitForNonExistence(timeout: 5))
             }
-            let sequence = withIcon ? ["aquamarine", "kiwiCreme", "aquamarine"] : ["kiwiCreme", "aquamarine", "kiwiCreme"]
+            let sequence = withIcon ? ["aquamarine", "kiwiCreme", "aquamarine"]
+                : ["emberObsidian", "strawberryObsidian", "kiwiCreme", "aquamarine", "kiwiCreme"]
             for id in sequence {
                 let option = app.buttons["guardian.option.\(id)"]
+                scrollFullyIntoView(app, option, throughGutter: true)
                 XCTAssertTrue(option.isHittable, app.debugDescription)
                 waitForSettledFrame(option)
                 let position = option.frame
+                let optionsPosition = options.frame
                 let header = bar.frame
                 option.tap()
                 if withIcon {
@@ -2512,11 +3085,23 @@ final class RNFullAppUITests: XCTestCase {
                 let selected = NSPredicate(format: "selected == true")
                 expectation(for: selected, evaluatedWith: option)
                 waitForExpectations(timeout: 10)
+                scrollFullyIntoView(app, option, throughGutter: true)
                 waitForSettledFrame(option)
-                XCTAssertEqual(option.frame.minY, position.minY, accuracy: 1.5)
+                XCTAssertEqual(option.frame.minY - options.frame.minY,
+                               position.minY - optionsPosition.minY, accuracy: 1.5,
+                               "Changing spotlight prose cannot rearrange the choices within their group.")
+                XCTAssertEqual(option.frame.width, position.width, accuracy: 1.5)
+                XCTAssertEqual(option.frame.height, position.height, accuracy: 1.5)
+                XCTAssertEqual(options.frame.height, optionsPosition.height, accuracy: 1.5)
                 XCTAssertEqual(bar.frame.minY, header.minY, accuracy: 1.5)
                 XCTAssertEqual(bar.frame.height, header.height, accuracy: 1.5)
                 capture(app, "Guard picker returns from selection \(id) icon \(withIcon)")
+                if id == "emberObsidian" || id == "strawberryObsidian" {
+                    let spotlightTitle = app.staticTexts[option.label].firstMatch
+                    XCTAssertTrue(spotlightTitle.exists)
+                    scrollFullyIntoView(app, spotlightTitle, throughGutter: true)
+                    capture(app, "Native persisted Guard look \(id) in its foreground spotlight")
+                }
             }
         }
         for _ in 0..<6 where !original.isHittable { app.swipeDown() }
@@ -2531,16 +3116,22 @@ final class RNFullAppUITests: XCTestCase {
     /// SwiftUI exposes the shared row as a Switch containing the actual UISwitch.
     /// Tap that native accessory; the row's AX center is its explanatory label.
     private func tapNativeSwitch(_ row: XCUIElement) {
-        let control = row.switches.firstMatch
+        let accessory = row.switches.firstMatch
+        let control = accessory.exists ? accessory : row
         XCTAssertTrue(control.exists, row.debugDescription)
+        XCTAssertEqual(control.elementType, .switch, "Only the actual native switch may receive this tap.")
         control.tap()
     }
 
     private func openVPNSetup(_ app: XCUIApplication) {
-        let setup = app.switches["vpn.setup-toggle"]
+        let setup = app.descendants(matching: .any).matching(identifier: "vpn.setup-toggle").firstMatch.switches.firstMatch
         XCTAssertTrue(setup.waitForExistence(timeout: 10), app.debugDescription)
         if setup.value as? String == "0" { tapNativeSwitch(setup) }
-        XCTAssertTrue(app.buttons["vpn.configuration-row"].waitForExistence(timeout: 10), app.debugDescription)
+        let empty = app.staticTexts["No configurations"].firstMatch
+        let saved = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "vpn.configuration-row")).firstMatch
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            empty.exists || saved.exists
+        }, object: app)], timeout: 10), .completed, "Setup must reveal either the fresh empty store or its saved rows. Each journey qualifies its own fixture.")
     }
 
     func testSecurityOffWireGuardCommentDraftRetainsAcrossBackground() throws {
@@ -2595,6 +3186,51 @@ final class RNFullAppUITests: XCTestCase {
         }
         let emptySave = try XCTUnwrap(nativeEditorSave())
         XCTAssertFalse(emptySave.isEnabled, "An empty native draft cannot be saved.")
+        // Name has its own ordinary UIKit responder. Qualify its suspension and
+        // explicit re-admission before establishing the separate Content pixel
+        // baseline. This checks committed text, not IME marked-text ordering or
+        // input during the unobservable background/activation transition.
+        let name = app.textFields["Configuration name"]
+        XCTAssertTrue(name.waitForExistence(timeout: 10))
+        waitForSettledFrame(name)
+        name.tap()
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "hasKeyboardFocus == true"), object: name)], timeout: 10), .completed)
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
+        waitForSettledFrame(app.keyboards.firstMatch, requiresHittable: false)
+        let acceptedName = "Security-off unsaved Name draft"
+        name.typeText(acceptedName)
+        XCTAssertEqual(name.value as? String, acceptedName)
+        XCUIDevice.shared.press(.home)
+        let nameBackgrounded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            app.state == .runningBackground || app.state == .runningBackgroundSuspended
+        }, object: app)
+        XCTAssertEqual(XCTWaiter.wait(for: [nameBackgrounded], timeout: 10), .completed)
+        app.activate()
+        let nameReadmitted = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            name.exists && name.isEnabled
+        }, object: name)
+        XCTAssertEqual(XCTWaiter.wait(for: [nameReadmitted], timeout: 15), .completed,
+                       "The current Name owner must regain editing authority after resume.")
+        XCTAssertEqual(name.value as? String, acceptedName,
+                       "Suspending the Name responder must retain its exact committed buffer.")
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "hasKeyboardFocus == false"), object: name)], timeout: 10), .completed,
+                       "Name must not restore keyboard focus without a new tap.")
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 10),
+                      "Suspending the only focused Name responder must dismiss its keyboard.")
+        waitForSettledFrame(name)
+        name.tap()
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "hasKeyboardFocus == true"), object: name)], timeout: 10), .completed)
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
+        waitForSettledFrame(app.keyboards.firstMatch, requiresHittable: false)
+        let nameSuffix = " after resume"
+        let newestName = acceptedName + nameSuffix
+        // A center tap restores focus at the tapped character, not at the end.
+        // Name has no clear accessory; tap inside its trailing empty space to
+        // select the append position before checking the exact newer buffer.
+        name.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)).tap()
+        name.typeText(nameSuffix)
+        XCTAssertEqual(name.value as? String, newestName,
+                       "Fresh authorized typing must extend the retained Name without an older callback replacing it.")
         // A comment is deliberately not a parseable configuration. No key, real
         // endpoint, saved profile, tunnel command, or credential write is used.
         let draft = "# Security-off unsaved background qualification"
@@ -2650,11 +3286,12 @@ final class RNFullAppUITests: XCTestCase {
             width: prefixBounds.width * size.width, height: prefixBounds.height * size.height)
             .insetBy(dx: -3, dy: -3).integral.intersection(CGRect(origin: .zero, size: size))
         // The lower OCR padding overlaps the next line's blinking caret. Its
-        // four-point strip contained only the caret in the exported RGB diff;
-        // the actual prefix glyphs end above it. Keep the whole prefix, prove
+        // five-point strip contains only the caret/blank padding in the matched
+        // iOS 26.5 and 27 RGB sources; all actual prefix ink remains above it.
+        // Keep the whole prefix, prove
         // it again with cropped OCR, and compare only these actual glyph pixels.
         let glyphFrame = CGRect(x: paddedPrefixFrame.minX, y: paddedPrefixFrame.minY,
-            width: paddedPrefixFrame.width, height: paddedPrefixFrame.height - 4)
+            width: paddedPrefixFrame.width, height: paddedPrefixFrame.height - 5)
         XCTAssertGreaterThan(glyphFrame.height, 0)
         let glyphPixels = regionPNG(baseline, frame: glyphFrame)
         let croppedRequest = textRequest()
@@ -2703,18 +3340,32 @@ final class RNFullAppUITests: XCTestCase {
                 XCTAssertTrue(nativeEditorSave()?.isEnabled == true,
                               "The native nonempty-draft action must retain its admitted state.")
             }
+        XCTAssertTrue(name.waitForExistence(timeout: 10))
+        XCTAssertEqual(name.value as? String, newestName,
+                       "The later Content resume must preserve the newest authorized Name buffer.")
         editor.buttons["Cancel"].tap()
         let discard = app.alerts["Discard changes?"].buttons["Discard"]
         XCTAssertTrue(discard.waitForExistence(timeout: 10))
         discard.tap()
         XCTAssertTrue(editor.waitForNonExistence(timeout: 10))
-        app.navigationBars["VPN chaining"].buttons["Cancel editing"].tap()
+        let cancelEditing = app.navigationBars["VPN chaining"].buttons["Cancel editing"]
+        XCTAssertTrue(cancelEditing.waitForExistence(timeout: 10))
+        waitForSettledFrame(cancelEditing)
+        cancelEditing.tap()
+        XCTAssertTrue(cancelEditing.waitForNonExistence(timeout: 10))
         scrollFullyIntoView(app, emptyStore)
         XCTAssertEqual(emptyStore.label, originalMetadata,
                        "Discard must preserve the confirmed-empty stored metadata.")
         XCTAssertFalse(app.buttons["vpn.configuration-row"].exists)
         XCTAssertFalse(app.switches["vpn.row-toggle.0"].exists)
-        if originalSetup == "0" { scrollFullyIntoView(app, setup); setup.tap() }
+        if originalSetup == "0" {
+            scrollFullyIntoView(app, setup)
+            tapNativeSwitch(setup)
+            let restored = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "0"), object: setup)
+            XCTAssertEqual(XCTWaiter.wait(for: [restored], timeout: 10), .completed)
+        }
+        XCTAssertTrue(nativeBack(app).waitForExistence(timeout: 10))
+        waitForSettledFrame(nativeBack(app))
         nativeBack(app).tap()
         nativeTab(app, "Guard").tap()
         assertRound8GuardIsOff(app)
@@ -2741,11 +3392,15 @@ final class RNFullAppUITests: XCTestCase {
         waitForSettledFrame(vpnHeader)
         XCTAssertEqual(vpnHeader.frame.height, expandedHeight, accuracy: 2,
                        "VPN must inherit DNS's ordinary large-title scaffold, not the embedded-native inline override.")
+        let vpnScroll = app.scrollViews.firstMatch
+        XCTAssertTrue(vpnScroll.waitForExistence(timeout: 10))
+        XCTAssertLessThan(vpnScroll.frame.minY, vpnHeader.frame.maxY - 10,
+                          "The hosted VPN page must extend beneath its native large-title bar.")
         capture(app, "VPN standard large title matches DNS")
     }
 
     func testVPNChainingIsAPushedPageWithNativeControls() throws {
-        let app = launch()
+        let app = launch(paidPlan: true)
         nativeTab(app, "Settings").tap()
         let row = app.buttons["connection.vpn"]
         scrollFullyIntoView(app, row); row.tap()
@@ -2767,7 +3422,11 @@ final class RNFullAppUITests: XCTestCase {
             scrollFullyIntoView(app, add); add.tap()
             let sheet = app.navigationBars["WireGuard configuration"]
             XCTAssertTrue(sheet.waitForExistence(timeout: 10))
-            XCTAssertFalse(sheet.buttons["Save"].isEnabled)
+            let save = app.buttons.matching(NSPredicate(format: "label == %@", "Save")).allElementsBoundByIndex.filter {
+                $0.frame.minY >= sheet.frame.maxY && $0.frame.width >= 44
+            }
+            XCTAssertEqual(save.count, 1, "The configuration editor's Save belongs to its pinned footer.")
+            XCTAssertFalse(try XCTUnwrap(save.first).isEnabled)
             sheet.buttons["Cancel"].tap()
             XCTAssertTrue(sheet.waitForNonExistence(timeout: 10))
         }
@@ -2786,14 +3445,14 @@ final class RNFullAppUITests: XCTestCase {
     }
 
     func testRound8InteractiveVPNBackPreservesNativeRows() throws {
-        let app = launch()
+        let app = launch(paidPlan: true)
         nativeTab(app, "Settings").tap()
         let vpn = app.buttons["connection.vpn"]
         scrollFullyIntoView(app, vpn)
         vpn.tap()
         let header = app.navigationBars["VPN chaining"]
         XCTAssertTrue(header.waitForExistence(timeout: 10))
-        let setup = app.switches["vpn.setup-toggle"]
+        let setup = app.descendants(matching: .any).matching(identifier: "vpn.setup-toggle").firstMatch.switches.firstMatch
         scrollFullyIntoView(app, setup)
         let originalValue = setup.value as? String
         let originalFrame = setup.frame
@@ -4696,7 +5355,7 @@ final class RNFullAppUITests: XCTestCase {
     func testRound8VPNAndEditorRotateInPlaceInBothThemes() throws {
         defer { XCUIDevice.shared.orientation = .portrait }
         for appearance in ["Light", "Dark"] {
-            let app = launch()
+            let app = launch(paidPlan: true)
             nativeTab(app, "Settings").tap()
             let customization = app.buttons["row.Customization"]
             scrollFullyIntoView(app, customization)
@@ -4721,16 +5380,25 @@ final class RNFullAppUITests: XCTestCase {
             XCTAssertTrue(app.navigationBars["VPN chaining"].waitForExistence(timeout: 10))
             capture(app, "Round 8 \(appearance) VPN introduction and setup normal scale")
             openVPNSetup(app)
-            let configuration = app.buttons["vpn.configuration-row"]
-            scrollFullyIntoView(app, configuration)
-            let originalLabel = configuration.label
+            let empty = app.staticTexts["No configurations"].firstMatch
+            XCTAssertTrue(empty.waitForExistence(timeout: 10), "This private simulator must have no saved credentials.")
+            scrollFullyIntoView(app, empty)
+            let originalLabel = empty.label
             XCUIDevice.shared.orientation = .landscapeLeft
             assertWindowOrientation(app, landscape: true)
             XCTAssertTrue(app.navigationBars["VPN chaining"].exists)
-            XCTAssertEqual(configuration.label, originalLabel)
-            scrollFullyIntoView(app, configuration)
+            XCTAssertEqual(empty.label, originalLabel)
+            // The floating native tab bar can overlap the row's wide AX
+            // background while its left-aligned empty-state text stays visible.
+            // This step verifies retained metadata; the editor below has strict
+            // exposed-viewport geometry and screenshot OCR qualification.
+            waitForSettledFrame(empty, requiresHittable: false)
             capture(app, "Round 8 \(appearance) VPN rotated in place")
-            configuration.tap()
+            app.navigationBars["VPN chaining"].buttons["Edit"].tap()
+            let add = app.buttons["Add configuration"]
+            scrollFullyIntoView(app, add)
+            XCTAssertTrue(add.wait(for: \.isEnabled, toEqual: true, timeout: 15))
+            add.tap()
             let editor = app.navigationBars["WireGuard configuration"]
             XCTAssertTrue(editor.waitForExistence(timeout: 10))
             XCTAssertTrue(editor.buttons["Cancel"].isHittable)
@@ -4755,28 +5423,38 @@ final class RNFullAppUITests: XCTestCase {
             XCTAssertTrue(editor.buttons["Cancel"].isHittable)
             if canEdit {
                 XCTAssertTrue((input.value as? String ?? "").contains("unsaved rotation qualification"))
+                assertRound8VisibleLandscapeEditing(app, editor: editor, suffix: " visible landscape")
                 capture(app, "Round 8 \(appearance) editor keyboard rotated in place")
             } else {
                 XCTAssertFalse(input.isEnabled)
                 capture(app, "Round 8 \(appearance) disabled editor rotated in place")
             }
             editor.buttons["Cancel"].tap()
+            if canEdit {
+                let discard = app.alerts["Discard changes?"].buttons["Discard"]
+                XCTAssertTrue(discard.waitForExistence(timeout: 10))
+                discard.tap()
+            }
             XCTAssertTrue(editor.waitForNonExistence(timeout: 10))
             XCUIDevice.shared.orientation = .portrait
             assertWindowOrientation(app, landscape: false)
-            scrollFullyIntoView(app, configuration)
-            XCTAssertEqual(configuration.label, originalLabel, "Cancelling the draft must preserve stored configuration metadata.")
-            configuration.tap()
+            scrollFullyIntoView(app, add)
+            XCTAssertTrue(add.isEnabled)
+            add.tap()
             XCTAssertTrue(editor.waitForExistence(timeout: 10))
             if canEdit {
                 XCTAssertFalse((app.textViews.firstMatch.value as? String ?? "").contains("unsaved rotation qualification"), "Cancelled text must not persist in the editor.")
             }
             editor.buttons["Cancel"].tap()
             XCTAssertTrue(editor.waitForNonExistence(timeout: 10))
+            app.navigationBars["VPN chaining"].buttons["Cancel editing"].tap()
+            scrollFullyIntoView(app, empty)
+            XCTAssertEqual(empty.label, originalLabel, "Cancelling both drafts must preserve the confirmed-empty metadata.")
+            XCTAssertFalse(app.buttons["vpn.configuration-row"].exists)
             nativeBack(app).tap()
             XCUIDevice.shared.system.open(URL(string: "lavasecurity://settings/dns-resolver")!)
-            XCTAssertTrue(app.navigationBars["DNS provider"].waitForExistence(timeout: 10))
-            waitForSettledFrame(app.switches["Use Device DNS setting"])
+            XCTAssertTrue(app.navigationBars["DNS settings"].waitForExistence(timeout: 10))
+            waitForSettledFrame(app.switches["Device DNS"])
             capture(app, "Round 8 \(appearance) DNS introduction and peer rows normal scale")
         }
     }
@@ -4805,24 +5483,59 @@ final class RNFullAppUITests: XCTestCase {
             let restored = launch()
             if !originalMatchSystem { _ = matchSystem(restored, enabled: false) }
         }
-        let app = launch(largeText: true)
+        let app = launch(largeText: true, paidPlan: true)
         nativeTab(app, "Settings").tap()
         XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "connection.phone").firstMatch.exists)
         capture(app, "Round 8 portrait Settings large text actionable connection rows")
         app.buttons["connection.vpn"].tap()
         XCTAssertTrue(app.navigationBars["VPN chaining"].waitForExistence(timeout: 10))
         openVPNSetup(app)
-        let chaining = app.switches["vpn.chaining-toggle"]
-        scrollFullyIntoView(app, chaining)
-        XCTAssertTrue(chaining.isHittable)
+        let configurations = app.staticTexts["No configurations"].firstMatch
+        scrollFullyIntoView(app, configurations)
+        XCTAssertTrue(configurations.isHittable, "The fresh fixture has no saved VPN credentials.")
+        XCTAssertFalse(app.switches["vpn.chaining-toggle"].exists, "Saved profiles have individual row controls in the accepted native baseline.")
         capture(app, "Round 8 VPN native row and external static explanation large text")
-        let fallback = app.switches["vpn.fallback-toggle"]
+        let fallback = app.descendants(matching: .any).matching(identifier: "vpn.fallback-toggle").firstMatch.switches.firstMatch
         scrollFullyIntoView(app, fallback)
         XCTAssertTrue(fallback.isHittable)
         for obsolete in ["Apply after restart", "Not used by this VPN"] {
             XCTAssertFalse(app.staticTexts[obsolete].exists)
         }
         capture(app, "Round 8 VPN fallback static footer large text")
+        // Qualify the enabled editor on this owned, empty Debug fixture too.
+        // The separately opted-in installed-QA maximum-text case cannot stand
+        // in for a fresh simulator or admit saved user configuration here.
+        app.navigationBars["VPN chaining"].buttons["Edit"].tap()
+        let addConfiguration = app.buttons["Add configuration"]
+        scrollFullyIntoView(app, addConfiguration); addConfiguration.tap()
+        let editor = app.navigationBars["WireGuard configuration"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 10))
+        let input = app.textViews.firstMatch
+        XCTAssertTrue(input.waitForExistence(timeout: 10)); XCTAssertTrue(input.isEnabled)
+        waitForSettledFrame(input); input.tap()
+        let maximumTextDraft = "# Synthetic maximum text draft; no keys or endpoint"
+        input.typeText(maximumTextDraft)
+        XCTAssertEqual(input.value as? String, maximumTextDraft)
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
+        capture(app, "Fresh enabled configuration editor maximum text with keyboard")
+        XCUIDevice.shared.orientation = .landscapeLeft
+        assertWindowOrientation(app, landscape: true)
+        let editorContent = app.scrollViews.containing(.textView, identifier: "Content").firstMatch
+        XCTAssertTrue(editorContent.waitForExistence(timeout: 10))
+        for action in [editorContent.buttons["Choose file"].firstMatch, editorContent.buttons["Save"].firstMatch] {
+            try scrollRound8EditorFooterIntoView(app, editor: editor, action: action, expectedDraft: maximumTextDraft)
+            capture(app, "Fresh maximum-text landscape editor fully visible \(action.label)")
+        }
+        XCTAssertTrue(editorContent.buttons["Save"].firstMatch.isEnabled, "The native baseline admits a nonempty draft; strict parsing happens only when Save is explicitly activated.")
+        XCUIDevice.shared.orientation = .portrait
+        assertWindowOrientation(app, landscape: false)
+        editor.buttons["Cancel"].tap()
+        let discardConfiguration = app.alerts["Discard changes?"].buttons["Discard"]
+        XCTAssertTrue(discardConfiguration.waitForExistence(timeout: 10)); discardConfiguration.tap()
+        XCTAssertTrue(editor.waitForNonExistence(timeout: 10))
+        app.navigationBars["VPN chaining"].buttons["Cancel editing"].tap()
+        XCTAssertTrue(configurations.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["vpn.configuration-row"].exists, "Maximum-text qualification cannot persist its synthetic draft.")
         // Establish the real landscape viewport on the parent page, then verify
         // the same shared native page in that viewport. In-place native rotation
         // is tracked separately; a portrait screenshot is never landscape proof.
@@ -4841,8 +5554,8 @@ final class RNFullAppUITests: XCTestCase {
         XCUIDevice.shared.orientation = .portrait
         assertWindowOrientation(app, landscape: false)
         XCUIDevice.shared.system.open(URL(string: "lavasecurity://settings/dns-resolver")!)
-        XCTAssertTrue(app.navigationBars["DNS provider"].waitForExistence(timeout: 10))
-        let device = app.switches["Use Device DNS setting"]
+        XCTAssertTrue(app.navigationBars["DNS settings"].waitForExistence(timeout: 10))
+        let device = app.switches["Device DNS"]
         XCTAssertTrue(device.waitForExistence(timeout: 10))
         capture(app, "Round 8 DNS standalone control and external helper large text")
         nativeTab(app, "Settings").tap()
@@ -4945,21 +5658,16 @@ final class RNFullAppUITests: XCTestCase {
         let refresh = app.navigationBars.buttons["Update now"]
         recordControlBounds(app, ["RN Edit": edit, "RN Refresh": refresh,
                                  "RN system Back": app.navigationBars.buttons["BackButton"]], phase: "Filter viewing toolbar")
-        // Save the visible Edit target before refresh replaces toolbar items. XCTest
-        // can briefly report a replacement item's pre-layout frame over Back; tapping
-        // that frame exercises navigation instead of the intended Edit entry.
+        // Refresh republishes native toolbar items. Resolve the current Edit
+        // action after that publication instead of tapping a cached coordinate.
         waitForSettledFrame(edit)
-        let editFrame = edit.frame
-        XCTAssertGreaterThan(editFrame.midX, app.frame.midX, "Edit must be in the trailing toolbar.")
+        XCTAssertGreaterThan(edit.frame.midX, app.frame.midX, "Edit must be in the trailing toolbar.")
         if refresh.isEnabled { refresh.tap() }
-        let editPoint = app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: editFrame.midX, dy: editFrame.midY))
-        // Enter once: after this transition the same coordinate is Save. An
-        // unchanged Save now correctly finishes editing, so repeated coordinate
-        // taps alternate commands instead of testing repeated Edit callbacks.
-        // The component regression covers duplicate Edit callbacks while its
-        // native reply is pending; this journey verifies the real refresh/edit
-        // transition and then deliberately exercises the no-change Save below.
-        editPoint.tap()
+        XCTAssertTrue(edit.waitForExistence(timeout: 10))
+        waitForSettledFrame(edit)
+        XCTAssertTrue(edit.isEnabled)
+        recordControlBounds(app, ["Current Edit after refresh": edit], phase: "Filter refresh toolbar settles before Edit")
+        edit.tap()
         let cancel = app.navigationBars.buttons["Cancel editing"]
         XCTAssertTrue(cancel.waitForExistence(timeout: 20), app.debugDescription)
         XCTAssertTrue(app.navigationBars.buttons["Save"].isEnabled, "An unchanged valid draft can finish editing without a write.")
@@ -5279,7 +5987,7 @@ final class RNFullAppUITests: XCTestCase {
         activity.tap()
         XCTAssertTrue(app.navigationBars["Activity"].waitForExistence(timeout: 10))
         XCUIDevice.shared.system.open(URL(string: "lavasecurity://settings/dns-resolver")!)
-        let dns = app.navigationBars["DNS provider"]
+        let dns = app.navigationBars["DNS settings"]
         XCTAssertTrue(dns.waitForExistence(timeout: 10))
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "selected == true"), object: nativeTab(app, "Settings"))], timeout: 5), .completed)
         waitForSettledFrame(dns)
@@ -5299,7 +6007,7 @@ final class RNFullAppUITests: XCTestCase {
         capture(app, "Both native tabs return their nested stacks to root")
         XCUIDevice.shared.system.open(URL(string: "lavasecurity://settings")!)
         let feedbackRow = app.buttons["row.Feedback"]
-        for _ in 0..<5 where !feedbackRow.isHittable { app.swipeUp() }
+        scrollFullyIntoView(app, feedbackRow)
         XCTAssertTrue(feedbackRow.isHittable, app.debugDescription)
         feedbackRow.tap()
         let feedback = fullSheetHeader(app, title: "Feedback")
@@ -5408,6 +6116,323 @@ final class RNFullAppUITests: XCTestCase {
         adjust(from: target, to: original)
         if !wasEnabled { toggle.tap() }
     }
+    func testCustomDNSRapidURLTypingPreservesRepeatedCharacters() throws {
+        let app = launch(paidPlan: true)
+        nativeTab(app, "Settings").tap()
+        let dns = app.buttons["connection.dns"]
+        scrollFullyIntoView(app, dns); dns.tap()
+        app.navigationBars["DNS settings"].buttons["Edit"].tap()
+        let deviceDNS = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Device DNS")).firstMatch
+        XCTAssertTrue(deviceDNS.waitForExistence(timeout: 10)); deviceDNS.tap()
+        XCTAssertTrue(app.navigationBars.buttons["Add custom DNS"].waitForExistence(timeout: 10)); app.navigationBars.buttons["Add custom DNS"].tap()
+        let name = app.textFields["Custom DNS"]
+        XCTAssertTrue(name.waitForExistence(timeout: 10)); waitForSettledFrame(name); name.tap()
+        name.typeText("Synthetic repeated URL typing")
+        XCTAssertEqual(name.value as? String, "Synthetic repeated URL typing")
+        let primary = app.textFields["IPv4/6, https://, tls://, doq://, quic://, or sdns://"]
+        XCTAssertTrue(primary.waitForExistence(timeout: 10)); waitForSettledFrame(primary); primary.tap()
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "hasKeyboardFocus == true"), object: primary)], timeout: 10), .completed)
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10)); waitForSettledFrame(app.keyboards.firstMatch, requiresHittable: false)
+        for index in 1...3 {
+            let value = "https://dns.example.test/dns-query?repeat=\(index)"
+            let previous = index == 1 ? "" : primary.value as? String ?? ""
+            primary.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: previous.count) + value)
+            XCTAssertEqual(primary.value as? String, value, "Every repeated URL character must survive the complete typing burst.")
+        }
+        capture(app, "Custom DNS rapid repeated URL input remains exact")
+        app.navigationBars["Custom DNS"].buttons["Close"].tap()
+        XCTAssertTrue(app.textFields["Search DNS providers or transports"].waitForExistence(timeout: 10))
+        app.navigationBars.buttons["Close"].tap()
+        app.navigationBars["DNS settings"].buttons["Cancel editing"].tap()
+        XCTAssertTrue(app.navigationBars["DNS settings"].buttons["Edit"].waitForExistence(timeout: 10))
+    }
+
+    func testProtectedForegroundFormsRetainDraftsBehindReauthorization() throws {
+        let app = launch(paidPlan: true)
+        nativeTab(app, "Settings").tap()
+        app.buttons["row.Security"].tap()
+        let passcode = app.switches["Passcode"]
+        XCTAssertTrue(passcode.waitForExistence(timeout: 10))
+        XCTAssertEqual(passcode.value as? String, "0", "Use the task-private simulator's empty security fixture.")
+        passcode.tap()
+        XCTAssertTrue(app.staticTexts["Set passcode"].waitForExistence(timeout: 10))
+        app.typeText("1234")
+        XCTAssertTrue(app.staticTexts["Confirm passcode"].waitForExistence(timeout: 10))
+        app.typeText("1234")
+        XCTAssertTrue(passcode.waitForExistence(timeout: 10))
+        if app.buttons["OK"].exists { app.buttons["OK"].tap() }
+        let editFilters = app.switches["Edit filters"]
+        scrollFullyIntoView(app, editFilters)
+        if editFilters.value as? String == "0" { editFilters.tap() }
+        let settings = app.switches["Change settings"]
+        scrollFullyIntoView(app, settings)
+        if settings.value as? String == "0" { settings.tap() }
+        let openLava = app.switches["Open Lava"]
+        scrollFullyIntoView(app, openLava)
+        if openLava.value as? String == "1" { openLava.tap(); enterPasscode(app) }
+        nativeBack(app).tap()
+
+        func revokeAndResume(_ name: XCUIElement, privateFields: [XCUIElement] = [], coverID: String, phase: String) {
+            // Revealing a focused Content editor can scroll its Name above the
+            // bar. Backgrounding needs stable identity, without touching Name.
+            waitForSettledFrame(name, requiresHittable: false)
+            XCUIDevice.shared.press(.home)
+            let background = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                app.state == .runningBackground || app.state == .runningBackgroundSuspended
+            }, object: app)
+            XCTAssertEqual(XCTWaiter.wait(for: [background], timeout: 10), .completed)
+            app.activate()
+            let prompt = app.staticTexts["Enter passcode"]
+            let cover = app.otherElements[coverID]
+            let reentry = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                prompt.exists || cover.exists
+            }, object: app)
+            XCTAssertEqual(XCTWaiter.wait(for: [reentry], timeout: 15), .completed)
+            XCTAssertFalse(name.exists, "Protected draft fields must leave the accessibility tree on resume.")
+            for field in privateFields { XCTAssertFalse(field.exists, "Every protected input must be concealed on resume.") }
+            if !prompt.exists {
+                capture(app, "\(phase) concealed before explicit authorization")
+                let unlock = cover.buttons["Unlock Lava"]
+                XCTAssertTrue(unlock.waitForExistence(timeout: 10))
+                unlock.tap()
+            }
+            XCTAssertTrue(app.staticTexts["Enter passcode"].waitForExistence(timeout: 15))
+            XCTAssertFalse(name.exists, "Protected draft fields must leave the accessibility tree before reauthorization.")
+            for field in privateFields { XCTAssertFalse(field.exists, "Every protected input must be concealed during authorization.") }
+            capture(app, "\(phase) concealed behind native authorization")
+            app.navigationBars["Authentication"].buttons["Cancel"].tap()
+            XCTAssertTrue(app.buttons["Unlock Lava"].waitForExistence(timeout: 10))
+            let retry = app.buttons["Unlock Lava"]
+            let retryReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in retry.isHittable }, object: retry)
+            let retryResult = XCTWaiter.wait(for: [retryReady], timeout: 10)
+            capture(app, "\(phase) cancellation offers an interactive retry")
+            XCTAssertEqual(retryResult, .completed, "The shared lock must remain interactive after cancellation.")
+            XCTAssertFalse(name.exists, "Cancelling authorization cannot restore protected fields.")
+            for field in privateFields { XCTAssertFalse(field.exists, "Cancelling authorization cannot reveal another input.") }
+            app.buttons["Unlock Lava"].tap()
+            enterPasscode(app)
+            XCTAssertTrue(name.waitForExistence(timeout: 15), "The same retained form must reappear after authorization.")
+            capture(app, "\(phase) retained draft after explicit reauthorization")
+        }
+        func focusForRapidTyping(_ field: XCUIElement) {
+            waitForSettledFrame(field); field.tap()
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "hasKeyboardFocus == true"), object: field)], timeout: 10), .completed)
+            XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
+            waitForSettledFrame(app.keyboards.firstMatch, requiresHittable: false)
+        }
+
+        let dnsEntry = app.buttons["connection.dns"]
+        scrollFullyIntoView(app, dnsEntry)
+        waitForSettledFrame(dnsEntry)
+        dnsEntry.tap()
+        if app.staticTexts["Enter passcode"].waitForExistence(timeout: 5) { enterPasscode(app) }
+        XCTAssertTrue(app.navigationBars.buttons["Edit"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.switches["Device DNS"].waitForExistence(timeout: 10))
+        let savedDeviceDNSValue = try XCTUnwrap(app.switches["Device DNS"].value as? String)
+        app.navigationBars.buttons["Edit"].tap()
+        let deviceDNS = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Device DNS")).firstMatch
+        XCTAssertTrue(deviceDNS.waitForExistence(timeout: 10))
+        deviceDNS.tap()
+        XCTAssertTrue(app.navigationBars.buttons["Add custom DNS"].waitForExistence(timeout: 10))
+        app.navigationBars.buttons["Add custom DNS"].tap()
+        let dnsName = app.textFields["Custom DNS"]
+        XCTAssertTrue(dnsName.waitForExistence(timeout: 10))
+        waitForSettledFrame(dnsName)
+        dnsName.tap()
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "hasKeyboardFocus == true"), object: dnsName)], timeout: 10), .completed)
+        dnsName.typeText("Retained protected DNS draft")
+        XCTAssertEqual(dnsName.value as? String, "Retained protected DNS draft", "Rapid typing must be intact before any lifecycle transition.")
+        let primaryDNS = app.textFields["IPv4/6, https://, tls://, doq://, quic://, or sdns://"]
+        XCTAssertTrue(primaryDNS.waitForExistence(timeout: 10))
+        focusForRapidTyping(primaryDNS); primaryDNS.typeText("https://dns.example.test/dns-query")
+        XCTAssertEqual(primaryDNS.value as? String, "https://dns.example.test/dns-query")
+        revokeAndResume(dnsName, privateFields: [primaryDNS], coverID: "custom-entry-privacy-cover", phase: "Custom DNS")
+        XCTAssertEqual(dnsName.value as? String, "Retained protected DNS draft")
+        XCTAssertEqual(primaryDNS.value as? String, "https://dns.example.test/dns-query")
+        let saveCustomDNS = app.scrollViews.containing(.textField, identifier: "Custom DNS").firstMatch.buttons["Save"]
+        scrollFullyIntoView(app, saveCustomDNS); saveCustomDNS.tap()
+        XCTAssertTrue(app.textFields["Search DNS providers or transports"].waitForExistence(timeout: 10))
+        let selectedDNS = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Retained protected DNS draft")).firstMatch
+        XCTAssertTrue(selectedDNS.waitForExistence(timeout: 10), "The original picker must receive the authorized native custom draft.")
+        let saveDNSSelection = app.buttons["Save selection"]
+        scrollFullyIntoView(app, saveDNSSelection, presentedSheet: app.navigationBars["Choose DNS"]); saveDNSSelection.tap()
+        XCTAssertTrue(selectedDNS.waitForExistence(timeout: 10), "The same parent tier draft must receive the custom selection.")
+        let cancelDNS = app.navigationBars["DNS settings"].buttons["Cancel editing"]
+        XCTAssertTrue(cancelDNS.waitForExistence(timeout: 10)); cancelDNS.tap()
+        let discardDNS = app.alerts["Discard changes?"].buttons["Discard"]
+        XCTAssertTrue(discardDNS.waitForExistence(timeout: 10)); discardDNS.tap()
+        XCTAssertTrue(app.navigationBars["DNS settings"].buttons["Edit"].waitForExistence(timeout: 10))
+        XCTAssertEqual(app.switches["Device DNS"].value as? String, savedDeviceDNSValue, "Discarding the custom form cannot change the saved DNS choice.")
+        XCTAssertFalse(app.staticTexts["Retained protected DNS draft"].exists)
+        nativeBack(app).tap()
+
+        let vpn = app.buttons["connection.vpn"]
+        scrollFullyIntoView(app, vpn)
+        vpn.tap()
+        if app.staticTexts["Enter passcode"].waitForExistence(timeout: 5) { enterPasscode(app) }
+        let setup = app.descendants(matching: .any).matching(identifier: "vpn.setup-toggle").firstMatch.switches.firstMatch
+        XCTAssertTrue(setup.waitForExistence(timeout: 10))
+        let originalSetup = setup.value as? String
+        if originalSetup == "0" { setup.tap() }
+        let empty = app.staticTexts["No configurations"].firstMatch
+        XCTAssertTrue(empty.waitForExistence(timeout: 10), "No saved credentials are admitted to this test.")
+        app.navigationBars["VPN chaining"].buttons["Edit"].tap()
+        if app.staticTexts["Enter passcode"].waitForExistence(timeout: 5) { enterPasscode(app) }
+        let add = app.buttons["Add configuration"]
+        scrollFullyIntoView(app, add)
+        XCTAssertTrue(add.isEnabled)
+        add.tap()
+        let vpnName = app.textFields["Configuration name"]
+        XCTAssertTrue(vpnName.waitForExistence(timeout: 10))
+        waitForSettledFrame(vpnName)
+        vpnName.tap()
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "hasKeyboardFocus == true"), object: vpnName)], timeout: 10), .completed)
+        vpnName.typeText("Retained protected VPN draft")
+        XCTAssertEqual(vpnName.value as? String, "Retained protected VPN draft")
+        let content = app.textViews.firstMatch
+        XCTAssertTrue(content.waitForExistence(timeout: 10))
+        let comment = "# Retained synthetic comment; no keys or endpoint"
+        focusForRapidTyping(content); content.typeText(comment)
+        XCTAssertEqual(content.value as? String, comment)
+        revokeAndResume(vpnName, privateFields: [content], coverID: "vpn-editor-privacy-cover", phase: "WireGuard")
+        XCTAssertEqual(vpnName.value as? String, "Retained protected VPN draft")
+        XCTAssertFalse(content.exists, "Authorization alone cannot reveal a private native configuration buffer.")
+        let reveal = app.buttons["Show configuration"]
+        XCTAssertTrue(reveal.waitForExistence(timeout: 10))
+        reveal.tap()
+        XCTAssertTrue(content.waitForExistence(timeout: 10))
+        XCTAssertEqual(content.value as? String, comment, "Reauthorization must retain the same opaque native input owner.")
+        app.navigationBars["WireGuard configuration"].buttons["Cancel"].tap()
+        let discard = app.alerts["Discard changes?"].buttons["Discard"]
+        XCTAssertTrue(discard.waitForExistence(timeout: 10))
+        discard.tap()
+        XCTAssertTrue(app.navigationBars["WireGuard configuration"].waitForNonExistence(timeout: 10))
+        let cancelVPN = app.navigationBars["VPN chaining"].buttons["Cancel editing"]
+        waitForSettledFrame(cancelVPN)
+        cancelVPN.tap()
+        XCTAssertTrue(cancelVPN.waitForNonExistence(timeout: 10))
+        XCTAssertTrue(empty.waitForExistence(timeout: 10), "Discard cannot create a saved configuration.")
+        if originalSetup == "0" {
+            scrollFullyIntoView(app, setup)
+            tapNativeSwitch(setup)
+            if app.staticTexts["Enter passcode"].waitForExistence(timeout: 3) { enterPasscode(app) }
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                setup.value as? String == originalSetup
+            }, object: nil)], timeout: 10), .completed)
+        }
+        let vpnBack = nativeBack(app)
+        XCTAssertTrue(vpnBack.waitForExistence(timeout: 10), app.debugDescription)
+        waitForSettledFrame(vpnBack)
+        vpnBack.tap()
+
+        nativeTab(app, "Guard").tap()
+        app.buttons["guard.filter"].tap()
+        app.buttons["row.Switch or manage filters"].tap()
+        XCTAssertTrue(app.buttons["Core"].waitForExistence(timeout: 10))
+        app.buttons["Core"].tap()
+        let viewOnly = app.buttons["View or edit only"]
+        XCTAssertTrue(viewOnly.waitForExistence(timeout: 10))
+        waitForSettledFrame(viewOnly)
+        viewOnly.tap()
+        XCTAssertTrue(viewOnly.waitForNonExistence(timeout: 10), "Selecting the settled native action must close the choice sheet.")
+        // Library and detail both expose Edit; wait for detail's own identity
+        // before addressing its toolbar after the asynchronous native open.
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "identifier == %@ AND label == %@", "filter.identity.name", "Core")).firstMatch.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(app.navigationBars.buttons["Edit"].waitForExistence(timeout: 10))
+        app.navigationBars.buttons["Edit"].tap()
+        if app.staticTexts["Enter passcode"].waitForExistence(timeout: 5) { enterPasscode(app) }
+        let addList = app.buttons["Add a blocklist"]
+        XCTAssertTrue(addList.waitForExistence(timeout: 10), app.debugDescription)
+        scrollFullyIntoView(app, addList); addList.tap()
+        XCTAssertTrue(app.navigationBars.buttons["Add your own blocklist"].waitForExistence(timeout: 10))
+        app.navigationBars.buttons["Add your own blocklist"].tap()
+        let sourceName = app.textFields["My blocklist"]
+        XCTAssertTrue(sourceName.waitForExistence(timeout: 10))
+        waitForSettledFrame(sourceName); sourceName.tap(); sourceName.typeText("Retained protected source")
+        XCTAssertEqual(sourceName.value as? String, "Retained protected source")
+        let sourceURL = app.textFields["https://example.com/pi-hole-style-list.txt"]
+        XCTAssertTrue(sourceURL.waitForExistence(timeout: 10))
+        focusForRapidTyping(sourceURL); sourceURL.typeText("https://example.com/lava-synthetic-review.txt")
+        XCTAssertEqual(sourceURL.value as? String, "https://example.com/lava-synthetic-review.txt")
+        revokeAndResume(sourceName, privateFields: [sourceURL], coverID: "custom-entry-privacy-cover", phase: "Custom blocklist")
+        XCTAssertEqual(sourceName.value as? String, "Retained protected source")
+        XCTAssertEqual(sourceURL.value as? String, "https://example.com/lava-synthetic-review.txt")
+        // Stage a public synthetic URL without saving the filter or fetching it.
+        // This exercises the retained native parent epoch, not just local text.
+        let addSource = app.buttons["Add blocklist"]
+        scrollFullyIntoView(app, addSource); addSource.tap()
+        // Entry editing and viewing the originating filter are independent
+        // native security surfaces. Backgrounding revoked the latter too.
+        if app.staticTexts["Enter passcode"].waitForExistence(timeout: 5) { enterPasscode(app) }
+        XCTAssertTrue(app.textFields["Search blocklists or categories"].waitForExistence(timeout: 10))
+        XCTAssertFalse(sourceName.exists)
+        let sourcePickerHeader = fullSheetHeader(app, title: "Choose blocklists")
+        XCTAssertTrue(sourcePickerHeader.waitForExistence(timeout: 10))
+        let closeSourcePicker = sourcePickerHeader.buttons["Close"]
+        XCTAssertTrue(closeSourcePicker.wait(for: \.isHittable, toEqual: true, timeout: 10))
+        waitForSettledFrame(closeSourcePicker); closeSourcePicker.tap()
+        XCTAssertTrue(sourcePickerHeader.waitForNonExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Retained protected source"].waitForExistence(timeout: 10))
+        let cancelSource = app.navigationBars.buttons["Cancel editing"]
+        XCTAssertTrue(cancelSource.wait(for: \.isHittable, toEqual: true, timeout: 10))
+        waitForSettledFrame(cancelSource); cancelSource.tap()
+        let discardSource = app.alerts["Discard changes?"].buttons["Discard"]
+        XCTAssertTrue(discardSource.waitForExistence(timeout: 10)); discardSource.tap()
+        XCTAssertTrue(app.navigationBars.buttons["Edit"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts["Retained protected source"].exists)
+        nativeBack(app).tap()
+        XCTAssertTrue(app.buttons["Core"].waitForExistence(timeout: 10))
+        app.navigationBars.buttons["Edit"].tap()
+        if app.staticTexts["Enter passcode"].waitForExistence(timeout: 5) { enterPasscode(app) }
+        XCTAssertTrue(app.navigationBars.buttons["Close edit mode"].waitForExistence(timeout: 10))
+        app.buttons["filter.library.filter-essential"].tap()
+        let rename = app.textFields["Filter name"]
+        XCTAssertTrue(rename.waitForExistence(timeout: 10))
+        let savedName = rename.value as? String ?? ""
+        focusForRapidTyping(rename)
+        rename.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: savedName.count) + "Retained protected rename")
+        revokeAndResume(rename, coverID: "foreground-flow-privacy-cover", phase: "Library rename")
+        XCTAssertEqual(rename.value as? String, "Retained protected rename")
+        app.navigationBars["Rename filter"].buttons["Cancel"].tap()
+        let discardRename = app.alerts["Discard changes?"].buttons["Discard"]
+        XCTAssertTrue(discardRename.waitForExistence(timeout: 10))
+        discardRename.tap()
+        XCTAssertTrue(app.navigationBars["Rename filter"].waitForNonExistence(timeout: 10))
+        let closeLibrary = app.navigationBars["Your filters"].buttons["Close edit mode"]
+        waitForSettledFrame(closeLibrary)
+        closeLibrary.tap()
+        XCTAssertTrue(closeLibrary.waitForNonExistence(timeout: 10), "Closing the retained library editor must complete before leaving its tab.")
+        XCTAssertTrue(app.buttons[savedName].waitForExistence(timeout: 10), "Discard cannot change the saved filter identity.")
+        XCTAssertFalse(app.buttons["Retained protected rename"].exists)
+        nativeTab(app, "Settings").tap()
+        // Backgrounding invalidated Settings-entry authorization. Complete
+        // that native gate before asking the protected Security row to open.
+        enterPasscode(app)
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "selected == true"), object: nativeTab(app, "Settings"))], timeout: 10), .completed)
+        let security = app.buttons["row.Security"]
+        XCTAssertTrue(security.waitForExistence(timeout: 10))
+        security.tap()
+        enterPasscode(app)
+        passcode.tap()
+        enterPasscode(app)
+        XCTAssertEqual(passcode.value as? String, "0")
+        nativeTab(app, "Guard").tap()
+        // Switching tabs retains Guard -> Filters -> Your filters. Return
+        // through both native Back actions before inspecting root protection.
+        XCTAssertTrue(app.navigationBars["Your filters"].waitForExistence(timeout: 10))
+        waitForSettledFrame(app.navigationBars["Your filters"])
+        waitForSettledFrame(nativeBack(app))
+        nativeBack(app).tap()
+        XCTAssertTrue(app.navigationBars["Your filters"].waitForNonExistence(timeout: 10))
+        XCTAssertTrue(app.navigationBars["Filters"].waitForExistence(timeout: 10))
+        waitForSettledFrame(app.navigationBars["Filters"])
+        XCTAssertTrue(app.buttons["row.Now filtering"].waitForExistence(timeout: 10))
+        waitForSettledFrame(nativeBack(app))
+        nativeBack(app).tap()
+        XCTAssertTrue(app.buttons["guard.filter"].waitForExistence(timeout: 10))
+        assertRound8GuardIsOff(app)
+    }
+
     func testProtectedDNSContextualReturnAfterBackground() throws {
         let app = launch()
         nativeTab(app, "Settings").tap()
@@ -5447,23 +6472,23 @@ final class RNFullAppUITests: XCTestCase {
         XCTAssertEqual(configure.label, "Open DNS settings")
         XCUIDevice.shared.press(.home)
         app.activate()
-        scrollFullyIntoView(app, configure)
+        scrollFullyIntoView(app, configure, throughGutter: true)
         configure.tap()
         XCTAssertTrue(app.staticTexts["Enter passcode"].waitForExistence(timeout: 10))
         capture(app, "Explore DNS entry waits for fresh native authentication after background")
         app.buttons["Cancel"].tap()
         XCTAssertTrue(app.navigationBars["Explore"].waitForExistence(timeout: 10))
-        XCTAssertFalse(app.navigationBars["DNS provider"].exists, "Cancelling authorization must not open a protected DNS page.")
+        XCTAssertFalse(app.navigationBars["DNS settings"].exists, "Cancelling authorization must not open a protected DNS page.")
         configure.tap()
         enterPasscode(app)
-        let device = app.switches["Use Device DNS setting"]
+        let device = app.switches["Device DNS"]
         XCTAssertTrue(device.waitForExistence(timeout: 10))
         let savedDeviceChoice = try XCTUnwrap(device.value as? String)
         nativeBack(app).tap()
         XCTAssertTrue(app.navigationBars["Explore"].waitForExistence(timeout: 10))
         XCUIDevice.shared.press(.home)
         app.activate()
-        scrollFullyIntoView(app, configure)
+        scrollFullyIntoView(app, configure, throughGutter: true)
         configure.tap()
         enterPasscode(app)
         XCTAssertTrue(device.waitForExistence(timeout: 10))
@@ -5479,7 +6504,7 @@ final class RNFullAppUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Explore"].waitForExistence(timeout: 10))
         XCUIDevice.shared.press(.home)
         app.activate()
-        scrollFullyIntoView(app, configure)
+        scrollFullyIntoView(app, configure, throughGutter: true)
         configure.tap()
         XCTAssertTrue(app.staticTexts["Enter passcode"].waitForExistence(timeout: 10))
         app.buttons["Cancel"].tap()
@@ -5492,6 +6517,100 @@ final class RNFullAppUITests: XCTestCase {
         passcode.tap()
         enterPasscode(app)
         XCTAssertEqual(passcode.value as? String, "0")
+    }
+
+    func testSecurityLockResumesOneVisitWithOnePasscodeAndUsableRetry() throws {
+        let app = launch()
+        nativeTab(app, "Settings").tap()
+        app.buttons["row.Security"].tap()
+        let passcode = app.switches["Passcode"]
+        XCTAssertTrue(passcode.waitForExistence(timeout: 10))
+        XCTAssertEqual(passcode.value as? String, "0")
+        passcode.tap()
+        XCTAssertTrue(app.staticTexts["Set passcode"].waitForExistence(timeout: 10))
+        app.typeText("1234")
+        XCTAssertTrue(app.staticTexts["Confirm passcode"].waitForExistence(timeout: 10))
+        app.typeText("1234")
+        XCTAssertTrue(passcode.waitForExistence(timeout: 10))
+        let unlock = app.switches["Open Lava"]
+        scrollFullyIntoView(app, unlock)
+        unlock.tap()
+        XCTAssertEqual(unlock.value as? String, "1")
+        nativeBack(app).tap()
+        app.buttons["row.Security"].tap()
+        enterPasscode(app) // One tap must land on the intended credential screen.
+        XCTAssertTrue(passcode.waitForExistence(timeout: 10))
+
+        func background() {
+            XCUIDevice.shared.press(.home)
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                app.state == .runningBackground || app.state == .runningBackgroundSuspended
+            }, object: app)], timeout: 10), .completed)
+            app.activate()
+            XCTAssertTrue(app.staticTexts["Enter passcode"].waitForExistence(timeout: 10))
+        }
+        func assertRestored(_ phase: String) {
+            XCTAssertTrue(passcode.waitForExistence(timeout: 10), app.debugDescription)
+            scrollFullyIntoView(app, passcode)
+            XCTAssertTrue(passcode.isHittable, "Successful unlock must reveal the retained Security screen")
+            XCTAssertFalse(app.otherElements["lavaPrivacyShield"].exists)
+            XCTAssertFalse(app.otherElements["securityLockOverlay"].exists)
+            XCTAssertFalse(app.staticTexts["Enter passcode"].waitForExistence(timeout: 1), "No second credential prompt")
+            XCTAssertTrue(passcode.isHittable)
+            capture(app, phase)
+        }
+        for cycle in 1...3 {
+            background()
+            enterPasscode(app)
+            assertRestored("Security restored with one passcode, cycle \(cycle)")
+        }
+        background()
+        app.navigationBars["Authentication"].buttons["Cancel"].tap()
+        let retry = app.buttons["Unlock Lava"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 10))
+        capture(app, "One interactive lock after authentication cancellation")
+        XCTAssertEqual(app.buttons.matching(identifier: "Unlock Lava").count, 1, "The scene must have one lock presenter.")
+        XCTAssertTrue(retry.isHittable, "Cancellation must leave a usable lock, never a blank shield. \(app.debugDescription)")
+        XCTAssertFalse(app.staticTexts["Enter passcode"].waitForExistence(timeout: 1), "No automatic retry after cancellation")
+        retry.tap()
+        enterPasscode(app)
+        assertRestored("Security restored after explicit retry")
+        nativeBack(app).tap()
+        app.buttons["row.Security"].tap()
+        enterPasscode(app)
+        XCTAssertTrue(passcode.waitForExistence(timeout: 10), "A later visit still requires credentials and proceeds on the first tap")
+        let activityProtection = app.switches["View Activity"]
+        scrollFullyIntoView(app, activityProtection)
+        if activityProtection.value as? String == "0" { activityProtection.tap() }
+        nativeBack(app).tap()
+        nativeTab(app, "Guard").tap()
+        let today = app.buttons["guard.today"]
+        XCTAssertTrue(today.waitForExistence(timeout: 10))
+        background()
+        enterPasscode(app)
+        XCTAssertTrue(today.waitForExistence(timeout: 10))
+        XCTAssertTrue(today.isHittable, "Unlocking Guard must reveal working content, never an empty screen.")
+        capture(app, "Guard restored after one unlock")
+        today.tap()
+        enterPasscode(app)
+        let periods = app.segmentedControls["activity.period"]
+        XCTAssertTrue(periods.waitForExistence(timeout: 10), "Activity entry must finish after one tap and one authentication.")
+        periods.buttons["Month"].tap()
+        background()
+        enterPasscode(app)
+        XCTAssertTrue(periods.waitForExistence(timeout: 10))
+        XCTAssertTrue(periods.buttons["Month"].isSelected, "The same Activity visit must resume with its selected period.")
+        XCTAssertTrue(periods.isHittable)
+        XCTAssertFalse(app.staticTexts["Enter passcode"].waitForExistence(timeout: 1))
+        capture(app, "Activity restores the selected period with one unlock")
+        app.launchEnvironment["LAVA_UI_TEST_RESET_SECURITY"] = "0"
+        app.terminate()
+        app.launch()
+        enterPasscode(app)
+        XCTAssertTrue(today.waitForExistence(timeout: 10), "Cold launch must reveal Guard after one unlock.")
+        XCTAssertTrue(today.isHittable)
+        XCTAssertFalse(app.staticTexts["Enter passcode"].waitForExistence(timeout: 1))
+        capture(app, "Cold launch reveals Guard after one unlock")
     }
 
     func testNativePasscodeSetupAndAuthenticationAboveReactSheet() throws {
@@ -5528,15 +6647,18 @@ final class RNFullAppUITests: XCTestCase {
         for _ in 0..<5 where !icon.isHittable { app.swipeUp() }
         XCTAssertTrue(icon.isHittable, app.debugDescription)
         let before = icon.value as? String
-        // Backgrounding revokes the turn while the RN sheet stays open. App
-        // Unlock is off, so the next setting mutation must prompt above it.
+        // The protected settings visit is retained beneath the shared lock even
+        // when the separate whole-app entry gate is off.
         XCUIDevice.shared.press(.home)
         app.activate()
-        XCTAssertTrue(icon.waitForExistence(timeout: 10))
-        icon.tap()
         XCTAssertTrue(app.staticTexts["Enter passcode"].waitForExistence(timeout: 5), app.debugDescription)
         capture(app, "Native authentication above the React Guard sheet")
         app.buttons["Cancel"].tap()
+        let retry = app.buttons["Unlock Lava"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 10))
+        retry.tap()
+        enterPasscode(app)
+        XCTAssertTrue(icon.waitForExistence(timeout: 10))
         XCTAssertEqual(icon.value as? String, before, "Cancelling authentication must leave the setting unchanged.")
         fullSheetHeader(app, title: "Lava Guard").buttons["Close"].tap()
         nativeBack(app).tap()
@@ -5551,10 +6673,11 @@ final class RNFullAppUITests: XCTestCase {
         XCTAssertTrue(restore.isHittable, app.debugDescription)
         XCUIDevice.shared.press(.home)
         app.activate()
-        XCTAssertTrue(restore.waitForExistence(timeout: 10))
-        restore.tap()
-        XCTAssertTrue(app.staticTexts["Enter passcode"].waitForExistence(timeout: 5), "StoreKit actions must reauthenticate after backgrounding.")
+        XCTAssertTrue(app.staticTexts["Enter passcode"].waitForExistence(timeout: 5), "The protected purchase visit must reauthenticate after backgrounding.")
         app.buttons["Cancel"].tap()
+        XCTAssertTrue(retry.waitForExistence(timeout: 10))
+        retry.tap()
+        enterPasscode(app)
         waitForSettledFrame(restore)
         nativeBack(app).tap()
 
@@ -5563,8 +6686,9 @@ final class RNFullAppUITests: XCTestCase {
         XCTAssertTrue(vpn.isHittable, app.debugDescription)
         vpn.tap()
         enterPasscode(app)
-        openVPNSetup(app)
-        let protectedSetup = app.switches["vpn.setup-toggle"]
+        let protectedSetup = app.descendants(matching: .any).matching(identifier: "vpn.setup-toggle").firstMatch.switches.firstMatch
+        XCTAssertTrue(protectedSetup.waitForExistence(timeout: 10))
+        XCTAssertEqual(protectedSetup.value as? String, "0", "Free users stop at the VPN prerequisite.")
         let protectedSetupValue = protectedSetup.value as? String
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.005, dy: 0.55))
             .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.18, dy: 0.55)),
@@ -5572,9 +6696,7 @@ final class RNFullAppUITests: XCTestCase {
         waitForSettledFrame(protectedSetup)
         XCTAssertFalse(app.staticTexts["Enter passcode"].exists, "Cancelled Back keeps the current native page authorization.")
         XCTAssertEqual(protectedSetup.value as? String, protectedSetupValue)
-        let nativeUpgrade = app.buttons["See Lava Plus"]
-        XCTAssertTrue(nativeUpgrade.waitForExistence(timeout: 10))
-        nativeUpgrade.tap()
+        tapNativeSwitch(protectedSetup)
         let nativePlus = app.navigationBars["Lava Plus"]
         XCTAssertTrue(nativePlus.waitForExistence(timeout: 10))
         nativePlus.buttons.firstMatch.tap()
@@ -5582,18 +6704,8 @@ final class RNFullAppUITests: XCTestCase {
         if !returnPromptAppeared {
             capture(app, "Native child return missing authentication")
             var observations = [app.debugDescription]
-            let setup = app.switches["vpn.setup-toggle"]
+            let setup = app.descendants(matching: .any).matching(identifier: "vpn.setup-toggle").firstMatch.switches.firstMatch
             observations.append("setup exists=\(setup.exists) hittable=\(setup.isHittable)")
-            #if targetEnvironment(simulator)
-            if setup.exists, setup.isHittable {
-                let before = setup.value as? String
-                tapNativeSwitch(setup)
-                let after = setup.value as? String
-                observations.append("setup before=\(before ?? "nil") after=\(after ?? "nil") prompt=\(app.staticTexts["Enter passcode"].exists)")
-                if after != before { tapNativeSwitch(setup) }
-                observations.append("restored=\(setup.value as? String ?? "nil")")
-            }
-            #endif
             let receipt = XCTAttachment(string: observations.joined(separator: "\n"))
             receipt.name = "Native child return admission diagnostic — isolated QA simulator"
             receipt.lifetime = .keepAlways
@@ -5616,11 +6728,12 @@ final class RNFullAppUITests: XCTestCase {
         enterPasscode(app)
         XCTAssertEqual(protectedSetup.value as? String, protectedSetupValue,
                        "Cancelled child-return authentication must preserve the setting.")
-        XCTAssertTrue(nativeUpgrade.waitForExistence(timeout: 10))
-        nativeUpgrade.tap()
+        XCTAssertTrue(protectedSetup.waitForExistence(timeout: 10))
+        tapNativeSwitch(protectedSetup)
         XCTAssertTrue(nativePlus.waitForExistence(timeout: 10))
         XCUIDevice.shared.press(.home)
         app.activate()
+        enterPasscode(app)
         XCTAssertTrue(nativePlus.waitForExistence(timeout: 10))
         nativePlus.buttons.firstMatch.tap()
         enterPasscode(app)
@@ -5631,10 +6744,16 @@ final class RNFullAppUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Enter passcode"].waitForExistence(timeout: 10),
             "The native VPN page also reauthorizes when resumed directly.")
         app.buttons["Cancel"].tap()
+        XCTAssertTrue(retry.waitForExistence(timeout: 10))
+        retry.tap()
+        enterPasscode(app)
+        XCTAssertTrue(app.navigationBars["VPN chaining"].waitForExistence(timeout: 10))
+        nativeBack(app).tap()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 10))
         let securityRow = app.buttons["row.Security"]
         for _ in 0..<5 where !securityRow.isHittable { app.swipeDown() }
-        app.buttons["row.Security"].tap()
+        waitForSettledFrame(securityRow)
+        securityRow.tap()
         enterPasscode(app)
         for _ in 0..<4 where !settings.isHittable { app.swipeUp() }
         settings.tap()
@@ -5649,7 +6768,11 @@ final class RNFullAppUITests: XCTestCase {
         filters.tap()
         app.buttons["row.Switch or manage filters"].tap()
         app.buttons["Core"].tap()
-        app.buttons["View or edit only"].tap()
+        let viewOnly = app.buttons["View or edit only"]
+        XCTAssertTrue(viewOnly.waitForExistence(timeout: 10))
+        waitForSettledFrame(viewOnly)
+        viewOnly.tap()
+        XCTAssertTrue(viewOnly.waitForNonExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "identifier == %@ AND label == %@", "filter.identity.name", "Core")).firstMatch.waitForExistence(timeout: 10))
         app.navigationBars.buttons["Edit"].tap()
         enterPasscode(app)
@@ -5664,13 +6787,14 @@ final class RNFullAppUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "identifier == %@ AND label == %@", "filter.identity.name", "Core")).firstMatch.waitForExistence(timeout: 10))
         XCUIDevice.shared.press(.home)
         app.activate()
+        enterPasscode(app)
         let cancelEditing = app.navigationBars.buttons["Cancel editing"]
         XCTAssertTrue(cancelEditing.waitForExistence(timeout: 10))
         cancelEditing.tap()
         let discard = app.alerts.buttons["Discard"]
         XCTAssertTrue(discard.waitForExistence(timeout: 10))
         discard.tap()
-        XCTAssertTrue(app.navigationBars.buttons["Edit"].waitForExistence(timeout: 10), "Discard must not demand credentials after the edit grant expires in the background.")
+        XCTAssertTrue(app.navigationBars.buttons["Edit"].waitForExistence(timeout: 10), "Discard must not demand another authentication after the protected visit resumes.")
         XCTAssertFalse(app.staticTexts["Enter passcode"].exists)
         XCTAssertFalse(app.staticTexts[discardedDomain].exists)
         capture(app, "Filter draft discarded after background without reauthentication")
@@ -5742,8 +6866,9 @@ final class RNFullAppUITests: XCTestCase {
         let sharedFilter = app.buttons.matching(NSPredicate(format: "label == %@", targetName)).firstMatch
         XCTAssertTrue(sharedFilter.waitForExistence(timeout: 10), app.debugDescription)
         sharedFilter.tap()
-        let shareInactive = app.alerts[targetName].buttons["Share"]
-        XCTAssertTrue(shareInactive.waitForExistence(timeout: 10), "Share the inactive filter without applying it.")
+        let shareInactive = app.sheets[targetName].buttons["Share"]
+        XCTAssertTrue(shareInactive.waitForExistence(timeout: 10), "Share the inactive filter through its native choice sheet without applying it.")
+        waitForSettledFrame(shareInactive)
         shareInactive.tap()
         let setupCode = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'LF1-'")).firstMatch
         for _ in 0..<4 where !setupCode.exists { app.swipeUp() }
@@ -5802,7 +6927,7 @@ final class RNFullAppUITests: XCTestCase {
         enterPasscode(app)
         let completed = app.staticTexts["Filter imported"]
         XCTAssertTrue(completed.waitForExistence(timeout: 20), app.debugDescription)
-        let message = app.staticTexts["The shared filter was imported as “\(targetName)” in Your filters."]
+        let message = app.staticTexts["The shared filter was added to Your filters as “\(targetName)”."]
         XCTAssertTrue(message.exists, "The success names the confirmed local filter.")
         capture(app, "Confirmed import awaiting Done")
 
@@ -5895,7 +7020,8 @@ final class RNFullAppUITests: XCTestCase {
                                                 action: XCUIElement, expectedDraft: String) throws {
         let input = app.textViews.firstMatch
         let keyboard = app.keyboards.firstMatch
-        let footer = [app.buttons["Choose file"], app.buttons["Save"]]
+        let editorContent = app.scrollViews.containing(.textView, identifier: "Content").firstMatch
+        let footer = [editorContent.buttons["Choose file"].firstMatch, editorContent.buttons["Save"].firstMatch]
         var scrollSamples: [String] = []
         defer {
             let evidence = XCTAttachment(string: scrollSamples.joined(separator: "\n"))
@@ -5973,13 +7099,21 @@ final class RNFullAppUITests: XCTestCase {
                       "The complete footer action must fit above the keyboard and its toolbar. Action=\(action.frame), visible=\(visible).")
     }
 
-    private func scrollFullyIntoView(_ app: XCUIApplication, _ element: XCUIElement, in lane: XCUIElement? = nil, afterScroll: (() -> Void)? = nil) {
+    private func scrollFullyIntoView(_ app: XCUIApplication, _ element: XCUIElement, in lane: XCUIElement? = nil, presentedSheet: XCUIElement? = nil, throughGutter: Bool = false, afterScroll: (() -> Void)? = nil) {
         // A heading can be tappable while its illustration is already above the
         // viewport. Move the complete scene using its real frame, with bounded
         // gestures that stay inside the native content viewport.
         func viewport() -> CGRect {
-            let top = app.navigationBars.firstMatch.exists ? app.navigationBars.firstMatch.frame.maxY + 8 : app.frame.minY + 8
-            let bottom = contentBottom(app) - 8
+            let header = presentedSheet ?? app.navigationBars.firstMatch
+            let top = header.exists ? header.frame.maxY + 8 : app.frame.minY + 8
+            // A presented sheet covers the retained page's bottom tab bar.
+            // Measure its visible window, rather than that background bar.
+            var contentEdge = presentedSheet == nil ? contentBottom(app) : app.frame.maxY
+            let keyboard = app.keyboards.firstMatch
+            if presentedSheet != nil, keyboard.exists, keyboard.frame.height > 0 {
+                contentEdge = min(contentEdge, keyboard.frame.minY)
+            }
+            let bottom = contentEdge - 8
             let page = CGRect(x: app.frame.minX, y: top, width: app.frame.width, height: bottom - top)
             return lane.map { page.intersection($0.frame).insetBy(dx: 0, dy: 4) } ?? page
         }
@@ -5987,6 +7121,7 @@ final class RNFullAppUITests: XCTestCase {
         // UIKit consumes part of each gesture before scrolling, so gesture
         // distance cannot predict the count. Stop on actual containment, capped
         // to keep a non-scrolling surface from looping indefinitely.
+        if let presentedSheet { XCTAssertTrue(presentedSheet.waitForExistence(timeout: 10)) }
         for _ in 0..<48 {
             let visible = viewport(), frame = element.frame
             if visible.contains(frame) { break }
@@ -5999,8 +7134,13 @@ final class RNFullAppUITests: XCTestCase {
             // otherwise a nearly stationary drag can activate a destination row.
             let distance = (requested < 0 ? -1.0 : 1.0) * max(16, min(visible.height * 0.4, abs(requested)))
             let origin = app.coordinate(withNormalizedOffset: .zero)
-            let start = origin.withOffset(CGVector(dx: visible.midX - app.frame.minX, dy: visible.midY - app.frame.minY))
-            let end = origin.withOffset(CGVector(dx: visible.midX - app.frame.minX, dy: visible.midY - app.frame.minY - distance))
+            // A prose field has its own scroll recognizer. The sheet gutter
+            // scrolls the parent without moving the caret or hitting an action.
+            // Explore's diagram also owns physical drag inspection; page
+            // scrolling must start outside that interactive drawing.
+            let gestureX = presentedSheet != nil || throughGutter ? visible.minX + 4 : visible.midX
+            let start = origin.withOffset(CGVector(dx: gestureX - app.frame.minX, dy: visible.midY - app.frame.minY))
+            let end = origin.withOffset(CGVector(dx: gestureX - app.frame.minX, dy: visible.midY - app.frame.minY - distance))
             start.press(forDuration: 0.05, thenDragTo: end, withVelocity: XCUIGestureVelocity(rawValue: 60), thenHoldForDuration: 1.0)
             afterScroll?()
         }
@@ -6013,8 +7153,18 @@ final class RNFullAppUITests: XCTestCase {
         app.typeText("1234")
         XCTAssertTrue(app.staticTexts["Enter passcode"].waitForNonExistence(timeout: 10))
     }
+    private func renderedStaticText(_ app: XCUIApplication, _ title: String) throws -> XCUIElement {
+        let query = app.staticTexts.matching(identifier: title)
+        XCTAssertTrue(query.firstMatch.waitForExistence(timeout: 10), app.debugDescription)
+        let leaves = query.allElementsBoundByIndex.filter {
+            $0.children(matching: .staticText).matching(identifier: title).count == 0
+        }
+        XCTAssertEqual(leaves.count, 1, "Measure the unique rendered text leaf rather than Fabric's paragraph container.")
+        return try XCTUnwrap(leaves.first)
+    }
     func testCustomTextSizeChangesReactLayoutAndRestoresSystem() throws {
         let app = launch()
+        restoreSystemTextSizeAfterCase = true
         nativeTab(app, "Settings").tap()
         app.buttons["row.Customization"].tap()
         let system = app.switches["Match system"]
@@ -6080,7 +7230,10 @@ final class RNFullAppUITests: XCTestCase {
         let configure = exploreContent.buttons["explore.configure"]
         XCTAssertTrue(configure.waitForExistence(timeout: 10))
         XCTAssertFalse(exploreContent.staticTexts["Welcome"].exists)
-        for _ in 0..<8 where !configure.isHittable { app.swipeUp() }
+        let exploreScroll = app.scrollViews.containing(.button, identifier: "explore.configure").firstMatch
+        XCTAssertTrue(exploreScroll.waitForExistence(timeout: 10), app.debugDescription)
+        capture(app, "Large text Explore configuration before measured scrolling")
+        scrollFullyIntoView(app, configure, in: exploreScroll, throughGutter: true)
         XCTAssertTrue(configure.isHittable, "The connection's real configuration must remain reachable with large text.")
         XCTAssertEqual(configure.label, "Open Filters")
         capture(app, "Large text Explore configuration")
@@ -6103,7 +7256,11 @@ final class RNFullAppUITests: XCTestCase {
             app.buttons["guard.filter"].tap()
             app.buttons["row.Switch or manage filters"].tap()
             app.buttons["Core"].tap()
-            app.buttons["View or edit only"].tap()
+            let viewOnly = app.buttons["View or edit only"]
+            XCTAssertTrue(viewOnly.waitForExistence(timeout: 10))
+            waitForSettledFrame(viewOnly)
+            viewOnly.tap()
+            XCTAssertTrue(viewOnly.waitForNonExistence(timeout: 10))
             XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "identifier == %@ AND label == %@", "filter.identity.name", "Core")).firstMatch.waitForExistence(timeout: 10), app.debugDescription)
         }
         openCore()
@@ -6112,7 +7269,17 @@ final class RNFullAppUITests: XCTestCase {
         for _ in 0..<5 where !add.isHittable { app.swipeUp() }
         add.tap()
         XCTAssertTrue(app.buttons["Add domain"].waitForExistence(timeout: 10))
+        let field = app.textFields["Domain to block"]
+        XCTAssertTrue(field.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
+        waitForSettledFrame(field)
+        let domainHeader = app.navigationBars.firstMatch
+        XCTAssertGreaterThanOrEqual(field.frame.minY, domainHeader.frame.maxY,
+                                   "Autofocus must not push the domain row behind its header.")
+        let focusedY = field.frame.minY
         app.typeText(domain)
+        XCTAssertEqual(field.frame.minY, focusedY, accuracy: 2)
+        capture(app, "Domain sheet keyboard preserves the input below its native header")
         app.buttons["Add domain"].tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "identifier == %@ AND label == %@", "filter.identity.name", "Core")).firstMatch.waitForExistence(timeout: 10))
         app.navigationBars.buttons["Save"].tap()
@@ -6164,7 +7331,11 @@ final class RNFullAppUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Core"].exists)
         app.buttons["Core"].tap()
         XCTAssertTrue(switchAction.waitForExistence(timeout: 10), "Either cancellation path must release the dialog's pending command for reopening.")
-        app.buttons["View or edit only"].tap()
+        let viewOnly = app.buttons["View or edit only"]
+        XCTAssertTrue(viewOnly.waitForExistence(timeout: 10))
+        waitForSettledFrame(viewOnly)
+        viewOnly.tap()
+        XCTAssertTrue(viewOnly.waitForNonExistence(timeout: 10))
         let identity = app.staticTexts["filter.identity.name"]
         XCTAssertTrue(identity.waitForExistence(timeout: 10))
         let originalY = identity.frame.minY
@@ -6186,20 +7357,125 @@ final class RNFullAppUITests: XCTestCase {
 
     func testCatalogHeadersAndCustomEntryClosePreservePickerDraft() throws {
         let app = launch(paidPlan: true)
-        app.buttons["guard.filter"].tap()
-        app.buttons["row.Switch or manage filters"].tap()
-        app.buttons["Core"].tap()
-        app.buttons["View or edit only"].tap()
+        // Reuse the existing optional capture fixture to select the real
+        // persisted appearance. Ordinary CI keeps its current launch behavior.
+        if let appearance = ProcessInfo.processInfo.environment["LAVA_UI_TEST_FEEDBACK_APPEARANCE"] {
+            XCTAssertTrue(["Light", "Dark"].contains(appearance))
+            guard ["Light", "Dark"].contains(appearance) else { return }
+            nativeTab(app, "Settings").tap()
+            let customization = app.buttons["row.Customization"]
+            scrollFullyIntoView(app, customization)
+            customization.tap()
+            XCTAssertTrue(app.navigationBars["Customization"].waitForExistence(timeout: 10))
+            let theme = app.segmentedControls["Appearance"].buttons[appearance]
+            scrollFullyIntoView(app, theme)
+            waitForSettledFrame(theme)
+            theme.tap()
+            XCTAssertTrue(theme.isSelected)
+            capture(app, "Catalog capture selects persisted \(appearance) appearance")
+            nativeBack(app).tap()
+            nativeTab(app, "Guard").tap()
+        }
+        let filterEntry = app.buttons["guard.filter"]
+        XCTAssertTrue(filterEntry.waitForExistence(timeout: 10))
+        waitForSettledFrame(filterEntry)
+        filterEntry.tap()
+        if #available(iOS 26.0, *) {
+            let libraryEntry = app.buttons["row.Switch or manage filters"]
+            XCTAssertTrue(libraryEntry.waitForExistence(timeout: 10))
+            libraryEntry.tap()
+            app.buttons["Core"].tap()
+            let viewOnly = app.buttons["View or edit only"]
+            XCTAssertTrue(viewOnly.waitForExistence(timeout: 10))
+            // UIKit may expose an action before its popover stops moving.
+            // A tap on that transitional frame leaves the choice open.
+            waitForSettledFrame(viewOnly)
+            viewOnly.tap()
+            XCTAssertTrue(viewOnly.waitForNonExistence(timeout: 10), "Selecting the settled native action must close the choice sheet.")
+        } else {
+            let current = app.buttons["row.Now filtering"]
+            XCTAssertTrue(current.waitForExistence(timeout: 10))
+            current.tap()
+        }
+        // iOS 18 reaches the same picker from the current filter's editor.
+        // Its existing filter-choice alert rejects a presentation delegate.
+        // Library also has an Edit toolbar item while filter.open resolves;
+        // require the destination identity before interacting with detail.
+        XCTAssertTrue(app.staticTexts["filter.identity.name"].waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertTrue(app.navigationBars.buttons["Edit"].waitForExistence(timeout: 10))
         app.navigationBars.buttons["Edit"].tap()
         let addList = app.buttons["Add a blocklist"]
+        XCTAssertTrue(addList.waitForExistence(timeout: 10), app.debugDescription)
         scrollFullyIntoView(app, addList)
         addList.tap()
         let listSearch = app.textFields["Search blocklists or categories"]
         XCTAssertTrue(listSearch.waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertTrue(app.navigationBars.buttons["Close"].isHittable)
+        let listHeader = fullSheetHeader(app, title: "Choose blocklists")
+        let listScroll = app.otherElements["sheet.results"].scrollViews.firstMatch
+        XCTAssertTrue(listScroll.waitForExistence(timeout: 10))
+        waitForSettledFrame(listHeader)
+        XCTAssertGreaterThanOrEqual(listScroll.frame.minY, listHeader.frame.maxY)
+        XCTAssertLessThan(listScroll.frame.minY, listHeader.frame.maxY + 20)
+        XCTAssertLessThan(listSearch.frame.minY, listHeader.frame.maxY + 100,
+                          "The category/search controls must start immediately below the native bar.")
+        let pinnedY = listSearch.frame.minY
+        let firstList = listScroll.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Block List Basic")).firstMatch
+        XCTAssertTrue(firstList.waitForExistence(timeout: 10))
+        let firstListY = firstList.frame.minY
+        listScroll.swipeDown()
+        waitForSettledFrame(listSearch)
+        XCTAssertEqual(listSearch.frame.minY, pinnedY, accuracy: 2,
+                       "Pulling a newly opened catalog must not leave a gap above its controls.")
+        listScroll.swipeUp()
+        XCTAssertEqual(listSearch.frame.minY, pinnedY, accuracy: 2,
+                       "Picker search stays pinned while list content moves beneath its material.")
+        XCTAssertLessThan(firstList.frame.minY, firstListY - 20)
+        capture(app, "Blocklist picker glass capsules over scrolling rows")
+        app.buttons["Multi-purpose"].tap()
+        let category = listScroll.staticTexts["Multi-purpose"].firstMatch
+        XCTAssertTrue(category.waitForExistence(timeout: 10))
+        waitForSettledFrame(category)
+        XCTAssertGreaterThanOrEqual(category.frame.minY, listSearch.frame.maxY)
+        XCTAssertLessThan(category.frame.minY, listSearch.frame.maxY + 60,
+                          "Category jumps must reveal their heading below the pinned controls.")
         capture(app, "Blocklist picker native header and pinned controls")
-        listSearch.tap(); listSearch.typeText("HaGeZi")
+        let listSearchFrame = listSearch.frame
+        let listCategory = app.buttons["Multi-purpose"]
+        let listCategoryFrame = listCategory.frame
+        let noMatchQuery = "lava-catalog-no-match-rc17"
+        listSearch.tap(); listSearch.typeText(noMatchQuery)
+        let emptyCatalog = app.staticTexts["No blocklists found"].firstMatch
+        XCTAssertTrue(emptyCatalog.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
+        waitForSettledFrame(listSearch)
+        XCTAssertEqual(listSearch.value as? String, noMatchQuery)
+        XCTAssertGreaterThanOrEqual(emptyCatalog.frame.minY, listSearch.frame.maxY,
+                                   "Empty search feedback must be visible below the controls, not behind the native bar.")
+        XCTAssertEqual(listSearch.frame.minY, pinnedY, accuracy: 2,
+                       "An empty result with the keyboard must retain the pinned search position.")
+        XCTAssertEqual(listSearch.frame.width, listSearchFrame.width, accuracy: 2)
+        XCTAssertEqual(listSearch.frame.height, listSearchFrame.height, accuracy: 2)
+        XCTAssertTrue(listCategory.exists, "Searching must retain the unfiltered category controls.")
+        XCTAssertEqual(listCategory.frame.minY, listCategoryFrame.minY, accuracy: 2)
+        XCTAssertEqual(listCategory.frame.width, listCategoryFrame.width, accuracy: 2)
+        XCTAssertEqual(listCategory.frame.height, listCategoryFrame.height, accuracy: 2)
+        retainFrames(["searchBefore": listSearchFrame, "searchEmpty": listSearch.frame,
+                      "categoryBefore": listCategoryFrame, "categoryEmpty": listCategory.frame],
+                     name: "Catalog keyboard empty-result control frames")
+        capture(app, "Blocklist picker glass search with keyboard and empty results")
+        let emptyCatalogY = emptyCatalog.frame.minY
+        for _ in 0..<3 {
+            listScroll.swipeUp()
+            waitForSettledFrame(emptyCatalog)
+            XCTAssertEqual(emptyCatalog.frame.minY, emptyCatalogY, accuracy: 2,
+                           "An empty catalog must have no artificial scroll range above the keyboard.")
+            XCTAssertEqual(listSearch.frame.minY, pinnedY, accuracy: 2)
+        }
+        listSearch.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: noMatchQuery.count))
+        XCTAssertTrue(emptyCatalog.waitForNonExistence(timeout: 10))
+        XCTAssertTrue(firstList.waitForExistence(timeout: 10))
+        listSearch.typeText("HaGeZi")
         app.navigationBars.buttons["Add your own blocklist"].tap()
         XCTAssertTrue(app.otherElements["custom-entry-page"].waitForExistence(timeout: 10), app.debugDescription)
         let listClose = app.navigationBars["Add your own blocklist"].buttons["Close"]
@@ -6221,8 +7497,42 @@ final class RNFullAppUITests: XCTestCase {
         let dnsSearch = app.textFields["Search DNS providers or transports"]
         XCTAssertTrue(dnsSearch.waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertTrue(app.navigationBars.buttons["Close"].isHittable)
+        let dnsHeader = fullSheetHeader(app, title: "Choose DNS")
+        let dnsScroll = app.otherElements["sheet.results"].scrollViews.firstMatch
+        XCTAssertTrue(dnsScroll.waitForExistence(timeout: 10))
+        waitForSettledFrame(dnsHeader)
+        XCTAssertGreaterThanOrEqual(dnsScroll.frame.minY, dnsHeader.frame.maxY)
+        XCTAssertLessThan(dnsScroll.frame.minY, dnsHeader.frame.maxY + 20)
+        XCTAssertLessThan(dnsSearch.frame.minY, dnsHeader.frame.maxY + 100)
         capture(app, "DNS picker native header and pinned controls")
-        dnsSearch.tap(); dnsSearch.typeText("Cloudflare")
+        let dnsPinnedY = dnsSearch.frame.minY
+        dnsScroll.swipeDown()
+        waitForSettledFrame(dnsSearch)
+        XCTAssertEqual(dnsSearch.frame.minY, dnsPinnedY, accuracy: 2)
+        dnsScroll.swipeUp()
+        waitForSettledFrame(dnsSearch)
+        XCTAssertEqual(dnsSearch.frame.minY, dnsPinnedY, accuracy: 2,
+                       "DNS search stays pinned while provider rows move beneath its glass capsule.")
+        capture(app, "DNS picker glass capsules over scrolling provider rows")
+        dnsSearch.tap(); dnsSearch.typeText("u")
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label == %@", "Quad9")).firstMatch.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label == %@", "HaGeZi DNS")).firstMatch.exists,
+                       "The u in /dns-query must not match an unrelated provider.")
+        dnsSearch.typeText("u")
+        let emptyDNS = app.staticTexts["No DNS providers found"].firstMatch
+        XCTAssertTrue(emptyDNS.waitForExistence(timeout: 10))
+        waitForSettledFrame(emptyDNS)
+        let emptyDNSY = emptyDNS.frame.minY
+        for _ in 0..<3 {
+            dnsScroll.swipeUp()
+            waitForSettledFrame(emptyDNS)
+            XCTAssertEqual(emptyDNS.frame.minY, emptyDNSY, accuracy: 2)
+            XCTAssertEqual(dnsSearch.frame.minY, dnsPinnedY, accuracy: 2)
+        }
+        capture(app, "DNS empty results remain below pinned controls with keyboard")
+        dnsSearch.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 2))
+        dnsSearch.typeText("Cloudflare")
+        XCTAssertEqual(dnsSearch.value as? String, "Cloudflare", "Typing must finish before opening custom entry.")
         app.navigationBars.buttons["Add custom DNS"].tap()
         XCTAssertTrue(app.otherElements["custom-entry-page"].waitForExistence(timeout: 10), app.debugDescription)
         let dnsClose = app.navigationBars["Custom DNS"].buttons["Close"]
@@ -6279,9 +7589,9 @@ final class RNFullAppUITests: XCTestCase {
         restoreDefaults()
         app.navigationBars.buttons["Edit"].tap()
         app.buttons.matching(NSPredicate(format: "label == %@ AND value == %@", "Delete", "Extra")).element.tap()
-        app.navigationBars.buttons["Confirm deletions"].tap()
-        XCTAssertTrue(app.buttons["Delete filter"].waitForExistence(timeout: 10))
-        app.buttons["Delete filter"].tap()
+        app.navigationBars.buttons["Review changes"].tap()
+        XCTAssertTrue(app.buttons["Confirm changes"].waitForExistence(timeout: 10))
+        app.buttons["Confirm changes"].tap()
         XCTAssertTrue(app.navigationBars.buttons["Edit"].waitForExistence(timeout: 10))
         XCTAssertEqual(savedRows().count, 2)
         createDraft()
@@ -6306,49 +7616,72 @@ final class RNFullAppUITests: XCTestCase {
     }
 
     func testDNSCompoundControlsAndNativeTransportPreserveSavedSettings() throws {
-        let app = launch()
-        XCUIDevice.shared.system.open(URL(string: "lavasecurity://settings/dns-resolver")!)
-        XCTAssertTrue(app.navigationBars["DNS provider"].waitForExistence(timeout: 15))
-        let device = app.switches["Use Device DNS setting"]
+        let app = launch(paidPlan: true)
+        nativeTab(app, "Settings").tap()
+        let entry = app.buttons["connection.dns"]
+        scrollFullyIntoView(app, entry); entry.tap()
+        let header = app.navigationBars["DNS settings"]
+        XCTAssertTrue(header.waitForExistence(timeout: 15))
+        let device = app.switches["Device DNS"]
         XCTAssertTrue(device.waitForExistence(timeout: 10))
-        // Real simulator configuration remains authoritative; no tunnel/profile
-        // fixture is used to fake the full-tunnel branch tested in the native policy.
-        XCTAssertTrue(device.isEnabled, "The ordinary unchained DNS path remains editable.")
-        let wasDevice = device.value as? String == "1"
-        if wasDevice { device.tap() }
-        let transport = app.segmentedControls["DNS Transport"]
-        scrollFullyIntoView(app, transport)
-        XCTAssertTrue(transport.isHittable)
-        let original = transport.buttons.matching(NSPredicate(format: "selected == true")).element.label
-        let changed = transport.buttons[original == "IP" ? "DoH" : "IP"]
-        changed.tap()
-        XCTAssertTrue(changed.isSelected)
-        let helperText = "IP uses standard, unencrypted DNS. DoH (DNS over HTTPS), DoT (DNS over TLS), and DoQ (DNS over QUIC) encrypt requests between Lava and your DNS provider."
-        let dnsPages = app.scrollViews.containing(.segmentedControl, identifier: "DNS Transport")
-        XCTAssertEqual(dnsPages.count, 1, "Measure the helper in the current DNS control's page.")
-        // Fabric exposes this text's wrapper and its nested UILabel with the
-        // same label. Measure the one leaf text element, not an arbitrary match.
-        let helperLeaves = dnsPages.element.staticTexts.matching(identifier: helperText).allElementsBoundByIndex.filter {
-            $0.children(matching: .staticText).matching(identifier: helperText).count == 0
-        }
-        XCTAssertEqual(helperLeaves.count, 1, "The DNS transport explanation must have one rendered leaf.")
-        let helper = try XCTUnwrap(helperLeaves.first)
-        scrollFullyIntoView(app, helper)
-        XCTAssertTrue(helper.isHittable)
-        XCTAssertFalse(app.buttons["See how DNS finds a website"].exists)
-        capture(app, "DNS compound rows and unwrapped native transport with explanation")
-        scrollFullyIntoView(app, transport)
-        transport.buttons[original].tap()
-        if wasDevice {
-            for _ in 0..<8 where !device.isHittable { app.swipeDown() }
-            device.tap()
-            XCTAssertEqual(device.value as? String, "1")
-        }
+        let enabledTiers = app.otherElements.matching(NSPredicate(format: "identifier BEGINSWITH %@", "dns.tier-toggle."))
+            .allElementsBoundByIndex.filter { $0.switches.firstMatch.value as? String == "1" }.count
+        XCTAssertGreaterThan(enabledTiers, 0, "The real saved DNS configuration must retain an enabled tier.")
+        // Fresh onboarding enables an encrypted fallback; a saved configuration
+        // can contain only Device DNS. Qualify the same switch invariant against
+        // actual readback without changing native defaults for this journey.
+        XCTAssertEqual(device.isEnabled, enabledTiers > 1,
+                       "The sole enabled DNS tier cannot be switched off; another enabled tier permits toggling.")
+        XCTAssertTrue(header.buttons["Edit"].isEnabled, "The unchained tier still admits selection editing.")
+        let savedValue = try XCTUnwrap(device.value as? String)
+        XCTAssertEqual(savedValue, "1", "Use the isolated simulator's initial Device DNS tier.")
+        header.buttons["Edit"].tap()
+        let tier = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Device DNS")).firstMatch
+        XCTAssertTrue(tier.waitForExistence(timeout: 10)); tier.tap()
+        let search = app.textFields["Search DNS providers or transports"]
+        XCTAssertTrue(search.waitForExistence(timeout: 10))
+        waitForSettledFrame(search); search.tap()
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "hasKeyboardFocus == true"), object: search)], timeout: 10), .completed)
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
+        waitForSettledFrame(app.keyboards.firstMatch, requiresHittable: false)
+        search.typeText("Cloudflare")
+        XCTAssertEqual(search.value as? String, "Cloudflare")
+        let picker = app.scrollViews.containing(.textField, identifier: "Search DNS providers or transports").firstMatch
+        XCTAssertTrue(picker.waitForExistence(timeout: 10))
+        let encrypted = picker.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND value CONTAINS %@", "Cloudflare", "https://cloudflare-dns.com/dns-query")).firstMatch
+        XCTAssertTrue(encrypted.waitForExistence(timeout: 10), app.debugDescription)
+        scrollFullyIntoView(app, encrypted)
+        XCTAssertTrue(encrypted.isHittable, "The current tier picker must expose the actual DoH endpoint.")
+        encrypted.tap()
+        capture(app, "DNS tier picker reviews a native-catalog DoH transport")
+        // This existing native-hosted picker pins its footer below search.
+        // Finish editing with the keyboard's normal Return/Done action before
+        // confirming; scrolling cannot move an independently pinned footer.
+        if app.keyboards.firstMatch.exists { search.typeText("\n") }
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 10))
+        XCTAssertEqual(search.value as? String, "Cloudflare")
+        let selection = app.buttons["Save selection"]
+        scrollFullyIntoView(app, selection, presentedSheet: app.navigationBars["Choose DNS"]); selection.tap()
+        XCTAssertTrue(header.waitForExistence(timeout: 10))
+        let staged = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND value CONTAINS %@", "Cloudflare", "DoH")).firstMatch
+        XCTAssertTrue(staged.waitForExistence(timeout: 10), "Picker confirmation stages the transport in the unsaved tier draft.")
+        capture(app, "DNS compound tier row retains the staged transport metadata")
+        header.buttons["Cancel editing"].tap()
+        let discard = app.alerts["Discard changes?"].buttons["Discard"]
+        XCTAssertTrue(discard.waitForExistence(timeout: 10)); discard.tap()
+        XCTAssertTrue(header.buttons["Edit"].waitForExistence(timeout: 10))
+        XCTAssertEqual(device.value as? String, savedValue, "Discard must preserve the saved DNS tier and its enabled state.")
+        XCTAssertFalse(staged.exists)
+        nativeBack(app).tap(); entry.tap()
+        XCTAssertTrue(device.waitForExistence(timeout: 10))
+        XCTAssertEqual(device.value as? String, savedValue, "Reentry must read the unchanged native DNS configuration.")
     }
 
     func testConfirmationGlyphsRemainWhiteInBothNativeToolbarHosts() throws {
         let app = launch()
         func assertWhiteGlyph(_ button: XCUIElement, name: String) {
+            XCTAssertTrue(button.waitForExistence(timeout: 10))
+            waitForSettledFrame(button)
             XCTAssertTrue(button.isEnabled)
             capture(app, name)
             let image = app.screenshot().image.cgImage!
@@ -6373,11 +7706,11 @@ final class RNFullAppUITests: XCTestCase {
         app.buttons["row.Switch or manage filters"].tap()
         app.navigationBars.buttons["Edit"].tap()
         app.buttons.matching(NSPredicate(format: "label == 'Delete' AND value == 'Core'")).firstMatch.tap()
-        assertWhiteGlyph(app.navigationBars.buttons["Confirm deletions"], name: "RN native toolbar white confirmation")
+        assertWhiteGlyph(app.navigationBars.buttons["Review changes"], name: "RN native toolbar white confirmation")
         app.buttons.matching(NSPredicate(format: "label == 'Undo' AND value == 'Core'")).firstMatch.tap()
         app.buttons["Core"].tap()
         XCTAssertTrue(app.navigationBars["Rename filter"].waitForExistence(timeout: 10))
-        assertWhiteGlyph(app.buttons["Save"], name: "SwiftUI native toolbar white confirmation")
+        assertWhiteGlyph(app.buttons["Save"], name: "Foreground modal native toolbar white confirmation")
         app.buttons["Cancel"].tap()
     }
 
@@ -6416,9 +7749,9 @@ final class RNFullAppUITests: XCTestCase {
         assertSameFrames(libraryFrames(app), baseline, phase: "Library review cancellation return")
         capture(app, "Library settled rows after staged deletion and review return")
         undo.tap()
-        XCTAssertTrue(app.buttons["Rename Core"].waitForExistence(timeout: 10))
-        capture(app, "Library Edit exposes the pencil and accessible rename action")
-        app.buttons["Rename Core"].tap()
+        XCTAssertTrue(app.buttons["filter.library.filter-essential"].waitForExistence(timeout: 10))
+        capture(app, "Library Edit exposes the accessible filter identity action")
+        app.buttons["filter.library.filter-essential"].tap()
         XCTAssertTrue(app.navigationBars["Rename filter"].waitForExistence(timeout: 10), app.debugDescription)
         let field = app.textFields["Filter name"]
         func replaceName(_ name: String) {
@@ -6436,15 +7769,31 @@ final class RNFullAppUITests: XCTestCase {
         XCTAssertTrue(emoji.exists)
         let originalEmoji = emoji.value as? String ?? "🌱"
         func replaceEmoji(_ value: String) {
+            // Editing the name can expand the native sheet as its keyboard
+            // arrives. Resolve a settled, hittable field before synthesizing
+            // the next touch; a frame from the earlier detent is stale.
+            waitForSettledFrame(emoji)
             emoji.tap()
+            let focused = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hasKeyboardFocus == true"), object: emoji)
+            XCTAssertEqual(XCTWaiter.wait(for: [focused], timeout: 10), .completed,
+                           "The native emoji leaf must receive keyboard focus.")
             emoji.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: (emoji.value as? String ?? "").count) + value)
         }
         capture(app, "Rename inputs use equal control slots and a shared divider")
         // Accessibility groups union their descendants: UIKit reports the whole
         // emoji field, while SwiftUI reports only its text's ink. Compare their
         // centers relative to the row label, not these different ink bounds.
-        XCTAssertEqual(emoji.frame.midY - app.staticTexts["Emoji"].frame.midY,
-                       field.frame.midY - app.staticTexts["Name"].frame.midY, accuracy: 1.5)
+        func leafLabel(_ title: String) -> XCUIElement {
+            let explicit = app.staticTexts["filter.identity.\(title.lowercased()).label"].firstMatch
+            if explicit.exists { return explicit }
+            let row = app.otherElements["filter.identity.\(title.lowercased()).row"]
+            XCTAssertTrue(row.exists, app.debugDescription)
+            return row.staticTexts.matching(identifier: title).allElementsBoundByIndex.first {
+                $0.children(matching: .staticText).matching(identifier: title).count == 0
+            } ?? row.staticTexts[title].firstMatch
+        }
+        XCTAssertEqual(emoji.frame.midY - leafLabel("Emoji").frame.midY,
+                       field.frame.midY - leafLabel("Name").frame.midY, accuracy: 1.5)
         XCTAssertLessThan(emoji.frame.midY, field.frame.midY)
         replaceEmoji("🍐🍊")
         XCTAssertEqual(emoji.value as? String, "🍊", "A new complete emoji replaces the prior glyph during input.")
@@ -6453,7 +7802,8 @@ final class RNFullAppUITests: XCTestCase {
         replaceEmoji("🍐")
         capture(app, "Native emoji keyboard and one-emoji identity editor")
         app.buttons["Save"].tap()
-        XCTAssertTrue(app.buttons["Rename RN Contract Core"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(app.buttons["filter.library.filter-essential"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertEqual(app.buttons["filter.library.filter-essential"].label, "RN Contract Core")
         app.navigationBars.buttons["Review changes"].tap()
         XCTAssertTrue(app.buttons["Confirm changes"].waitForExistence(timeout: 10), app.debugDescription)
         app.buttons["Confirm changes"].tap()
@@ -6470,7 +7820,7 @@ final class RNFullAppUITests: XCTestCase {
         replaceEmoji(originalEmoji)
         replaceName("Core")
         app.buttons["Save"].tap()
-        XCTAssertTrue(app.buttons["Rename Core"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["filter.library.filter-essential"].waitForExistence(timeout: 10))
         app.navigationBars.buttons["Review changes"].tap()
         XCTAssertTrue(app.buttons["Confirm changes"].waitForExistence(timeout: 10), app.debugDescription)
         app.buttons["Confirm changes"].tap()
@@ -6547,9 +7897,28 @@ final class RNFullAppUITests: XCTestCase {
 
     func testSettingsFeedbackSheetAndDeviceQAPushWithGuardedCloseAndReentry() throws {
         let app = launch()
-        app.tabBars.buttons["Settings"].tap()
+        nativeTab(app, "Settings").tap()
+        // Matched native/RN captures choose the real persisted setting through
+        // UIKit. The optional runner fixture leaves the ordinary CI case intact.
+        if let appearance = ProcessInfo.processInfo.environment["LAVA_UI_TEST_FEEDBACK_APPEARANCE"] {
+            XCTAssertTrue(["Light", "Dark"].contains(appearance))
+            guard ["Light", "Dark"].contains(appearance) else { return }
+            let customization = app.buttons["row.Customization"]
+            scrollFullyIntoView(app, customization)
+            customization.tap()
+            XCTAssertTrue(app.navigationBars["Customization"].waitForExistence(timeout: 10))
+            let theme = app.segmentedControls["Appearance"].buttons[appearance]
+            scrollFullyIntoView(app, theme)
+            waitForSettledFrame(theme)
+            theme.tap()
+            XCTAssertTrue(theme.isSelected)
+            capture(app, "Feedback capture selects persisted \(appearance) appearance")
+            nativeBack(app).tap()
+            XCTAssertTrue(app.buttons["row.Feedback"].waitForExistence(timeout: 10))
+        }
         let feedbackRow = app.buttons["row.Feedback"]
-        for _ in 0..<5 where !feedbackRow.isHittable { app.swipeUp() }
+        scrollFullyIntoView(app, feedbackRow)
+        waitForSettledFrame(feedbackRow)
         XCTAssertTrue(feedbackRow.isHittable, app.debugDescription)
         feedbackRow.tap()
         let feedback = fullSheetHeader(app, title: "Feedback")
@@ -6562,10 +7931,89 @@ final class RNFullAppUITests: XCTestCase {
         capture(app, "Settings Feedback sheet has a leading Close glyph")
         XCUIDevice.shared.press(.home)
         app.activate()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10), "Resume must restore the actual foreground application before inspecting its sheet.")
         XCTAssertTrue(close.waitForExistence(timeout: 10))
         let topic = app.buttons["I have a suggestion"]
         for _ in 0..<4 where !topic.isHittable { app.swipeUp() }
         topic.tap()
+        let next = app.buttons["Continue"]
+        XCTAssertTrue(next.wait(for: \.isEnabled, toEqual: true, timeout: 10)); next.tap()
+        let details = app.textViews.firstMatch
+        XCTAssertTrue(details.waitForExistence(timeout: 10))
+        waitForSettledFrame(details); details.tap()
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "hasKeyboardFocus == true"), object: details)], timeout: 10), .completed)
+        let feedbackContent = app.scrollViews.containing(.textView, identifier: nil).firstMatch
+        XCTAssertTrue(feedbackContent.waitForExistence(timeout: 10))
+        let previewDraft = "Preview retains this draft\nParagraph spacing after Back\nFinal retained line"
+        details.typeText(previewDraft)
+        capture(app, "Feedback multiline draft before focused preview")
+        let previewTitle = "See what information is sent"
+        let previewLink = app.links[previewTitle].exists ? app.links[previewTitle] : app.buttons[previewTitle]
+        XCTAssertTrue(previewLink.waitForExistence(timeout: 10))
+        scrollFullyIntoView(app, previewLink, in: feedbackContent, presentedSheet: feedback)
+        XCTAssertTrue(NSPredicate(format: "hasKeyboardFocus == true").evaluate(with: details), "Preview must exercise the still-focused editor transition.")
+        XCTAssertTrue(app.keyboards.firstMatch.exists)
+        previewLink.tap()
+        let information = fullSheetHeader(app, title: "Information sent")
+        XCTAssertTrue(information.waitForExistence(timeout: 15))
+        XCTAssertTrue(details.waitForNonExistence(timeout: 10), "The preview removes its editor from the visible accessibility tree.")
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 10), "Commit the focused editor before presenting diagnostics.")
+        capture(app, "Feedback diagnostics preview after focused draft")
+        let lifecycleNote = app.staticTexts["Lifecycle entries use safe event names and counters. Recent DNS and domain events are not included."].firstMatch
+        XCTAssertTrue(lifecycleNote.waitForExistence(timeout: 10))
+        let previewContent = app.scrollViews.containing(.staticText, identifier: "Lifecycle entries use safe event names and counters. Recent DNS and domain events are not included.").firstMatch
+        XCTAssertTrue(previewContent.waitForExistence(timeout: 10))
+        scrollFullyIntoView(app, lifecycleNote, in: previewContent, presentedSheet: information)
+        XCTAssertTrue(app.staticTexts["enable-begin, enable-finished, reconnect-requested"].firstMatch.exists)
+        XCTAssertTrue(app.staticTexts["startTunnel-ready, network-path-changed, resolver-reset"].firstMatch.exists)
+        capture(app, "Feedback diagnostics lifecycle examples and safe-data footer")
+        let previewBack = information.buttons.firstMatch
+        XCTAssertTrue(previewBack.wait(for: \.isHittable, toEqual: true, timeout: 10))
+        previewBack.tap()
+        XCTAssertTrue(details.waitForExistence(timeout: 15))
+        XCTAssertEqual(details.value as? String, previewDraft, "Preview Back retains the exact committed draft.")
+        scrollFullyIntoView(app, details, in: feedbackContent, presentedSheet: feedback)
+        capture(app, "Feedback multiline draft after preview Back")
+        // Start the limit check with a fresh native owner. Tapping a restored
+        // TextEditor can place its caret at the beginning, so backspacing is not
+        // a reliable way to clear it. This also qualifies discard after preview.
+        close.tap()
+        let previewDiscard = app.alerts["Discard feedback?"]
+        XCTAssertTrue(previewDiscard.waitForExistence(timeout: 10))
+        previewDiscard.buttons["Discard"].tap()
+        XCTAssertTrue(feedbackRow.waitForExistence(timeout: 10))
+        feedbackRow.tap()
+        XCTAssertTrue(feedback.waitForExistence(timeout: 10))
+        scrollFullyIntoView(app, topic, presentedSheet: feedback)
+        topic.tap()
+        XCTAssertTrue(next.wait(for: \.isEnabled, toEqual: true, timeout: 10)); next.tap()
+        XCTAssertTrue(details.waitForExistence(timeout: 10))
+        waitForSettledFrame(details); details.tap()
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "hasKeyboardFocus == true"), object: details)], timeout: 10), .completed)
+        XCTAssertEqual(details.value as? String, "")
+        capture(app, "Feedback empty details with native keyboard")
+        // Synthetic text exercises the real native limit without submitting a
+        // report or using the user's clipboard. One uninterrupted typing burst
+        // must settle to exactly the same value as the native draft/counter.
+        let limited = String(repeating: "a", count: 5000)
+        details.typeText(limited + "b")
+        let acceptedLimit = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in details.value as? String == limited }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [acceptedLimit], timeout: 15), .completed)
+        let count = app.staticTexts["5,000 of 5,000 characters used"].firstMatch
+        XCTAssertTrue(count.waitForExistence(timeout: 10), "The accepted native draft must promptly publish its final counter.")
+        scrollFullyIntoView(app, count, in: feedbackContent, presentedSheet: feedback)
+        XCTAssertTrue(count.exists)
+        capture(app, "Feedback visible input matches native grapheme limit")
+        let review = app.buttons["Review"]
+        scrollFullyIntoView(app, review, presentedSheet: feedback)
+        XCTAssertTrue(review.wait(for: \.isEnabled, toEqual: true, timeout: 10)); review.tap()
+        XCTAssertTrue(app.staticTexts["Review and submit"].waitForExistence(timeout: 10))
+        let submit = app.buttons["Submit"]
+        XCTAssertTrue(submit.waitForExistence(timeout: 10)); XCTAssertTrue(submit.isEnabled)
+        capture(app, "Feedback reviewed native context without submission")
+        let feedbackBack = app.buttons["Back"]
+        scrollFullyIntoView(app, feedbackBack, presentedSheet: feedback); feedbackBack.tap()
+        XCTAssertTrue(details.waitForExistence(timeout: 10)); XCTAssertEqual(details.value as? String, limited)
         close.tap()
         let discard = app.alerts["Discard feedback?"]
         XCTAssertTrue(discard.waitForExistence(timeout: 10), "Sheet Close must respect the draft's own discard guard.")
@@ -6593,7 +8041,7 @@ final class RNFullAppUITests: XCTestCase {
         XCTAssertTrue(qaRow.waitForExistence(timeout: 10))
         qaRow.tap()
         XCTAssertTrue(qa.waitForExistence(timeout: 10))
-        app.tabBars.buttons["Settings"].tap()
+        nativeTab(app, "Settings").tap()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 10))
         XCTAssertFalse(qa.exists, "Settings reselection must pop the native Device QA route.")
     }
@@ -6627,150 +8075,198 @@ final class RNFullAppUITests: XCTestCase {
 
     func testUnusedFilterSharesDirectlyWithoutSwitching() throws {
         let app = launch()
-        app.buttons["row.How Lava filters"].tap()
+        let filterEntry = app.buttons["guard.filter"]
+        waitForSettledFrame(filterEntry)
+        filterEntry.tap()
         let current = app.buttons["row.Now filtering"]
+        XCTAssertTrue(current.waitForExistence(timeout: 10))
         let activeBefore = current.label + String(describing: current.value)
-        app.buttons["row.Your filters"].tap()
-        // One of these defaults is unused even if another journey switched the active filter.
-        var chosen = "Core"
-        app.buttons[chosen].tap()
-        if !app.buttons["Switch to this filter"].waitForExistence(timeout: 2) {
-            app.navigationBars.buttons["BackButton"].tap()
-            chosen = "Balanced"
-            app.buttons[chosen].tap()
-        }
-        XCTAssertTrue(app.buttons["Switch to this filter"].waitForExistence(timeout: 10), app.debugDescription)
+        let chosen = current.label.contains("Core") ? "Balanced" : "Core"
+        let library = app.buttons["row.Switch or manage filters"]
+        waitForSettledFrame(library)
+        library.tap()
+        let inactive = app.buttons[chosen]
+        XCTAssertTrue(inactive.waitForExistence(timeout: 10))
+        waitForSettledFrame(inactive)
+        inactive.tap()
+        let choices = app.sheets[chosen]
+        XCTAssertTrue(choices.waitForExistence(timeout: 10), app.debugDescription)
         for label in ["Switch to this filter", "View or edit only", "Share", "Cancel"] {
-            XCTAssertTrue(app.buttons[label].exists, label)
+            XCTAssertTrue(choices.buttons[label].exists, label)
         }
         capture(app, "Unused filter offers switch view share and cancel")
-        app.buttons["Share"].tap()
-        XCTAssertTrue(app.navigationBars["Share your filter"].waitForExistence(timeout: 15))
+        let share = choices.buttons["Share"]
+        waitForSettledFrame(share)
+        share.tap()
+        let header = fullSheetHeader(app, title: "Share your filter")
+        XCTAssertTrue(header.waitForExistence(timeout: 15))
         XCTAssertTrue(app.buttons["Show the QR code"].waitForExistence(timeout: 10))
         capture(app, "Unused saved filter opens contextual sharing directly")
-        app.navigationBars.buttons["Close"].tap()
-        XCTAssertTrue(app.buttons[chosen].waitForExistence(timeout: 10))
-        app.navigationBars.buttons["BackButton"].tap()
+        header.buttons["Close"].tap()
+        XCTAssertTrue(header.waitForNonExistence(timeout: 10))
+        XCTAssertTrue(inactive.waitForExistence(timeout: 10))
+        let back = app.navigationBars["Your filters"].buttons["BackButton"]
+        waitForSettledFrame(back)
+        back.tap()
         XCTAssertTrue(current.waitForExistence(timeout: 10))
-        XCTAssertEqual(current.label + String(describing: current.value), activeBefore, "Sharing must not switch the active filter.")
+        XCTAssertEqual(current.label + String(describing: current.value), activeBefore,
+                       "Sharing must not switch the active filter.")
     }
 
     func testSharedPanelAndFooterLinksKeepExpandedTouchTargets() throws {
         let app = launch(paidPlan: true)
-        func tapNearLabel(_ label: XCUIElement, verticalOffset: CGFloat) {
-            waitForSettledFrame(label, requiresHittable: false)
-            let frame = label.frame
+        func tapNearLabel(_ link: XCUIElement, verticalOffset: CGFloat) {
+            scrollFullyIntoView(app, link, throughGutter: true)
+            waitForSettledFrame(link)
+            XCTAssertGreaterThanOrEqual(link.frame.height, 44)
+            let frame = link.frame
+            retainFrames(["accessible shared link": frame], name: "Shared footer target offset \(verticalOffset)")
             app.coordinate(withNormalizedOffset: .zero).withOffset(
                 CGVector(dx: frame.midX - app.frame.minX, dy: frame.midY - app.frame.minY + verticalOffset)
             ).tap()
         }
-        func openNetwork() {
-            XCUIDevice.shared.system.open(URL(string: "lavasecurity://settings")!)
-            let network = app.buttons["row.Network activity"]
-            XCTAssertTrue(network.waitForExistence(timeout: 10))
-            for _ in 0..<5 where !network.isHittable { app.swipeUp() }
-            network.tap()
-            XCTAssertTrue(app.links["network.privacy.link"].waitForExistence(timeout: 10), app.debugDescription)
+        XCUIDevice.shared.system.open(URL(string: "lavasecurity://settings")!)
+        let network = app.buttons["row.Network activity"]
+        XCTAssertTrue(network.waitForExistence(timeout: 10))
+        scrollFullyIntoView(app, network)
+        network.tap()
+        let networkIntro = "Connection and protection events stay on this device for 7 days. They leave it only if you include diagnostics when you send feedback."
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label == %@", networkIntro)).firstMatch.waitForExistence(timeout: 10))
+        capture(app, "Network activity retains its current shared information panel")
+        for offset: CGFloat in [-20, 20] {
+            XCUIDevice.shared.system.open(URL(string: "lavasecurity://guard")!)
+            let activity = app.buttons["guard.today"]
+            XCTAssertTrue(activity.waitForExistence(timeout: 10))
+            waitForSettledFrame(activity)
+            activity.tap()
+            let privacy = app.links["Review Privacy & data"].firstMatch
+            XCTAssertTrue(privacy.waitForExistence(timeout: 10), app.debugDescription)
+            tapNearLabel(privacy, verticalOffset: offset)
+            XCTAssertTrue(app.navigationBars["Privacy & data"].waitForExistence(timeout: 10),
+                          "The shared Activity footer must remain tappable at \(offset)pt.")
+            capture(app, "Shared Activity privacy footer edge opens its destination")
         }
         for offset: CGFloat in [-20, 20] {
-            openNetwork()
-            let label = app.staticTexts["network.privacy.link.label"].firstMatch
-            XCTAssertTrue(label.waitForExistence(timeout: 10), app.debugDescription)
-            retainFrames(["visible link label": label.frame, "accessible link": app.links["network.privacy.link"].frame], name: "Network link target offset \(offset)")
-            capture(app, "Compact Network info panel with shared paragraph gap")
-            tapNearLabel(label, verticalOffset: offset)
-            XCTAssertTrue(app.navigationBars["Privacy & data"].waitForExistence(timeout: 10), "The expanded Network link edge must remain tappable at \(offset)pt.")
-        }
-        for offset: CGFloat in [-20, 20] {
             XCUIDevice.shared.system.open(URL(string: "lavasecurity://settings")!)
-            let vpn = app.buttons["row.VPN chaining"]
+            let vpn = app.buttons["connection.vpn"]
             XCTAssertTrue(vpn.waitForExistence(timeout: 10))
-            for _ in 0..<5 where !vpn.isHittable { app.swipeUp() }
+            scrollFullyIntoView(app, vpn)
+            waitForSettledFrame(vpn)
             vpn.tap()
+            let setup = app.descendants(matching: .any).matching(identifier: "vpn.setup-toggle").firstMatch.switches.firstMatch
+            XCTAssertTrue(setup.waitForExistence(timeout: 10))
+            let originalSetup = setup.value as? String
             openVPNSetup(app)
-            let link = app.buttons["vpn.dns.link"]
-            for _ in 0..<7 where !link.isHittable { app.swipeUp() }
-            XCTAssertTrue(link.isHittable, app.debugDescription)
-            // The modifier keeps the accessible visible line at its natural height;
-            // test the expanded real hit region beyond that line, not only its center.
-            capture(app, "Native VPN footer uses the shared paragraph gap")
-            retainFrames(["native link": link.frame], name: "VPN footer target offset \(offset)")
+            let link = app.links["Review DNS settings"].firstMatch
+            XCTAssertTrue(link.waitForExistence(timeout: 10), app.debugDescription)
             tapNearLabel(link, verticalOffset: offset)
-            XCTAssertTrue(app.navigationBars["DNS provider"].waitForExistence(timeout: 10), "The native footer link edge must remain tappable at \(offset)pt.")
+            XCTAssertTrue(app.navigationBars["DNS settings"].waitForExistence(timeout: 10),
+                          "The shared VPN footer must remain tappable at \(offset)pt.")
+            capture(app, "Shared VPN DNS footer edge opens its destination")
+            nativeBack(app).tap()
+            XCTAssertTrue(app.navigationBars["VPN chaining"].waitForExistence(timeout: 10))
+            if originalSetup == "0" {
+                scrollFullyIntoView(app, setup)
+                waitForSettledFrame(setup)
+                tapNativeSwitch(setup)
+                XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                    setup.value as? String == originalSetup
+                }, object: nil)], timeout: 10), .completed)
+            }
         }
     }
 
 
     func testImportAddsThenReplacesWithOneConfirmationAndPreservesSavedName() throws {
         let app = launch(paidPlan: true)
-        // Generated with the production ShareableFilterConfiguration encoder;
-        // v2 contains oisd-small with an explicit empty allowed-exceptions set.
+        // Production encoder payload with oisd-small and no allowed exceptions.
         let code = "LF1-MNi38X0Rq1ZKzMnJL09NUbKKjtVRSsrJT86GcZJLi0vycyHsnMzikmIgUyk_szhFtzgXqEsJKFymZGVUCwA"
-        app.buttons["row.How Lava filters"].tap()
+        let filters = app.buttons["guard.filter"]
+        waitForSettledFrame(filters)
+        filters.tap()
         let current = app.buttons["row.Now filtering"]
+        XCTAssertTrue(current.waitForExistence(timeout: 10))
         let activeBefore = current.label + String(describing: current.value)
         func preview() {
-            app.navigationBars.buttons["Import"].tap()
-            let entry = app.buttons["Enter a code, Paste or type the setup code"]
+            let importAction = app.navigationBars["Filters"].buttons["Import"]
+            waitForSettledFrame(importAction)
+            importAction.tap()
+            let entry = app.buttons["Enter a code"]
             XCTAssertTrue(entry.waitForExistence(timeout: 10))
+            waitForSettledFrame(entry)
             entry.tap()
             let editor = app.textViews.firstMatch
             XCTAssertTrue(editor.waitForExistence(timeout: 10))
+            waitForSettledFrame(editor)
             editor.tap()
             editor.typeText(code)
             app.buttons["Continue"].tap()
-            XCTAssertTrue(app.navigationBars["Review import"].waitForExistence(timeout: 15), app.debugDescription)
+            XCTAssertTrue(fullSheetHeader(app, title: "Review import").waitForExistence(timeout: 15), app.debugDescription)
         }
         preview()
         app.buttons["Add as a new filter"].tap()
         let completed = app.staticTexts["Filter imported"].firstMatch
         XCTAssertTrue(completed.waitForExistence(timeout: 20), app.debugDescription)
-        let saved = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Saved as “")).firstMatch
+        let saved = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "The shared filter was added to Your filters as “")).firstMatch
         XCTAssertTrue(saved.waitForExistence(timeout: 10), app.debugDescription)
         let parts = saved.label.components(separatedBy: CharacterSet(charactersIn: "“”"))
         XCTAssertGreaterThan(parts.count, 2)
         let name = parts[1]
         XCTAssertFalse(name.isEmpty)
-        XCTAssertFalse(app.navigationBars.buttons["Back"].exists, "Committed imports cannot navigate back and replay.")
-        capture(app, "Add import reaches final confirmation with saved generated name")
+        let exactMessage = "The shared filter was added to Your filters as “\(name)”."
+        XCTAssertEqual(saved.label, exactMessage)
+        XCTAssertFalse(app.navigationBars.buttons["Back"].exists,
+                       "Committed imports cannot navigate back and replay.")
+        capture(app, "Add import confirms the exact saved generated name")
         app.buttons["Done"].tap()
+        XCTAssertTrue(completed.waitForNonExistence(timeout: 10))
         XCTAssertTrue(current.waitForExistence(timeout: 10))
         XCTAssertEqual(current.label + String(describing: current.value), activeBefore)
         preview()
         app.buttons["Replace a filter instead"].tap()
-        XCTAssertTrue(app.navigationBars["Replace a filter"].waitForExistence(timeout: 10))
+        let selection = fullSheetHeader(app, title: "Replace a filter")
+        XCTAssertTrue(selection.waitForExistence(timeout: 10))
         let target = app.buttons.matching(NSPredicate(format: "label == %@ OR label BEGINSWITH %@", name, name + ",")).firstMatch
-        for _ in 0..<5 where !target.isHittable { app.swipeUp() }
+        scrollFullyIntoView(app, target)
         XCTAssertTrue(target.isHittable, app.debugDescription)
+        XCTAssertFalse(target.label.contains("In effect"), "Replace only this journey's new inactive filter.")
+        waitForSettledFrame(target)
         target.tap()
-        let confirmation = app.alerts["Replace this filter?"]
-        XCTAssertTrue(confirmation.waitForExistence(timeout: 10))
-        XCTAssertTrue(confirmation.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", name)).firstMatch.exists)
-        confirmation.buttons["Cancel"].tap()
-        XCTAssertTrue(app.navigationBars["Replace a filter"].exists)
-        XCTAssertFalse(completed.exists, "Cancel must leave the target untouched and stay at selection.")
+        let review = fullSheetHeader(app, title: "Review import")
+        XCTAssertTrue(review.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts[name].firstMatch.exists)
+        let replace = app.buttons["Replace a filter"]
+        XCTAssertTrue(replace.waitForExistence(timeout: 10))
+        capture(app, "Replacement reviews the selected name and content diff before mutation")
+        review.buttons["Back"].tap()
+        XCTAssertTrue(selection.waitForExistence(timeout: 10))
+        XCTAssertFalse(completed.exists, "Cancelling review must leave the target untouched and return to selection.")
+        waitForSettledFrame(target)
         target.tap()
-        XCTAssertTrue(confirmation.waitForExistence(timeout: 10))
-        capture(app, "Replacement presents one target-aware confirmation dialog")
-        confirmation.buttons["Replace"].tap()
-        XCTAssertTrue(completed.waitForExistence(timeout: 20), "Replace must proceed directly to completion without a legacy review page. \(app.debugDescription)")
-        XCTAssertTrue(app.staticTexts["Saved as “\(name)” in Your filters."].firstMatch.exists)
-        capture(app, "Replacement finishes directly and preserves the selected filter name")
+        XCTAssertTrue(review.waitForExistence(timeout: 10))
+        waitForSettledFrame(replace)
+        replace.tap()
+        XCTAssertTrue(completed.waitForExistence(timeout: 20), app.debugDescription)
+        XCTAssertTrue(app.staticTexts[exactMessage].firstMatch.exists)
+        capture(app, "Reviewed replacement preserves the selected filter name")
         app.buttons["Done"].tap()
+        XCTAssertTrue(completed.waitForNonExistence(timeout: 10))
         XCTAssertTrue(current.waitForExistence(timeout: 10))
         XCTAssertEqual(current.label + String(describing: current.value), activeBefore)
-        app.buttons["row.Your filters"].tap()
+        let library = app.buttons["row.Switch or manage filters"]
+        waitForSettledFrame(library)
+        library.tap()
         XCTAssertTrue(app.buttons[name].waitForExistence(timeout: 10))
-        // Remove only this journey's new filter through the real staged Review.
-        app.navigationBars.buttons["Edit"].tap()
+        app.navigationBars["Your filters"].buttons["Edit"].tap()
         let deletion = app.buttons.matching(NSPredicate(format: "label == 'Delete' AND value == %@", name)).firstMatch
         XCTAssertTrue(deletion.waitForExistence(timeout: 10))
         deletion.tap()
-        app.navigationBars.buttons["Review changes"].tap()
+        app.navigationBars["Your filters"].buttons["Review changes"].tap()
         let commit = app.buttons["Confirm changes"]
         XCTAssertTrue(commit.waitForExistence(timeout: 10))
+        waitForSettledFrame(commit)
         commit.tap()
-        XCTAssertTrue(app.navigationBars.buttons["Edit"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.navigationBars["Your filters"].buttons["Edit"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.buttons[name].exists)
     }
 

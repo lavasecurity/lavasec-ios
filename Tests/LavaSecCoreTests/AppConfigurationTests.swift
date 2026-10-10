@@ -242,7 +242,7 @@ final class AppConfigurationTests: XCTestCase {
         XCTAssertEqual(decoded.enabledBlocklistIDs, [source.id])
     }
 
-    func testAllowlistValidatorRejectsThreatAndProtectedDomainsAfterNormalization() throws {
+    func testAllowlistValidatorRejectsThreatDomainsAfterNormalization() throws {
         var threatRules = DomainRuleSet()
         try threatRules.insert(domain: "danger.example.com")
         let validator = AllowlistValidator(nonAllowableThreatRules: threatRules)
@@ -255,10 +255,13 @@ final class AppConfigurationTests: XCTestCase {
         XCTAssertNil(threatResult.normalizedDomain)
         XCTAssertEqual(threatResult.message, "Some dangerous domains cannot be allowed.")
 
-        let protectedResult = validator.validate("apple.com")
-        XCTAssertFalse(protectedResult.isAllowed)
-        XCTAssertNil(protectedResult.normalizedDomain)
-        XCTAssertEqual(protectedResult.message, "This domain is protected so Lava can keep essential services working.")
+        for domain in ["apple.com", "gs-loc.apple.com", "icloud.com", "mzstatic.com",
+                       "api.lavasecurity.app", "lavasecurity.com", "lavasec.app", "lavasec.example",
+                       "accounts.google.com", "google.com"] {
+            let result = validator.validate(domain)
+            XCTAssertTrue(result.isAllowed, domain)
+            XCTAssertEqual(result.normalizedDomain, domain)
+        }
     }
 
     /// THE RUNG IS THE USER'S OWN RESOLVER SELECTION, carried through unchanged.

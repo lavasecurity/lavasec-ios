@@ -1112,13 +1112,19 @@ final class BlocklistCatalogSyncTests: XCTestCase {
         }
     }
 
-    func testDirectSourceParsingSkipsProtectedDomainsBeforeRulesReachSnapshot() async throws {
+    func testCatalogAndStreamingCompilationRetainServiceDomainsAndHonorExplicitExceptions() async throws {
         try await withTemporaryDirectory(prefix: "blocklist-catalog-sync") { temporaryDirectory in
             let catalogURL = URL(string: "https://api.lavasecurity.app/v1/catalog")!
             let sourceURL = URL(string: "https://upstream.example.com/list.txt")!
             let rawText = """
             api.lavasecurity.app
             apps.apple.com
+            gs-loc.apple.com
+            icloud.com
+            mzstatic.com
+            lavasecurity.com
+            lavasec.app
+            lavasec.example
             accounts.google.com
             google.com
             sites.google.com
@@ -1158,12 +1164,26 @@ final class BlocklistCatalogSyncTests: XCTestCase {
             ).sync(enabledSourceIDs: [source.id])
 
             let ruleSet = try XCTUnwrap(result.sourceRuleSets[source.id])
-            XCTAssertTrue(ruleSet.contains("ads.example.com"))
-            XCTAssertFalse(ruleSet.contains("google.com"))
-            XCTAssertTrue(ruleSet.contains("sites.google.com"))
-            XCTAssertFalse(ruleSet.contains("api.lavasecurity.app"))
-            XCTAssertFalse(ruleSet.contains("apps.apple.com"))
-            XCTAssertFalse(ruleSet.contains("accounts.google.com"))
+            let domains = rawText.split(separator: "\n").map(String.init)
+            XCTAssertEqual(ruleSet.allDomains, Set(domains))
+
+            let configuration = AppConfiguration(enabledBlocklistIDs: [source.id])
+            let compiler = CachedFilterSnapshotCompiler(cacheDirectoryURL: temporaryDirectory)
+            let snapshot = try await compiler.compile(
+                baseSnapshot: configuration.filterSnapshot(), configuration: configuration
+            )
+            for domain in domains {
+                XCTAssertEqual(snapshot.decision(for: domain).reason, .blocklist, domain)
+            }
+
+            var allowing = configuration
+            allowing.allowedDomains = ["gs-loc.apple.com", "api.lavasecurity.app"]
+            let allowedSnapshot = try await compiler.compile(
+                baseSnapshot: allowing.filterSnapshot(), configuration: allowing
+            )
+            XCTAssertEqual(allowedSnapshot.decision(for: "gs-loc.apple.com").reason, .localAllowlist)
+            XCTAssertEqual(allowedSnapshot.decision(for: "api.lavasecurity.app").reason, .localAllowlist)
+            XCTAssertEqual(allowedSnapshot.decision(for: "apps.apple.com").reason, .blocklist)
         }
     }
 
@@ -1368,6 +1388,7 @@ final class BlocklistCatalogSyncTests: XCTestCase {
             let rawText = """
             0.0.0.0 ads.example.com
             0.0.0.0 api.lavasecurity.app
+            0.0.0.0 gs-loc.apple.com
             """
             let requestLog = RequestLog()
             let cacheURL = temporaryDirectory
@@ -1386,7 +1407,8 @@ final class BlocklistCatalogSyncTests: XCTestCase {
             ).syncCustomBlocklists([source])
 
             XCTAssertTrue(try XCTUnwrap(result.sourceRuleSets[source.id]).contains("ads.example.com"))
-            XCTAssertFalse(try XCTUnwrap(result.sourceRuleSets[source.id]).contains("api.lavasecurity.app"))
+            XCTAssertTrue(try XCTUnwrap(result.sourceRuleSets[source.id]).contains("api.lavasecurity.app"))
+            XCTAssertTrue(try XCTUnwrap(result.sourceRuleSets[source.id]).contains("gs-loc.apple.com"))
             let requestedURLs = await requestLog.snapshot()
             XCTAssertEqual(requestedURLs, [sourceURL])
             XCTAssertFalse(result.usedCachedSourceIDs.contains(source.id))
@@ -1401,8 +1423,10 @@ final class BlocklistCatalogSyncTests: XCTestCase {
             ).loadCachedCustomBlocklists([source])
 
             XCTAssertTrue(try XCTUnwrap(cached.sourceRuleSets[source.id]).contains("ads.example.com"))
+            XCTAssertTrue(try XCTUnwrap(cached.sourceRuleSets[source.id]).contains("api.lavasecurity.app"))
+            XCTAssertTrue(try XCTUnwrap(cached.sourceRuleSets[source.id]).contains("gs-loc.apple.com"))
             XCTAssertTrue(cached.usedCachedSourceIDs.contains(source.id))
-            XCTAssertEqual(result.localCustomRuleCounts[source.id]?.count(matching: source), 1)
+            XCTAssertEqual(result.localCustomRuleCounts[source.id]?.count(matching: source), 3)
             XCTAssertEqual(cached.localCustomRuleCounts[source.id], result.localCustomRuleCounts[source.id])
             let mismatched = try CustomBlocklistSource(id: source.id, displayName: source.displayName,
                 rawURL: "https://different.example.com/list.txt", parseFormat: source.parseFormat)

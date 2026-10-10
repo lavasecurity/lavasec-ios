@@ -12,6 +12,10 @@ const internalStrings = new Set([
   'LavaChoice needs this platform’s native component mapping.',
   'Lava UI currently has an iOS implementation only. This platform needs its native component mapping.'
 ]);
+// Numeric SVG path/transform grammar carries artwork, never display prose.
+const vectorData = value => (/\d/.test(value) && /^(?:[MmLlHhVvCcSsQqTtAa][\s,]*[-+]?(?:\d|\.\d)[\d\s.,+\-eE]*|[Zz][\s,]*)+$/.test(value))
+  || /^(?:(?:translate|scale|rotate|matrix|skewX|skewY)\([\d\s.,+\-eE]*\)\s*)+$/.test(value)
+  || /^x(?:Min|Mid|Max)Y(?:Min|Mid|Max)\s+(?:meet|slice)$/.test(value);
 
 function isCopyArgument(node) {
   let current = node;
@@ -46,6 +50,7 @@ export function auditSource(text, file, known, allowed = new Set()) {
   const check = (value, node, force = false) => {
     value = value.trim();
     if (!/[A-Za-z]/.test(value) || (!force && !/\s/.test(value))) return;
+    if (!force && vectorData(value)) return;
     if (known.has(value) || allowed.has(value) || internalStrings.has(value) || /^iOS \d+(?:\.\d+)*$/.test(value)) return;
     misses.push(`${file}:${source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1}: ${JSON.stringify(value)}`);
   };
@@ -76,7 +81,7 @@ export function auditSource(text, file, known, allowed = new Set()) {
         const developerError = ts.isNewExpression(node.parent) && node.parent.expression.getText() === 'Error'
           && ['Unknown Lava color ', 'Unregistered toolbar glyph: '].includes(node.head.text)
           && node.templateSpans.length === 1 && node.templateSpans[0].literal.text === '';
-        if (!developerError && /[A-Za-z]{2}/.test(prose) && /\s/.test(prose)) {
+        if (!developerError && !vectorData(prose) && /[A-Za-z]{2}/.test(prose) && /\s/.test(prose)) {
           misses.push(`${file}:${source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1}: dynamic English template ${node.getText(source)}`);
         }
       }
@@ -103,7 +108,6 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   for (const file of ['../Sources/LavaSecKit/Generated/DefaultCatalog+Generated.swift','../Sources/LavaSecKit/DNSResolverPreset.swift']) {
     for (const match of fs.readFileSync(path.join(root,file),'utf8').matchAll(/(?:name|displayName): "([^"\n]+)"/g)) allowed.add(match[1]);
   }
-  allowed.add('Extra');
   const files = ['app','review','src'].flatMap(directory => sources(path.join(root,directory)));
   const misses = files.flatMap(file => auditSource(fs.readFileSync(file,'utf8'),path.relative(root,file),known,allowed));
   if (misses.length) {

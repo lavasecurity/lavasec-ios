@@ -155,3 +155,21 @@
 "Exception cannot be added" = "この例外を追加できません";
 "Already allowed" = "すでに許可済み";
 "Allowed exception limit reached" = "許可する例外の上限に達しました";
+
+/* WireGuard file, parser, and stored-key recovery. Never include imported secrets or directives. */
+"Couldn't open that file. Try moving it to Files first." = "ファイルを開けませんでした。まず「ファイル」アプリに移動してみてください。";
+"That file is %lld KB — far too big for a WireGuard config. Wrong file?" = "このファイルは %lld KB あり、WireGuard 設定としては大きすぎます。別のファイルではありませんか？";
+"That file isn't text, so it isn't a WireGuard config." = "このファイルはテキストではないため、WireGuard 設定ではありません。";
+"This build can't save a WireGuard configuration. Update Lava and try again." = "このビルドでは WireGuard 設定を保存できません。Lava をアップデートしてから再試行してください。";
+"This WireGuard configuration uses a setting Lava doesn't support." = "この WireGuard 設定には Lava が対応していない項目が含まれています。";
+"A required WireGuard setting is missing or repeated." = "必須の WireGuard 設定項目が欠けているか、重複しています。";
+"A WireGuard setting is in the wrong section." = "WireGuard 設定項目が正しいセクションにありません。";
+"A WireGuard setting has an invalid value." = "WireGuard 設定項目の値が無効です。";
+"This WireGuard configuration isn't valid. Check its addresses, routes, MTU, and public key." = "この WireGuard 設定は無効です。アドレス、ルート、MTU、公開鍵を確認してください。";
+"Your WireGuard configuration couldn't be read. Try again after unlocking your device." = "WireGuard 設定を読み取れませんでした。デバイスのロックを解除してから再試行してください。";
+"The saved WireGuard configuration is no longer usable. Import it again." = "保存した WireGuard 設定は使用できなくなりました。もう一度インポートしてください。";
+"Lava couldn't access the saved WireGuard keys. Unlock your device and try again." = "Lava は保存した WireGuard 鍵にアクセスできませんでした。デバイスのロックを解除して再試行してください。";
+"Lava couldn't save the WireGuard configuration. Try again in a moment." = "Lava は WireGuard 設定を保存できませんでした。しばらくしてから再試行してください。";
+"The WireGuard private key isn't valid. Import your configuration again." = "WireGuard の秘密鍵が無効です。設定をもう一度インポートしてください。";
+"The WireGuard pre-shared key isn't valid. Import your configuration again." = "WireGuard の事前共有鍵が無効です。設定をもう一度インポートしてください。";
+"This WireGuard configuration uses the server's key. Import your device's configuration instead." = "この WireGuard 設定にはサーバーの鍵が使われています。デバイス用の設定をインポートしてください。";

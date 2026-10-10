@@ -84,7 +84,7 @@ export function validateGeneratedProjects(projects, policy) {
   for (const target of pods) {
     assert.deepEqual(target.frameworks, policy.podFrameworks[target.name] ?? []);
     for (const path of [...target.sources, ...target.resources]) {
-      assert.ok(!path.split('/').includes('..') && ['ios/Pods/', 'node_modules/react-native/', 'node_modules/react-native-screens/', 'node_modules/react-native-safe-area-context/', 'ios/build/generated/ios/']
+      assert.ok(!path.split('/').includes('..') && ['ios/Pods/', 'node_modules/react-native/', 'node_modules/react-native-screens/', 'node_modules/react-native-safe-area-context/', 'node_modules/react-native-svg/', 'ios/build/generated/ios/']
         .some(root => path.startsWith(root)), `Unexpected dependency source: ${path}`);
     }
     assert.deepEqual(target.products, [], 'Pods may not alias native Lava package products.');

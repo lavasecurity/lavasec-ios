@@ -1,7 +1,8 @@
+import {usePlusEntry} from './plus-entry';
 import {useEffect,useRef,useState} from 'react';
 import {Linking} from 'react-native';
 import {useRoute,type RouteProp} from '@react-navigation/native';
-import {Alert} from '../app/presentation';
+import {Alert,localized} from '../app/presentation';
 import type {DNSChoice} from '../app/contract';
 import {LavaActionButton,LavaIconButton,LavaToggleControl} from '../src';
 import {colors} from '../src/colors.ios';
@@ -18,6 +19,7 @@ const openSettings=()=>{void Linking.openSettings().catch(report);};
 const dnsRowMetadata=(choice?:DNSChoice)=>[choice?.transport,choice?.metadata].filter(Boolean).join(' · ');
 export function DNSScreen(){
   const nav=useReviewNavigation();const {app,live}=useReview();const {draft,setDraft}=useDNSEditor();
+  const retireDraft=useRef(setDraft);retireDraft.current=setDraft;
   const [{editing,busy},setMode]=useState({editing:false,busy:false});const pending=useRef(false);
   const setBusy=(busy:boolean)=>setMode(mode=>({...mode,busy}));
   const setEditing=(editing:boolean)=>setMode(mode=>({...mode,editing}));
@@ -25,7 +27,7 @@ export function DNSScreen(){
   useEffect(()=>{if(!editable){setEditing(false);setDraft({tiers:[],context:''});}},[editable]);
   const systemDNS=editing?draft.systemDNS:live?.dnsPatch?.provider;
   const systemChanged=editing&&(draft.systemDNS?.id??null)!==(draft.systemDNSOriginalID??null);
-  useEffect(()=>()=>setDraft({tiers:[],context:''}),[]);
+  useEffect(()=>()=>retireDraft.current({tiers:[],context:''}),[]);
   const edit=()=>{setDraft({tiers:live?.dns.tiers??[],context:live?.dns.tiersContext??'',systemDNS:live?.dnsPatch?.provider??null,systemDNSOriginalID:live?.dnsPatch?.provider?.id??null});setEditing(true);};
   const cancel=()=>{const discard=()=>{setEditing(false);setDraft({tiers:[],context:''});};
     if(systemChanged||JSON.stringify(draft.tiers)!==JSON.stringify(live?.dns.tiers))Alert.alert('Discard changes?','Your saved DNS settings will stay active.',[{text:'Cancel',style:'cancel'},{text:'Discard',style:'destructive',onPress:discard}]);else discard();};
@@ -84,15 +86,15 @@ export function DNSScreen(){
     action={!editable?{title:'Review VPN chaining',onPress:()=>nav.navigate('VPNChaining')}:undefined}/>
     {editable&&<><Section title="Resolution tiers in Lava" footer="Lava tries the primary DNS first, then the fallback DNS if needed."><Group footer={editing&&editable?<OrderedListAction count={tiers.length} addTitle="Add fallback DNS" disabled={busy}
       onAdd={()=>nav.navigate('DNSPicker',{target:'tier',index:tiers.length})} onSwap={()=>setDraft({...draft,tiers:[...tiers].reverse()})}/>:undefined}>
-      {tiers.map((tier,index)=><ListRow key={index} title={tier.name} metadata={dnsRowMetadata(tier)}
+      {tiers.map((tier,index)=><ListRow key={index} verbatimTitle title={tier.name} metadata={dnsRowMetadata(tier)}
         leading={<Symbol name={`${index+1}.circle`} tone="primary"/>} disabled={busy}
         onPress={editing&&editable?()=>nav.navigate('DNSPicker',{target:'tier',index}):undefined}
         trailing={<AccessorySlot switchable>{editing?(editable&&tiers.length>1?<LavaIconButton title="Remove" item={tier.name} icon="remove" role="destructive" onPress={()=>removeTier(index)}/>:null)
-          :<LavaToggleControl title={tier.name} testID={`dns.tier-toggle.${index}`} value={tier.isEnabled!==false} disabled={busy||(tier.isEnabled!==false&&tiers.filter(row=>row.isEnabled!==false).length===1)} onValueChange={value=>toggleTier(index,value)}/>}</AccessorySlot>}/>)}
+          :<LavaToggleControl verbatimTitle title={tier.name} testID={`dns.tier-toggle.${index}`} value={tier.isEnabled!==false} disabled={busy||(tier.isEnabled!==false&&tiers.filter(row=>row.isEnabled!==false).length===1)} onValueChange={value=>toggleTier(index,value)}/>}</AccessorySlot>}/>)}
     </Group></Section>
     {live?.dnsPatch?.available&&<Section title="System DNS">
       <Group footer={editing&&!systemDNS?<SettingsInset><AddAction title="Add System DNS" onPress={()=>nav.navigate('DNSPicker',{target:'profile'})}/></SettingsInset>:undefined}>
-        {systemDNS?<ListRow title={systemDNS.name} metadata={dnsRowMetadata(systemDNS)}
+        {systemDNS?<ListRow verbatimTitle title={systemDNS.name} metadata={dnsRowMetadata(systemDNS)}
           leading={<Symbol name="s.circle" tone="primary"/>} disabled={profileBusy}
           onPress={editing?()=>nav.navigate('DNSPicker',{target:'profile'}):undefined}
           trailing={<AccessorySlot>{editing?<LavaIconButton title="Remove" item="System DNS" icon="remove" role="destructive" disabled={profileBusy} onPress={()=>setDraft({...draft,systemDNS:null})}/>:null}</AccessorySlot>}/>
@@ -102,17 +104,18 @@ export function DNSScreen(){
         <ListRow title={profileTitle} leading={profileBusy?<SettingsGlyph name={profileIcon} busy/>:<Symbol name={profileIcon} tone={enabled?'white':'primary'}/>} action disabled={profileBusy}
           onPress={selectProfile}/>
       </SettingsSurface>}
+      <Quiet>This profile handles system DNS requests and helps Lava filter with Connectivity Assist.</Quiet>
       {!editing&&canUninstall&&<SettingsSurface>
         <ListRow action title="Uninstall profile" icon="trash" color={colors.errorText} testID="dns.profile.uninstall"
           disabled={profileBusy||!app} onPress={uninstallProfile}/>
       </SettingsSurface>}
-      <Quiet>This profile handles system DNS requests and helps Lava filter with Connectivity Assist.</Quiet>
     </Section>}
     </>}
   </Screen>;
 }
 
 export function DNSPickerScreen(){
+  const upgrade=usePlusEntry();
   const nav=useReviewNavigation();const route=useRoute<RouteProp<ReviewRoutes,'DNSPicker'>>();const {target,index=0}=route.params;
   const {app,live}=useReview();const {draft,setDraft}=useDNSEditor();const [search,setSearch]=useState('');const [busy,setBusy]=useState(false);const pending=useRef(false);
   const [selected,setSelected]=useState<DNSChoice|undefined>(target==='profile'?(draft.systemDNS??undefined):draft.tiers[index]);
@@ -121,16 +124,18 @@ export function DNSPickerScreen(){
   useEffect(()=>{if(customToken&&live?.dns.customDraftToken===customToken&&live.dns.customDraft){setCustom(live.dns.customDraft);setSelected(live.dns.customDraft);setCustomToken(undefined);}},[customToken,live?.dns.customDraftToken,live?.dns.customDraft]);
   const choices=target==='profile'?live?.dnsPatch?.choices??[]:[...(live?.dns.choices??[]),...(custom?[custom]:[])];
   const query=search.trim().toLocaleLowerCase();
-  const sections=(target==='profile'?['DoT','DoH']:['Device','DoH','DoT','IP','DoQ']).map(title=>({title,items:choices.filter(choice=>choice.transport===title&&`${choice.name} ${choice.metadata} ${title}`.toLocaleLowerCase().includes(query))})).filter(section=>section.items.length);
+  // Search what the field promises: providers and transports. Endpoint paths
+  // such as /dns-query otherwise make "u" match every unrelated DoH provider.
+  const sections=(target==='profile'?['DoT','DoH']:['Device','DoH','DoT','IP','DoQ']).map(title=>({title,items:choices.filter(choice=>choice.transport===title&&[choice.name,title,localized(title)].some(value=>value.toLocaleLowerCase().includes(query)))})).filter(section=>section.items.length);
   const duplicate=target==='tier'&&!!selected&&draft.tiers.some((choice,i)=>i!==index&&sameDNS(choice,selected));
   const save=async()=>{if(!selected||duplicate||pending.current)return;pending.current=true;setBusy(true);
     try{if(target==='profile'){setDraft({...draft,systemDNS:selected});}
       else {const tiers=[...draft.tiers];tiers[index]={...selected,isEnabled:draft.tiers[index]?.isEnabled!==false};setDraft({...draft,tiers});}nav.goBack();
     }catch(e){report(e);}finally{pending.current=false;setBusy(false);}};
-  useToolbar({title:'Choose DNS',unstable_headerRightItems:()=>target==='tier'?[toolbarButton('Add custom DNS','plus',()=>{if(!live?.limits.allowsCustomDNS){nav.navigate('Upgrade');return;}if(!app||pending.current)return;pending.current=true;setBusy(true);void app.command<string>({type:'dns.customDraft',choice:custom}).then(id=>{setCustomToken(id);nav.navigate('CustomEntry',{id,kind:'dns'});}).catch(report).finally(()=>{pending.current=false;setBusy(false);});},busy)]:[],
+  useToolbar({title:'Choose DNS',unstable_headerRightItems:()=>target==='tier'?[toolbarButton('Add custom DNS','plus',()=>{if(!live?.limits.allowsCustomDNS){upgrade('customDNS',async()=>{if(!app)return;const id=await app.command<string>({type:'dns.customDraft',choice:custom});setCustomToken(id);return {name:'CustomEntry',params:{id,kind:'dns'}};});return;}if(!app||pending.current)return;pending.current=true;setBusy(true);void app.command<string>({type:'dns.customDraft',choice:custom}).then(id=>{setCustomToken(id);nav.navigate('CustomEntry',{id,kind:'dns'});}).catch(report).finally(()=>{pending.current=false;setBusy(false);});},busy)]:[],
   },[target,busy,draft,custom,live?.limits,selected]);
-  return <CatalogSheet sections={sections} search={search} onSearch={setSearch} searchLabel="Search DNS providers or transports"
-    renderRow={choice=><ListRow key={choice.id} title={choice.name} metadata={choice.metadata} selected={!!selected&&sameDNS(choice,selected)} disabled={busy||target==='tier'&&draft.tiers.some((row,i)=>i!==index&&sameDNS(row,choice))} onPress={()=>setSelected(choice)}/>}
+  return <CatalogSheet sections={sections} categoryTitles={(target==='profile'?['DoT','DoH']:['Device','DoH','DoT','IP','DoQ']).filter(title=>choices.some(choice=>choice.transport===title))} search={search} onSearch={setSearch} searchLabel="Search DNS providers or transports"
+    renderRow={choice=><ListRow key={choice.id} verbatimTitle title={choice.name} metadata={choice.metadata} selected={!!selected&&sameDNS(choice,selected)} disabled={busy||target==='tier'&&draft.tiers.some((row,i)=>i!==index&&sameDNS(row,choice))} onPress={()=>setSelected(choice)}/>}
     footer={<LavaActionButton title="Save Selection" disabled={!selected||duplicate||busy} onPress={()=>void save()}/>}
     empty={<Group><ListRow title="No DNS providers found"/></Group>}/>;
 }

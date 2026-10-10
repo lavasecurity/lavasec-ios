@@ -10,7 +10,7 @@ import {foundation} from '../src/foundation';
 import {guardAccent} from '../src/guard-accent.ios';
 import {LavaControlContent} from '../src';
 import Slider from '../specs/LavaSliderNativeComponent';
-import {Copy, DisclosureRow, Guardian, Row, RowAccessory, RowContent, Section, Symbol} from './primitives';
+import {Copy, DisclosureRow, Guardian, Row, RowAccessory, Section, Symbol} from './primitives';
 import {AddAction, SwapOrderAction, Group, ListRow, Quiet, toolbarButton, useToolbar} from './scaffold';
 
 // DNS and WireGuard share native item ownership in both modes. A custom Back
@@ -51,11 +51,19 @@ export function SettingsControl({children,title}:PropsWithChildren<{title?:strin
 // The navigation title names the page. Its introduction supplies one useful
 // body paragraph; callers cannot add another title or decorative glyph tier.
 export function SettingsIntro({summary,action}: {summary:string;action?:{title:string;onPress:()=>void}}) {
-  return <View style={{borderRadius:foundation.radius.surface,borderCurve:'continuous',backgroundColor:colors.softGreen}}><View style={{padding:foundation.space.lg}}><Copy role="supporting">{summary}</Copy></View>{action&&<Row title={action.title} intent="page" onPress={action.onPress}/>}</View>;
+  return <Group tone="green"><View style={{padding:foundation.space.lg}}><Copy role="supporting">{summary}</Copy></View>{action&&<Row title={action.title} intent="page" onPress={action.onPress}/>}</Group>;
 }
-export function SettingsStatus({title,description,icon,busy=false}: {title:string;description?:string;icon:string;busy?:boolean}) {
-  return <RowContent title={title} summary={description!==title?description:undefined}
-    leading={<SettingsGlyph name={icon} busy={busy}/>} intent="task"/>;
+export function SetupSection({title,steps,action,note}: {title:string;steps:readonly string[];action:{title:string;onPress:()=>void};note?:string}){
+  return <Section title={title} footer={note}><Group><View style={{paddingHorizontal:18,paddingVertical:16,gap:foundation.space.md}}>
+    {steps.map((step,index)=><View key={step} style={{flexDirection:'row',alignItems:'baseline',gap:foundation.space.md}}>
+      <View style={{width:22,height:22,borderRadius:11,backgroundColor:colors.softGreen,alignItems:'center',justifyContent:'center'}}><Copy role="row" color={colors.safeGreen} verbatim>{String(index+1)}</Copy></View>
+      <View style={{flex:1}}><Copy role="supporting">{step}</Copy></View>
+    </View>)}
+  </View><ListRow title={action.title} trailingRole="disclosure" trailing={<RowAccessory intent="external"/>} onPress={action.onPress}/></Group></Section>;
+}
+export function SettingsStatus({title,description,icon,leading,busy=false}: {title:string;description?:string;icon:string;leading?:React.ReactNode;busy?:boolean}) {
+  return <ListRow title={title} subtitle={description!==title?description:undefined}
+    leading={leading??<SettingsGlyph name={icon} busy={busy}/>}/>;
 }
 export function SettingsMessage({children,warning=false}:PropsWithChildren<{warning?:boolean}>) {
   return <View accessibilityLiveRegion="polite" style={settingsStyles.message}>{warning&&<Symbol name="exclamationmark.circle" tone="orange"/>}<View style={settingsStyles.flex}><Copy role="supporting" color={warning?colors.errorText:colors.secondaryText}>{children}</Copy></View></View>;
@@ -88,7 +96,7 @@ export function SettingsGuardRow({look,title,subtitle,selected,locked=false,onPr
 }) {
   return <ListRow action verbatimTitle testID={testID} title={title} subtitle={subtitle}
     leading={<SettingsGuardPortrait look={look} locked={locked}/>}
-    selected={navigation?undefined:selected} selectionLocked={!navigation&&locked} disabled={!navigation&&locked}
+    selected={navigation?undefined:selected} selectionLocked={!navigation&&locked}
     trailingRole={navigation?'disclosure':'control'} trailing={navigation?<RowAccessory intent="page" testID="customization.guard.accessory"/>:undefined} onPress={onPress}/>;
 }
 export function SettingsGuardPreview({look,title,subtitle,onPress}: {look:string;title:string;subtitle?:string;onPress:()=>void}) {

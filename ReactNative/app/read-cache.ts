@@ -35,6 +35,13 @@ export function readPrivacyScope(snapshot: AppSnapshot): string {
     snapshot.security?.unavailable, snapshot.security?.readRevision, snapshot.security?.sourceRevision,snapshot.security?.ownerRevision,snapshot.security?.displayClearRevision]);
 }
 
+/** Staging advances the source revision itself; only authority changes retire its review handoff. */
+export function domainReviewPrivacyScope(snapshot:AppSnapshot):string {
+  // Older projections without a native owner identity keep the strict read fence.
+  if(snapshot.security?.ownerRevision===undefined)return readPrivacyScope(snapshot);
+  return readPrivacyScope({...snapshot,security:{...snapshot.security,sourceRevision:undefined}});
+}
+
 /** Painted opt-out frames ignore routine grant revocation, while data ownership and policy still bind them. */
 export function readDisplayScope(snapshot:AppSnapshot):string {
   if(snapshot.security?.ownerRevision!==undefined&&snapshot.security.displayClearRevision!==undefined) {
@@ -50,4 +57,10 @@ export function presentationOwnerScope(snapshot:AppSnapshot):string {
   const ordered=Object.entries(snapshot.session?.protectedActions??{}).sort(([a],[b])=>a.localeCompare(b));
   const owner=snapshot.security?.ownerRevision??[snapshot.account?.signedIn,snapshot.account?.status,snapshot.account?.detail,snapshot.security?.sourceRevision];
   return JSON.stringify([owner,mayRetainPresentationFrame(snapshot)?undefined:snapshot.session?.passcode,ordered,snapshot.security?.unavailable]);
+}
+
+/** Ordinary settings scaffolds survive policy edits; actual owner replacement still retires their viewport. */
+export function presentationScaffoldOwnerScope(snapshot:AppSnapshot):string {
+  const owner=snapshot.security?.ownerRevision??[snapshot.account?.signedIn,snapshot.account?.status,snapshot.account?.detail,snapshot.security?.sourceRevision];
+  return JSON.stringify([owner,snapshot.security?.unavailable]);
 }

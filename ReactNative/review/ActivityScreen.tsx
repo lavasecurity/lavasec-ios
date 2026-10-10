@@ -1,3 +1,4 @@
+import {useRouteViewState} from '../app/use-route-view-state';
 import {Alert, localized} from '../app/presentation';
 import {useAppQuery} from '../app/queries';
 import {useEffect, useRef, useState} from 'react';
@@ -27,68 +28,90 @@ function calendarDayKey(){
 export function ActivityScreen() {
   const nav = useReviewNavigation();
   const {app,live,activityExample: showExample} = useReview();
-  const [dates, setDates] = useState<ActivityDates | null>(live?.activityDates ?? null);
-  const [period,setPeriod]=useState<'today'|'week'|'month'|'custom'>('today');
+  const [dates, setDates] = useRouteViewState<ActivityDates | null>(live?.activityDates ?? null);
+  const [period,setPeriod]=useRouteViewState<'today'|'week'|'month'|'custom'>('today');
   const dateRequest=useRef(0);
   const pendingPreset=useRef<number|undefined>(undefined);
+  const dateWork=useRef<{request:number;epoch:number|undefined}|undefined>(undefined);
+  // The admitted native projection already supplies today's calendar range.
+  // Use it for the first query instead of starting another date round trip.
+  const initializedDates=useRef(!!live?.activityDates);
+  const resumePreset=useRef(false);
   const calendarDay=useRef(calendarDayKey());
   const activePeriod=useRef(period);activePeriod.current=period;
   const mounted = useRef(false);
   const picking = useRef(false);
-  const preparingCustom = useRef<number|undefined>(undefined);
   const [pickerVisible,setPickerVisible]=useState(false);
   const focused=useIsFocused();
   const [foreground,setForeground]=useState(AppState.currentState==='active');
-  useEffect(()=>{const listener=AppState.addEventListener('change',state=>setForeground(state==='active'));return()=>listener.remove();},[]);
-  const canPresentCustom=useRef(focused&&foreground);canPresentCustom.current=focused&&foreground;
-  useEffect(()=>{
-    if((!focused||!foreground)&&preparingCustom.current!==undefined){
-      ++dateRequest.current;preparingCustom.current=undefined;picking.current=false;setPickerVisible(false);
-    }
-  },[focused,foreground]);
-  const choosePeriod=(preset:'today'|'week'|'month',showFailure=true)=>{
-    if(picking.current)return;
-    const request=++dateRequest.current;
-    const day=calendarDayKey();pendingPreset.current=request;
-    return NativeReview.getActivityDatePreset(preset).then(value=>{
-      if(!mounted.current||request!==dateRequest.current)return;
-      if(!value)throw new Error('Activity dates unavailable');
-      calendarDay.current=day;
-      setDates(value);setPeriod(preset);
-    }).catch(()=>{if(showFailure&&mounted.current&&request===dateRequest.current)Alert.alert('Activity dates unavailable','Please try again.');})
-      .finally(()=>{if(pendingPreset.current===request)pendingPreset.current=undefined;});
+  const epoch=app?.getReadEpoch?.();
+  const authoritative=!app?.getSnapshot||!!live&&!!app.getSnapshot().snapshot;
+  const activeDates=!app?.getSnapshot||foreground;
+  const canPresentCustom=useRef(focused&&activeDates);canPresentCustom.current=focused&&activeDates;
+  const cancelDates=()=>{
+    ++dateRequest.current;dateWork.current=undefined;pendingPreset.current=undefined;
+    picking.current=false;setPickerVisible(false);
   };
-  useEffect(() => {
-    mounted.current = true;const request=++dateRequest.current;
-    NativeReview.getActivityDates().then(value => { if (mounted.current&&request===dateRequest.current) setDates(value); })
-      .catch(() => { if (mounted.current&&request===dateRequest.current) Alert.alert('Activity dates unavailable', 'Please try again.'); });
-    return () => { mounted.current = false; };
-  }, []);
-  const wasForeground=useRef(foreground);
+  // Invalidate synchronously at the lifecycle boundary. A native picker reply
+  // can arrive before React commits its concealed render.
+  useEffect(()=>{mounted.current=true;const listener=AppState.addEventListener('change',state=>{
+    if(state!=='active'){resumePreset.current=true;cancelDates();}
+    setForeground(state==='active');
+  });return()=>{mounted.current=false;++dateRequest.current;listener.remove();};},[]);
+  const canReadDates=()=>mounted.current&&canPresentCustom.current&&(!app?.getSnapshot
+    ||!!live&&AppState.currentState==='active'&&!!app.getSnapshot().snapshot&&app.getReadEpoch?.()===epoch);
+  const choosePeriod=(preset:'today'|'week'|'month',showFailure=true)=>{
+    if(picking.current||!canReadDates())return;
+    const request=++dateRequest.current;
+    const day=calendarDayKey();pendingPreset.current=request;dateWork.current={request,epoch};
+    return NativeReview.getActivityDatePreset(preset).then(value=>{
+      if(request!==dateRequest.current||!canReadDates())return;
+      if(!value)throw new Error('Activity dates unavailable');
+      initializedDates.current=true;calendarDay.current=day;
+      setDates(value);setPeriod(preset);
+    }).catch(()=>{if(showFailure&&request===dateRequest.current&&canReadDates())Alert.alert('Activity dates unavailable','Please try again.');})
+      .finally(()=>{if(pendingPreset.current===request)pendingPreset.current=undefined;if(dateWork.current?.request===request)dateWork.current=undefined;});
+  };
   useEffect(()=>{
-    const returning=foreground&&!wasForeground.current;wasForeground.current=foreground;
-    if(returning&&activePeriod.current!=='custom')choosePeriod(activePeriod.current,false);
-  },[foreground]);
+    if(!focused||!activeDates||!authoritative){
+      if(!foreground||!authoritative)resumePreset.current=true;
+      if(dateWork.current)cancelDates();return;
+    }
+    // A resumed route can render before AppStore.refresh restores its fields.
+    // Start date preparation only with the current render's admitted setters.
+    if(dateWork.current&&dateWork.current.epoch!==epoch){resumePreset.current=true;cancelDates();}
+    if(dateWork.current)return;
+    if(!initializedDates.current){
+      const request=++dateRequest.current;const day=calendarDayKey();dateWork.current={request,epoch};
+      NativeReview.getActivityDates().then(value=>{
+        if(request!==dateRequest.current||!canReadDates())return;
+        initializedDates.current=true;resumePreset.current=false;calendarDay.current=day;setDates(value);
+      }).catch(()=>{if(request===dateRequest.current&&canReadDates())Alert.alert('Activity dates unavailable','Please try again.');})
+        .finally(()=>{if(dateWork.current?.request===request)dateWork.current=undefined;});
+    }else if(resumePreset.current){
+      resumePreset.current=false;
+      if(activePeriod.current!=='custom')choosePeriod(activePeriod.current,false);
+    }
+  },[app,focused,activeDates,authoritative,epoch]);
   const pickCustom=()=>{
-    if(picking.current||!dates)return;
-    picking.current=true;setPickerVisible(true);const request=++dateRequest.current;preparingCustom.current=request;
+    if(picking.current||!dates||!canReadDates())return;
+    picking.current=true;setPickerVisible(true);const request=++dateRequest.current;dateWork.current={request,epoch};
     Promise.resolve(period==='custom'?dates:NativeReview.getActivityDatePreset('fortnight'))
       .then(initial=>{
-        if(!mounted.current||request!==dateRequest.current||!canPresentCustom.current)return null;
+        if(request!==dateRequest.current||!canReadDates())return null;
         if(!initial)throw new Error('Activity dates unavailable');
-        preparingCustom.current=undefined;
         return NativeReview.pickActivityDates(initial.start,initial.end);
       })
-      .then(value=>{if(mounted.current&&value&&request===dateRequest.current){setDates(value);setPeriod('custom');}})
-      .catch(()=>{if(mounted.current&&request===dateRequest.current)Alert.alert('Activity dates unavailable','Please try again.');})
-      .finally(()=>{if(request===dateRequest.current){preparingCustom.current=undefined;picking.current=false;if(mounted.current)setPickerVisible(false);}});
+      .then(value=>{if(value&&request===dateRequest.current&&canReadDates()){initializedDates.current=true;setDates(value);setPeriod('custom');}})
+      .catch(()=>{if(request===dateRequest.current&&canReadDates())Alert.alert('Activity dates unavailable','Please try again.');})
+      .finally(()=>{if(request===dateRequest.current){dateWork.current=undefined;picking.current=false;if(mounted.current)setPickerVisible(false);}});
   };
   const query = useAppQuery<typeof activityEmpty>(dates ? {type:'activity.query',start:dates.start,end:dates.end,hourly:period==='today'} : null);
   // The existing foreground query poll rerenders this screen every five seconds.
   // Check the local calendar here instead of adding another timer or querying a
   // preset on every tick. Returning focus also catches a missed day/zone change.
   useEffect(()=>{
-    if(!focused||!foreground||picking.current||pendingPreset.current!==undefined)return;
+    if(!canReadDates()||picking.current||dateWork.current||pendingPreset.current!==undefined)return;
     const day=calendarDayKey();
     if(day===calendarDay.current)return;
     // A rejected refresh keeps the previous key so the next poll can retry.

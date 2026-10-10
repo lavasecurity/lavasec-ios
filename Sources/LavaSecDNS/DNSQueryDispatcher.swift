@@ -35,17 +35,19 @@ public struct DNSQueryDispatcher: Sendable {
         public let maximumAnswerTTL: UInt32?
     }
 
-    /// Applies current pause intent to a question-and-alias decision. Would-block answers
-    /// get a short TTL while paused so client caches cannot outlive resumed protection.
+    /// Applies current pause intent to a question-and-alias decision. Normal allows keep
+    /// their filter reason; would-block answers are marked as allowed by the pause and get
+    /// a short TTL so client caches cannot outlive resumed protection.
     public func decideForwardedResponse(
         filterDecision: FilterDecision,
         isProtectionPaused: Bool,
         maximumAnswerTTL: UInt32?,
         pausedWouldBlockTTL: UInt32
     ) -> ForwardedDecision {
-        let pauseTTL = isProtectionPaused && filterDecision.action == .block ? pausedWouldBlockTTL : nil
+        let pauseOverridesBlock = isProtectionPaused && filterDecision.action == .block
+        let pauseTTL = pauseOverridesBlock ? pausedWouldBlockTTL : nil
         return ForwardedDecision(
-            decision: isProtectionPaused ? .pausedAllow : filterDecision,
+            decision: pauseOverridesBlock ? .pausedAllow : filterDecision,
             maximumAnswerTTL: [maximumAnswerTTL, pauseTTL].compactMap { $0 }.min()
         )
     }

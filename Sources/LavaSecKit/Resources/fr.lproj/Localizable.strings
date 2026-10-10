@@ -142,3 +142,21 @@
 "Exception cannot be added" = "Impossible d’ajouter cette exception";
 "Already allowed" = "Déjà autorisé";
 "Allowed exception limit reached" = "Limite d’exceptions autorisées atteinte";
+
+/* WireGuard file, parser, and stored-key recovery. Never include imported secrets or directives. */
+"Couldn't open that file. Try moving it to Files first." = "Impossible d’ouvrir ce fichier. Essayez d’abord de le déplacer dans Fichiers.";
+"That file is %lld KB — far too big for a WireGuard config. Wrong file?" = "Ce fichier fait %lld Ko — bien trop volumineux pour une configuration WireGuard. Est-ce le bon fichier ?";
+"That file isn't text, so it isn't a WireGuard config." = "Ce fichier n’est pas un fichier texte, ce n’est donc pas une configuration WireGuard.";
+"This build can't save a WireGuard configuration. Update Lava and try again." = "Cette version ne peut pas enregistrer de configuration WireGuard. Mettez Lava à jour et réessayez.";
+"This WireGuard configuration uses a setting Lava doesn't support." = "Cette configuration WireGuard utilise un réglage que Lava ne prend pas en charge.";
+"A required WireGuard setting is missing or repeated." = "Un réglage WireGuard obligatoire est manquant ou répété.";
+"A WireGuard setting is in the wrong section." = "Un réglage WireGuard se trouve dans la mauvaise section.";
+"A WireGuard setting has an invalid value." = "Un réglage WireGuard contient une valeur invalide.";
+"This WireGuard configuration isn't valid. Check its addresses, routes, MTU, and public key." = "Cette configuration WireGuard n’est pas valide. Vérifiez les adresses, les routes, le MTU et la clé publique.";
+"Your WireGuard configuration couldn't be read. Try again after unlocking your device." = "Impossible de lire votre configuration WireGuard. Déverrouillez votre appareil et réessayez.";
+"The saved WireGuard configuration is no longer usable. Import it again." = "La configuration WireGuard enregistrée n’est plus utilisable. Importez-la à nouveau.";
+"Lava couldn't access the saved WireGuard keys. Unlock your device and try again." = "Lava n’a pas pu accéder aux clés WireGuard enregistrées. Déverrouillez votre appareil et réessayez.";
+"Lava couldn't save the WireGuard configuration. Try again in a moment." = "Lava n’a pas pu enregistrer la configuration WireGuard. Réessayez dans un instant.";
+"The WireGuard private key isn't valid. Import your configuration again." = "La clé privée WireGuard n’est pas valide. Importez à nouveau votre configuration.";
+"The WireGuard pre-shared key isn't valid. Import your configuration again." = "La clé prépartagée WireGuard n’est pas valide. Importez à nouveau votre configuration.";
+"This WireGuard configuration uses the server's key. Import your device's configuration instead." = "Cette configuration WireGuard utilise la clé du serveur. Importez plutôt la configuration de votre appareil.";

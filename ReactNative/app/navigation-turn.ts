@@ -1,6 +1,15 @@
 import type {NavigationAction, NavigationState} from '@react-navigation/native';
 
 type State = {index?:number;routes:readonly {key?:string;name:string;state?:State}[]};
+const nativeRedirectTarget=(screen:string)=>screen==='vpnChaining'?'VPNChaining':screen==='phoneQA'?'DeviceQA':screen;
+
+/** A dispatched native request is admitted only after its intended stack commits. */
+export function nativeRedirectMatches(state:State,tab:string,screen:string):boolean {
+  const route=state.routes[state.index??0],root=tab==='SettingsTab'?'Settings':'Guard',target=nativeRedirectTarget(screen);
+  if(route?.name!==tab||!route.state)return false;
+  const stack=route.state.routes.slice(0,(route.state.index??0)+1).map(item=>item.name);
+  return stack.length===(target===root?1:2)&&stack[0]===root&&(target===root||stack[1]===target);
+}
 
 // Replace the destination through its nested navigator's state parameter.
 // Address the existing tab navigator by key, leaving the other tab's mounted
@@ -8,7 +17,7 @@ type State = {index?:number;routes:readonly {key?:string;name:string;state?:Stat
 export function nativeRedirectAction(state:NavigationState,tab:string,screen:string):NavigationAction | undefined {
   if(!state.routes.some(route=>route.name===tab))return;
   const root=tab==='SettingsTab'?'Settings':'Guard';
-  const target=screen==='vpnChaining'?'VPNChaining':screen==='phoneQA'?'DeviceQA':screen;
+  const target=nativeRedirectTarget(screen);
   const stack={index:target===root?0:1,routes:[{name:root},...(target===root?[]:[{name:target}])]};
   return {type:'NAVIGATE',target:state.key,payload:{name:tab,params:{state:stack}}};
 }

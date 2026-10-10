@@ -1,3 +1,5 @@
+import {usePlusEntry} from '../review/plus-entry';
+import {PlusIntents} from '../review/plus-intents';
 import {VPNChainingScreen} from '../review/NativePageScreen';
 import {usePreventRemove} from '@react-navigation/native';
 import {LegalScreen} from '../review/DiagnosticScreens';
@@ -9,14 +11,15 @@ import {act, fireEvent, render, screen, waitFor} from '@testing-library/react-na
 import {AddDomainScreen, AddBlocklistScreen, FilterScreen, ReviewScreen, ActivityScreen, NetworkScreen, AccountScreen, SecurityScreen, DNSScreen, DNSPickerScreen, StatsScreen, DomainListScreen, FeedbackScreen, GuardScreen, FiltersScreen, UpgradeScreen, PrivacyScreen, LibraryScreen, ShareScreen, ShareDetailScreen, SettingsScreen, CustomizationScreen, ExploreScreen} from '../review/screens';
 import {configurePresentation, localized, localizedFormat} from '../app/presentation';
 import {ListRow, Toggle} from '../review/scaffold';
+import {GuardianScreen} from '../review/SettingsScreens';
 import {Choice} from '../review/primitives';
 import {LavaActionButton,LavaSelectionAccessory} from '../src';
 import {colors,colorForScheme} from '../src/colors.ios';
-import {ReviewContext} from '../review/ReviewContext';
-import {initialSession} from '../review/session';
+import {LiveRenderBoundary,ReviewContext} from '../review/ReviewContext';
+import {initialSession,protectedActionNames,logNames,notificationNames} from '../review/session';
 import {AppearanceStore} from '../review/appearance-store';
 import {addPreviewDomain, initialPreviewDraft, previewDiff} from '../review/preview-model';
-import type {AppCommand, AppSnapshot} from '../app/contract';
+import type {AppCommand, AppSnapshot, DNSChoice} from '../app/contract';
 import {useDNSEditor} from '../review/dns-editor';
 import type {AppStore} from '../app/store';
 
@@ -77,8 +80,8 @@ jest.mock('../review/scaffold', () => ({...jest.requireActual('../review/scaffol
 jest.mock('../specs/LavaSliderNativeComponent', () => ({__esModule:true,default:require('react-native').View}));
 jest.mock('../specs/LavaChoiceNativeComponent', () => require('./native-choice-mock'));
 jest.mock('../specs/NativeLavaReview', () => ({__esModule: true, default: {chooseFilterAction:(...args:unknown[])=>mockChooseFilterAction(...args),stopDemo:jest.fn(),speakDemo:jest.fn().mockResolvedValue(false),getLegalNotices:()=>mockLegalNotices(), normalizeDomain: (input: string) => mockNormalizeDomain(input), close: jest.fn(), getGuardAccents:()=>JSON.stringify({original:{light:'#BF4000',dark:'#FF8855'},aquamarine:{light:'#227B89',dark:'#6FD2DF'}}), getActivityDates: () => mockGetActivityDates(), getActivityDatePreset:(preset:string)=>mockGetActivityDatePreset(preset), pickActivityDates: (start: number, end: number) => mockPickActivityDates(start, end)}}));
-jest.mock('react-native-safe-area-context',()=>({SafeAreaProvider:require('react-native').View,SafeAreaView:require('react-native').View,useSafeAreaInsets:()=>({top:59,bottom:34,left:0,right:0})}));
-jest.mock('@react-navigation/native', () => ({usePreventRemove:jest.fn(),useNavigation: () => mockNavigation, useRoute: () => ({key:'source-route',params:{decision:mockDomainDecision,id:mockShareFilterID,standaloneReview:mockStandaloneReview,...mockExploreParams}}), useScrollToTop: jest.fn(), useIsFocused:()=>mockFocused}));
+jest.mock('react-native-safe-area-context',()=>({SafeAreaProvider:require('react-native').View,SafeAreaView:require('react-native').View,SafeAreaInsetsContext:require('react').createContext(null),useSafeAreaInsets:()=>({top:59,bottom:34,left:0,right:0})}));
+jest.mock('@react-navigation/native', () => ({StackActions:{replace:(name:string,params:unknown)=>({type:'REPLACE',payload:{name,params}})},usePreventRemove:jest.fn(),useNavigation: () => mockNavigation, useRoute: () => ({key:'source-route',params:{decision:mockDomainDecision,id:mockShareFilterID,standaloneReview:mockStandaloneReview,...mockExploreParams}}), useScrollToTop: jest.fn(), useIsFocused:()=>mockFocused}));
 jest.mock('../specs/LavaDecorationNativeComponent', () => ({__esModule: true, default: require('react-native').View}));
 jest.mock('../specs/LavaTextFieldNativeComponent', () => {
   const {TextInput} = require('react-native');
@@ -359,12 +362,34 @@ test('automatic upload scheduling remains independent from backup enablement',as
   expect(screen.getByRole('button',{name:'Back up now'})).toBeEnabled();
 });
 
-test('account action feedback appears once inside the shared status text lane',()=>{
+test('account status stays separate and follows sign-in changes while feedback appears once',()=>{
   const message='Sign-in unavailable';
   const live={account:{signedIn:false,status:'Not signed in',detail:message,message},backup:{enablement:backupEnablement(false,false),configured:false,busy:false}} as AppSnapshot;
-  render(<Provider live={live}><AccountScreen/></Provider>);
+  const view=render(<Provider live={live}><AccountScreen/></Provider>);
+  const {SettingsSurface,SettingsStatus}=require('../review/settings-scaffold');
+  const {Section,Symbol}=require('../review/primitives');
+  const surfaces=()=>screen.UNSAFE_getAllByType(Section).find(node=>node.props.title==='Account')!.findAllByType(SettingsSurface);
+  const status=()=>surfaces()[0]!;
+  expect(surfaces()).toHaveLength(2);
+  expect(status().findAllByType(SettingsStatus)).toHaveLength(1);
+  expect(status().findAllByType(ListRow)).toHaveLength(1);
+  expect(surfaces()[1]!.findAllByType(ListRow)).toHaveLength(2);
+  expect(status().props.tone).toBe('neutral');
+  expect(status().findByType(Symbol).props).toMatchObject({name:'person.crop.circle',tone:'primary'});
   expect(screen.getAllByText(message)).toHaveLength(1);
   expect(screen.getByText('Not signed in')).toBeOnTheScreen();
+
+  const title='Signed in with Apple';
+  view.rerender(<Provider live={{...live,account:{...live.account,signedIn:true,status:title,detail:'',message:title}}}><AccountScreen/></Provider>);
+  expect(status().props.tone).toBe('green');
+  expect(status().findByType(Symbol).props).toMatchObject({name:'checkmark.circle.fill',tone:'white'});
+  expect(screen.getAllByText(title)).toHaveLength(1);
+  expect(screen.queryByText(message)).toBeNull();
+
+  view.rerender(<Provider live={live}><AccountScreen/></Provider>);
+  expect(status().props.tone).toBe('neutral');
+  expect(status().findByType(Symbol).props).toMatchObject({name:'person.crop.circle',tone:'primary'});
+  expect(screen.getAllByText(message)).toHaveLength(1);
 });
 
 test('a paid subscriber retains management and restore while fresh entitlements load',async()=>{
@@ -776,12 +801,12 @@ test('filter content rows lead with a stroke-only outcome mark from the shared r
 });
 
 test.each([false,true])('domain quota preserves the native upgrade/remove contract on Plus=%s',async plus=>{
-  const live=editingSnapshot();live.limits.maxBlockedDomains=2;live.plus={enabled:plus} as AppSnapshot['plus'];
+  const live=editingSnapshot();live.limits.maxBlockedDomains=2;live.plus={enabled:plus,checking:false,busy:false,offers:[],showsYearlyPaidMonthly:false,message:'',expiration:''};
   const command=jest.fn(async(_input:AppCommand)=>null);
   render(<Provider live={live} app={{command} as unknown as AppStore}><AddDomainScreen/></Provider>);
   if(plus)expect(screen.getByRole('button',{name:'Add domain'})).toBeDisabled();
-  else {expect(screen.getByRole('button',{name:'Upgrade'})).toBeEnabled();await act(async()=>fireEvent.press(screen.getByRole('button',{name:'Upgrade'})));expect(mockNavigate).toHaveBeenLastCalledWith('Upgrade');}
-  await act(async()=>fireEvent(screen.getByLabelText('Domain to block'),'submitEditing',{nativeEvent:{text:'over-limit.example'}}));
+  else {expect(screen.getByTestId('plus.context')).toBeOnTheScreen();expect(screen.queryByLabelText('Domain to block')).toBeNull();}
+  if(plus)await act(async()=>fireEvent(screen.getByLabelText('Domain to block'),'submitEditing',{nativeEvent:{text:'over-limit.example'}}));
   expect(command.mock.calls.some(([input])=>input.type==='filter.domain')).toBe(false);
   expect(mockGoBack).not.toHaveBeenCalled();
 });
@@ -808,7 +833,7 @@ test('Library native draft owns deletions and review cancellation retains them',
   await act(async()=>toolbarAction('Edit').onPress());
   expect(command).toHaveBeenCalledWith({type:'library.edit'});
   expect(toolbarAction('Review changes').disabled).toBe(true);
-  await act(async()=>fireEvent.press(screen.getByRole('button',{name:'Delete'})));
+  await act(async()=>fireEvent.press(screen.getAllByRole('button',{name:'Delete'})[0]!));
   expect(command).toHaveBeenLastCalledWith({type:'library.toggleDeletion',id:'spare'});
   const staged={...live,libraryEditing:{active:true,hasChanges:true,deletions:['spare']}};
   view.rerender(<Provider live={staged} app={app}><LibraryScreen/></Provider>);
@@ -877,6 +902,63 @@ function dnsSnapshot():AppSnapshot {
 
 
 
+
+test.each(protectedActionNames)('Security keeps stable control paint and viewport while %s changes in either direction',async title=>{
+  const live={...editingSnapshot(),backgroundPrivacyCoverRequired:false,
+    security:{ownerRevision:'security-owner',unavailable:false,hasAuthenticationMethod:true,updatingSurface:false,showBiometrics:true,canEnableBiometrics:true},
+    session:{...initialSession(),passcode:false,biometrics:true}} as unknown as AppSnapshot;
+  let finish!:()=>void;const command=jest.fn(()=>new Promise<void>(resolve=>{finish=resolve;}));
+  const app={command} as unknown as AppStore;
+  const content=(current:AppSnapshot)=><Provider live={current} app={app}><LiveRenderBoundary component={SecurityScreen} directScrollRoot retireOnPolicyChange={false}/></Provider>;
+  render(content(live));
+  const native=screen.UNSAFE_getAllByType(NativeSwitch).find(control=>control.props.label===localized(title))!;
+  const scroll=screen.UNSAFE_getByType(ScrollView);
+  for(const next of [true,false]){
+  fireEvent(screen.getByRole('switch',{name:localized(title)}),'valueChange',next);
+  screen.rerender(content({...live,backgroundPrivacyCoverRequired:next,
+    session:{...live.session,protectedActions:{...live.session.protectedActions,[title]:next}}}));
+  expect(screen.UNSAFE_getAllByType(NativeSwitch).find(control=>control.props.label===localized(title))).toBe(native);
+  expect(screen.UNSAFE_getByType(ScrollView)).toBe(scroll);
+  expect(native.props).toMatchObject({pending:true,value:next});
+  // Busy keeps UIKit enabled paint; pending independently blocks input and AX.
+  const busy=screen.UNSAFE_getAllByType(NativeSwitch).filter(control=>control.props.pending);
+  expect(busy).toHaveLength(protectedActionNames.length);
+  for(const control of busy){
+    expect(control.props.disabled).toBe(false);
+  }
+  expect(screen.getByRole('switch',{name:'View Activity'})).toBeDisabled();
+  fireEvent(screen.getByRole('switch',{name:'View Activity'}),'valueChange',true);
+  expect(command).toHaveBeenCalledTimes(next?1:2);
+  expect(command).toHaveBeenLastCalledWith({type:'settings.set',key:`protectedActions.${title}`,value:next});
+  await act(async()=>finish());
+  expect(native.props).toMatchObject({pending:false,value:next});
+  expect(screen.getByRole('switch',{name:'View Activity'})).toBeEnabled();
+  }
+});
+
+test('opening passcode setup keeps its confirmed value while the native flow is pending',async()=>{
+  const live={...editingSnapshot(),security:{hasAuthenticationMethod:false,unavailable:false,showBiometrics:true,
+    canEnableBiometrics:false,biometricTitle:'Face ID'},session:{...initialSession(),passcode:false,biometrics:false}} as unknown as AppSnapshot;
+  let finish!:()=>void;const command=jest.fn(()=>new Promise<void>(resolve=>{finish=resolve;}));
+  render(<Provider live={live} app={{command} as unknown as AppStore}><SecurityScreen/></Provider>);
+  const passcode=screen.getByRole('switch',{name:'Passcode'});
+  fireEvent(passcode,'valueChange',true);
+  expect(command).toHaveBeenCalledWith({type:'native.flow',flow:'passcode'});
+  expect(passcode).toHaveProp('value',false);
+  expect(passcode).toBeDisabled();
+  await act(async()=>finish());
+  expect(passcode).toHaveProp('value',false);
+  expect(passcode).toBeEnabled();
+});
+
+test.each([false,true])('temporary biometric unavailability permits disabling an existing choice only (enabled=%s)',enabled=>{
+  const live={...editingSnapshot(),security:{hasAuthenticationMethod:true,unavailable:false,showBiometrics:true,
+    canEnableBiometrics:false,biometricTitle:'Face ID'},session:{...initialSession(),passcode:true,biometrics:enabled}} as unknown as AppSnapshot;
+  render(<Provider live={live}><SecurityScreen/></Provider>);
+  const biometric=screen.getByRole('switch',{name:'Face ID'});
+  if(enabled)expect(biometric).toBeEnabled();else expect(biometric).toBeDisabled();
+  expect(biometric).toHaveProp('value',enabled);
+});
 
 test('security accepts a native biometric credential and serializes protected-surface updates through cancellation',async()=>{
   const live={...editingSnapshot(),security:{hasAuthenticationMethod:true,updatingSurface:false,showBiometrics:true,canEnableBiometrics:true},session:{...initialSession(),passcode:false,biometrics:true}} as unknown as AppSnapshot;
@@ -1243,6 +1325,8 @@ test('domain-history actions retain native decision metadata and Copy dispatch',
     const app={command,subscribe:()=>()=>{},getInvalidation:()=>0} as unknown as AppStore;
     render(<Provider app={app} live={{hasDomainHistory:true} as AppSnapshot}><DomainListScreen history/></Provider>);
     await waitFor(()=>expect(screen.getByText('Allowed on Pause · Now')).toBeOnTheScreen());
+    expect(screen.getByTestId('domain-menu.event')).toHaveProp('allowedTintColor',colors.safeGreen);
+    expect(screen.getByTestId('domain-menu.event')).toHaveProp('blockedTintColor',colors.lavaOrange);
     fireEvent(screen.getByTestId('domain-menu.event'),'action',{nativeEvent:{id:'copy'}});
     expect(alert).not.toHaveBeenCalled();
     await waitFor(()=>expect(command).toHaveBeenCalledWith({type:'domains.copy',domain:'paused.example'}));
@@ -1278,7 +1362,7 @@ test.each([false,true])('over-limit selections offer Upgrade only on Free (Plus=
   render(<Provider app={{command} as unknown as AppStore} live={live}><AddBlocklistScreen/></Provider>);
   await waitFor(()=>expect(screen.getByText(pickerCatalog.summary)).toBeOnTheScreen());
   if(plus){expect(screen.getByRole('button',{name:'Save selection'})).toBeDisabled();expect(screen.queryByRole('button',{name:'Upgrade'})).toBeNull();}
-  else {await act(async()=>fireEvent.press(screen.getByRole('button',{name:'Upgrade'})));expect(mockNavigate).toHaveBeenLastCalledWith('Upgrade');}
+  else {await act(async()=>fireEvent.press(screen.getByRole('button',{name:'Upgrade'})));expect(mockNavigate).toHaveBeenLastCalledWith('Upgrade',{reason:'rules',intent:undefined});}
 });
 test.each([['de','  WERBUNG & TRACKER  '],['ja','広告とトラッカー']])('searches the displayed category in %s',async(locale,search)=>{
   configurePresentation({locale,textScales:null});
@@ -1298,6 +1382,45 @@ test.each([['  mit  ','First, MIT'],['lists.example','Custom, User supplied']])(
   await waitFor(()=>expect(screen.getByRole('button',{name:'First, MIT'})).toBeOnTheScreen());
   fireEvent.changeText(screen.getByLabelText('Search blocklists or categories'),search);
   expect(screen.getByRole('button',{name})).toBeOnTheScreen();
+});
+test('an empty catalog search keeps the same category and search header geometry',async()=>{
+  const command=jest.fn(async()=>pickerCatalog);
+  render(<Provider app={{command} as unknown as AppStore} live={pickerSnapshot()}><AddBlocklistScreen/></Provider>);
+  await waitFor(()=>expect(screen.getByRole('button',{name:'First, MIT'})).toBeOnTheScreen());
+  const controls=screen.getByTestId('catalog.controls');
+  const categories=pickerCatalog.sections.map(section=>screen.getByRole('button',{name:localized(section.title)}));
+  const input=screen.getByLabelText('Search blocklists or categories');
+  fireEvent.changeText(input,'no-matching-list-xyz');
+  expect(screen.getByText('No blocklists found')).toBeOnTheScreen();
+  expect(screen.getByTestId('catalog.controls')).toBe(controls);
+  expect(screen.getByLabelText('Search blocklists or categories')).toBe(input);
+  for(let index=0;index<categories.length;index++)expect(screen.getByRole('button',{name:localized(pickerCatalog.sections[index]!.title)})).toBe(categories[index]);
+  fireEvent.changeText(input,'');
+  expect(screen.getByRole('button',{name:'First, MIT'})).toBeOnTheScreen();
+});
+test('same-visit catalog resume preserves staged choices and search while retiring old input callbacks',async()=>{
+  const live=pickerSnapshot();let visible:AppSnapshot|null=live;let epoch=1;
+  const command=jest.fn(async(input:AppCommand)=>input.type==='catalog.query'?pickerCatalog:undefined);
+  const app={command,getSnapshot:()=>({snapshot:visible,displaySnapshot:null,error:null}),getReadEpoch:()=>epoch,subscribe:()=>()=>{}} as unknown as AppStore;
+  const view=render(<Provider app={app} live={live}><AddBlocklistScreen/></Provider>);
+  await waitFor(()=>expect(screen.getByRole('button',{name:'Third, MIT'})).toBeOnTheScreen());
+  fireEvent.press(screen.getByRole('button',{name:'Third, MIT'}));
+  const input=screen.getByLabelText('Search blocklists or categories');
+  fireEvent.changeText(input,'Third');
+  const oldRow=screen.UNSAFE_getAllByType(ListRow).find(row=>row.props.title==='Third')!.props.onPress;
+  visible=null;++epoch;
+  view.rerender(<Provider app={app}><AddBlocklistScreen/></Provider>);
+  expect(screen.getByLabelText('Search blocklists or categories')).toBe(input);
+  act(()=>oldRow());
+  visible=live;++epoch;
+  view.rerender(<Provider app={app} live={live}><AddBlocklistScreen/></Provider>);
+  await waitFor(()=>expect(screen.getByRole('button',{name:'Third, MIT'})).toBeOnTheScreen());
+  expect(screen.getByRole('button',{name:'Third, MIT'}).props.accessibilityState.selected).toBe(true);
+  expect(screen.queryByRole('button',{name:'First, MIT'})).toBeNull();
+  expect(screen.getByLabelText('Search blocklists or categories')).toBe(input);
+  act(()=>oldRow());
+  expect(screen.getByRole('button',{name:'Third, MIT'}).props.accessibilityState.selected).toBe(true);
+  expect(command.mock.calls.filter(([value])=>value.type==='filter.lists')).toEqual([]);
 });
 test('opening and cancelling a custom list keeps checkbox edits local until Save Selection',async()=>{
   const command=jest.fn(async(input:AppCommand)=>input.type==='catalog.query'?pickerCatalog:undefined);
@@ -1321,25 +1444,61 @@ test('opening and cancelling a custom list keeps checkbox edits local until Save
   await act(async()=>fireEvent.press(screen.getByRole('button',{name:'Save selection'})));
   expect(command).toHaveBeenLastCalledWith({type:'filter.lists',id:'active',ids:['first-list','second-list','third-list']});
 });
-test('checkbox changes retain catalog rows while native selection totals refresh',async()=>{
+test.each([false,true])('checkbox changes retain catalog rows while native selection totals refresh (off=%p)',async optOut=>{
   let finish!:(value:typeof pickerCatalog)=>void;
   const command=jest.fn((input:AppCommand)=>input.type==='catalog.query'&&input.ids.includes('third-list')?new Promise<typeof pickerCatalog>(resolve=>{finish=resolve;}):Promise.resolve(pickerCatalog));
-  render(<Provider live={pickerSnapshot()} app={{command} as unknown as AppStore}><AddBlocklistScreen/></Provider>);
+  render(<Provider live={{...pickerSnapshot(),backgroundPrivacyCoverRequired:!optOut}} app={{command} as unknown as AppStore}><AddBlocklistScreen/></Provider>);
   await waitFor(()=>expect(screen.getByRole('button',{name:'Third, MIT'})).toBeOnTheScreen());
   const row=screen.getByRole('button',{name:'Third, MIT'});
+  const fill=screen.getByTestId('budget.fill');
   fireEvent.press(row);
   expect(screen.getByRole('button',{name:'Third, MIT'})).toBe(row);
   expect(row.props.accessibilityState.selected).toBe(true);
   expect(screen.getByRole('button',{name:'Custom, User supplied'})).toBeOnTheScreen();
   expect(screen.queryByText('Loading blocklists…')).toBeNull();
   expect(screen.getByRole('button',{name:'Save selection'})).toBeDisabled();
+  expect(screen.getByTestId('budget.fill')).toBe(fill);
   await act(async()=>finish({...pickerCatalog,count:200,summary:'About 200 of 500K rules'}));
   expect(screen.getByRole('button',{name:'Third, MIT'})).toBe(row);
+  expect(screen.getByTestId('budget.fill')).toBe(fill);
   expect(screen.getByText('About 200 of 500K rules')).toBeOnTheScreen();
   expect(screen.getByRole('button',{name:'Save selection'})).toBeEnabled();
   const save=screen.UNSAFE_getByType(LavaActionButton).props.onPress;
   await act(async()=>{save();save();});
   expect(command.mock.calls.filter(([input])=>input.type==='filter.lists')).toHaveLength(1);
+});
+test.each([
+  {optOut:false,exceeded:false},{optOut:true,exceeded:false},
+  {optOut:false,exceeded:true},{optOut:true,exceeded:true},
+])('failed selection totals keep rows but cannot enable Save or Upgrade (off=$optOut, exceeded=$exceeded)',async({optOut,exceeded})=>{
+  let reject!:(error:Error)=>void;let recovered=false;
+  const command=jest.fn((input:AppCommand)=>{
+    if(input.type!=='catalog.query')return Promise.resolve(undefined);
+    if(recovered)return Promise.resolve({...pickerCatalog,count:200,summary:'About 200 of 500K rules'});
+    return input.ids.includes('third-list')?new Promise<typeof pickerCatalog>((_,fail)=>{reject=fail;}):Promise.resolve({...pickerCatalog,exceeded});
+  });
+  render(<Provider live={{...pickerSnapshot(),backgroundPrivacyCoverRequired:!optOut}} app={{command} as unknown as AppStore}><AddBlocklistScreen/></Provider>);
+  await waitFor(()=>expect(screen.getByRole('button',{name:'Third, MIT'})).toBeOnTheScreen());
+  const row=screen.getByRole('button',{name:'Third, MIT'});
+  fireEvent.press(row);
+  await act(async()=>reject(new Error('Catalog temporarily unavailable.')));
+  expect(screen.getByRole('button',{name:'Third, MIT'})).toBe(row);
+  expect(row.props.accessibilityState.selected).toBe(true);
+  expect(screen.getByText('Catalog temporarily unavailable.')).toBeOnTheScreen();
+  expect(screen.queryByText(pickerCatalog.summary)).toBeNull();
+  expect(screen.queryByRole('progressbar')).toBeNull();
+  expect(screen.queryByRole('button',{name:'Upgrade'})).toBeNull();
+  expect(screen.getByRole('button',{name:'Save selection'})).toBeDisabled();
+  await act(async()=>screen.UNSAFE_getByType(LavaActionButton).props.onPress());
+  expect(command.mock.calls.filter(([input])=>input.type==='filter.lists')).toHaveLength(0);
+  expect(mockNavigate).not.toHaveBeenCalledWith('Upgrade');
+  recovered=true;fireEvent.press(screen.getByRole('button',{name:'First, MIT'}));
+  await waitFor(()=>expect(screen.getByText('About 200 of 500K rules')).toBeOnTheScreen());
+  expect(screen.queryByText('Catalog temporarily unavailable.')).toBeNull();
+  expect(screen.getByRole('button',{name:'Third, MIT'})).toBe(row);
+  expect(screen.getByRole('button',{name:'Save selection'})).toBeEnabled();
+  await act(async()=>fireEvent.press(screen.getByRole('button',{name:'Save selection'})));
+  expect(command).toHaveBeenLastCalledWith({type:'filter.lists',id:'active',ids:['second-list','third-list']});
 });
 test('a staged list disappearing from native availability cannot poison Save Selection',async()=>{
   const withoutThird:typeof pickerCatalog=JSON.parse(JSON.stringify(pickerCatalog));
@@ -1367,13 +1526,16 @@ test('a staged list disappearing from native availability cannot poison Save Sel
   await act(async()=>fireEvent.press(screen.getByRole('button',{name:'Save selection'})));
   expect(command).toHaveBeenLastCalledWith({type:'filter.lists',id:'active',ids:['second-list']});
 });
-test('a failed catalog refresh preserves a newly added native custom list when saving other edits',async()=>{
+test('a failed catalog refresh preserves a newly added native custom list until totals recover',async()=>{
   const snapshot=(ids?:string[])=>{
     const live=pickerSnapshot(ids);
     return {...live,security:{...live.security,unavailable:false},session:{...live.session,protectedActions:{...live.session.protectedActions,'Update domains and lists':false}}};
   };
+  let recovered=false;
+  const withCustom={...pickerCatalog,sections:[...pickerCatalog.sections,{title:'Custom',isCustom:true,sources:[{id:'new-custom-list',name:'New custom',licenseName:'User supplied',sourceURL:'https://lists.example/new'}]}]};
   const command=jest.fn(async(input:AppCommand)=>{
     if(input.type!=='catalog.query')return undefined;
+    if(recovered)return withCustom;
     if(input.ids.includes('new-custom-list'))throw new Error('Catalog temporarily unavailable.');
     return pickerCatalog;
   });
@@ -1383,6 +1545,8 @@ test('a failed catalog refresh preserves a newly added native custom list when s
   view.rerender(<Provider live={snapshot(['first-list','second-list','new-custom-list'])} app={app}><AddBlocklistScreen/></Provider>);
   await waitFor(()=>expect(command).toHaveBeenCalledWith({type:'catalog.query',ids:['first-list','second-list','new-custom-list']}));
   await act(async()=>{});
+  expect(screen.getByRole('button',{name:'Save selection'})).toBeDisabled();
+  recovered=true;
   fireEvent.press(screen.getByRole('button',{name:'First, MIT'}));
   await waitFor(()=>expect(screen.getByRole('button',{name:'Save selection'})).toBeEnabled());
   await act(async()=>fireEvent.press(screen.getByRole('button',{name:'Save selection'})));
@@ -1430,14 +1594,14 @@ describe('standalone domain review cancellation',()=>{
   let previousAppState: typeof AppState.currentState;
   beforeEach(()=>{previousAppState=AppState.currentState;Object.defineProperty(AppState,'currentState',{configurable:true,value:'active'});mockNavigate.mockClear();});
   afterEach(()=>{mockStandaloneReview=undefined;Object.defineProperty(AppState,'currentState',{configurable:true,value:previousAppState});});
-  test.each([false,true])('domain actions transfer native draft ownership to Review (history %s)',async(history)=>{
+  test.each([[false,'blocked'],[false,'allowed'],[true,'blocked'],[true,'allowed']] as const)('domain actions transfer native draft ownership to Review (history %s, %s)',async(history,decision)=>{
     const alert=jest.spyOn(Alert,'alert').mockImplementation(()=>{});
     try {
       const command=jest.fn(async(input:AppCommand)=>input.type==='domains.query'?[{id:'event',domain:'tracker.example',metadata:'Blocked'}]:{id:'active',standaloneReview:'domain-review'});
       render(<Provider live={editingSnapshot()} app={{command} as unknown as AppStore}><DomainListScreen history={history}/></Provider>);
       await waitFor(()=>expect(screen.getByTestId('domain-menu.event')).toBeOnTheScreen());
-      await act(async()=>fireEvent(screen.getByTestId('domain-menu.event'),'action',{nativeEvent:{id:'blocked'}}));
-      expect(command).toHaveBeenCalledWith({type:'domains.stage',domain:'tracker.example',decision:'blocked'});
+      await act(async()=>fireEvent(screen.getByTestId('domain-menu.event'),'action',{nativeEvent:{id:decision}}));
+      expect(command).toHaveBeenCalledWith({type:'domains.stage',domain:'tracker.example',decision});
       expect(mockNavigate).toHaveBeenLastCalledWith('Review',{id:'active',standaloneReview:'domain-review'});
     } finally {alert.mockRestore();}
   });
@@ -1501,7 +1665,7 @@ test.each([['fr',false],['fr',true],['ja',false],['ja',true]] as const)('filter 
     } else {
       const link=screen.getByRole('link',{name:locale==='fr'?'Passez à la version supérieure':'アップグレード'});
       fireEvent.press(link);
-      expect(mockNavigate).toHaveBeenLastCalledWith('Upgrade');
+      expect(mockNavigate).toHaveBeenLastCalledWith('Upgrade',{reason:'filters',intent:undefined});
       expect(screen.getByText(localized('Manage more than three filters with Lava Plus.'))).toBeOnTheScreen();
     }
     expect(screen.queryByText(/of .* filters/)).toBeNull();
@@ -1553,16 +1717,45 @@ describe('network activity pagination',()=>{
     expect(screen.queryByText('Event 61')).toBeNull();
     expect(screen.queryByText('Event 300')).toBeNull();
   });
-  test('refreshes preserve the visible page until the entry count changes',async()=>{
+  test('refreshes preserve the visible page when entries arrive or expire',async()=>{
     const view=render(<Provider app={store()}><NetworkScreen/></Provider>);
     await waitFor(()=>expect(screen.getByText('Event 30')).toBeOnTheScreen());
     end();expect(screen.getByText('Event 60')).toBeOnTheScreen();
     await act(async()=>view.rerender(<Provider app={store([...rows])}><NetworkScreen/></Provider>));
     expect(screen.getByText('Event 60')).toBeOnTheScreen();
     await act(async()=>view.rerender(<Provider app={store(rows.slice(0,299))}><NetworkScreen/></Provider>));
+    expect(screen.getByText('Event 60')).toBeOnTheScreen();
+    await act(async()=>view.rerender(<Provider app={store([...rows,{id:'new',title:'New event',subtitle:'Connection',metadata:'Now'}])}><NetworkScreen/></Provider>));
+    expect(screen.getByText('Event 60')).toBeOnTheScreen();
+    expect(screen.queryByText('Event 61')).toBeNull();
+  });
+  test('an accepted empty log resets pagination for the next populated log',async()=>{
+    const view=render(<Provider app={store()}><NetworkScreen/></Provider>);
+    await waitFor(()=>expect(screen.getByText('Event 30')).toBeOnTheScreen());
+    end();expect(screen.getByText('Event 60')).toBeOnTheScreen();
+    await act(async()=>view.rerender(<Provider app={store([])}><NetworkScreen/></Provider>));
+    await act(async()=>view.rerender(<Provider app={store()}><NetworkScreen/></Provider>));
     expect(screen.getByText('Event 30')).toBeOnTheScreen();
     expect(screen.queryByText('Event 31')).toBeNull();
   });
+});
+
+test.each([false,true])('domain history keeps expanded rows and its query limit through native count updates (off=%p)',async optOut=>{
+  const original=AppState.currentState;Object.defineProperty(AppState,'currentState',{configurable:true,value:'active'});
+  const entries=Array.from({length:100},(_,index)=>({id:String(index),domain:`domain-${index}.example`,metadata:'Allowed'}));
+  const command=jest.fn(async(input:AppCommand)=>input.type==='domains.query'?entries.slice(0,input.limit):null);
+  const app={command,subscribe:()=>()=>{},getInvalidation:()=>0} as unknown as AppStore;
+  const live={session:initialSession(),backgroundPrivacyCoverRequired:!optOut,domainHistoryCount:100,security:{unavailable:false},account:{signedIn:false}} as unknown as AppSnapshot;
+  const view=render(<Provider app={app} live={live}><DomainListScreen history/></Provider>);
+  try {
+    await waitFor(()=>expect(screen.getByTestId('domain-menu.29')).toBeOnTheScreen());
+    fireEvent.scroll(screen.UNSAFE_getByType(ScrollView),{nativeEvent:{contentOffset:{y:1000},layoutMeasurement:{height:700},contentSize:{height:1700}}});
+    await waitFor(()=>expect(screen.getByTestId('domain-menu.59')).toBeOnTheScreen());
+    const row=screen.getByTestId('domain-menu.59');
+    view.rerender(<Provider app={app} live={{...live,domainHistoryCount:101}}><DomainListScreen history/></Provider>);
+    expect(screen.getByTestId('domain-menu.59')).toBe(row);
+    expect(command.mock.calls.filter(([input])=>input.type==='domains.query').map(([input])=>(input as Extract<AppCommand,{type:'domains.query'}>).limit)).toEqual([31,61]);
+  } finally {view.unmount();Object.defineProperty(AppState,'currentState',{configurable:true,value:original});}
 });
 
 
@@ -2125,7 +2318,7 @@ test('library sharing keeps the chosen inactive identity and excludes unavailabl
     expect(mockChooseFilterAction).toHaveBeenLastCalledWith(live.filters[1]!.name,true,true);
     expect(mockNavigate).toHaveBeenLastCalledWith('ShareDetail',{id:live.filters[1]!.id});
     fireEvent.press(screen.getByRole('button',{name:live.filters[2]!.name}));
-    expect(mockChooseFilterAction).toHaveBeenLastCalledWith(live.filters[2]!.name,false,false);
+    expect(mockChooseFilterAction).toHaveBeenLastCalledWith(live.filters[2]!.name,true,false);
   }finally{alert.mockRestore();}
 });
 
@@ -2275,6 +2468,24 @@ test('DNS panel swaps both tiers in its Add footer and commits only on Save',asy
   expect(command).toHaveBeenCalledWith({type:'dns.tiers',context:'saved-tier-context',tiers:[
     {id:'google-dot',name:'Google',primary:'',secondary:''},{id:'cloudflare-doh',name:'Cloudflare',primary:'',secondary:''}]});
 });
+test.each(['','Cancel',undefined])('DNS tier Save retains source name %s rather than persisting its localized display label',async sourceName=>{
+  configurePresentation({locale:'zh-Hant',textScales:null});
+  try {
+    const base={...dnsTier('custom-dns',sourceName===''?localized('Custom DNS'):sourceName??'Private resolver'),primary:'https://dns.example/query'};
+    const custom:DNSChoice=sourceName===undefined?base:{...base,sourceName};
+    const other=dnsTier('google-dot','Google','DoT');const live=tierSnapshot();live.dns.tiers=[custom,other];
+    const command=jest.fn().mockResolvedValue(null);
+    render(<Provider live={live} app={{command} as unknown as AppStore}><DNSScreen/></Provider>);
+    expect(screen.getByText(custom.name)).toBeOnTheScreen();
+    act(()=>toolbarAction(localized('Edit')).onPress());
+    fireEvent.press(screen.getByText(localized('Swap order')));
+    await act(async()=>toolbarAction(localized('Save')).onPress());
+    expect(command).toHaveBeenCalledWith({type:'dns.tiers',context:'saved-tier-context',tiers:[
+      {id:other.id,name:other.name,primary:'',secondary:''},
+      {id:custom.id,name:sourceName??custom.name,primary:custom.primary,secondary:''},
+    ]});
+  } finally {configurePresentation();}
+});
 test('DNS swapped order is discarded by Cancel and a single row keeps Add',async()=>{
   const alert=jest.spyOn(Alert,'alert').mockImplementation(()=>{});const live=tierSnapshot();const command=jest.fn();
   try{
@@ -2323,6 +2534,31 @@ test('DNS picker transport pills read Device, DoH, DoT, then IP',()=>{
   const pills=screen.getAllByRole('button').map(button=>String(button.props.accessibilityLabel))
     .filter(label=>['Device','DoH','DoT','IP','DoQ'].includes(label));
   expect(pills).toEqual(['Device','DoH','DoT','IP']);
+});
+test('DNS search matches providers and transports without matching generic endpoint paths or issuing reads',()=>{
+  mockExploreParams={target:'tier',index:0};const live=tierSnapshot();const command=jest.fn();
+  live.dns.choices=[
+    {...dnsTier('cloudflare-doh','Cloudflare','DoH'),metadata:'https://cloudflare.example.test/dns-query'},
+    {...dnsTier('hagezi-doh','HaGeZi DNS','DoH'),metadata:'https://hagezi.example.test/dns-query'},
+    dnsTier('quad9-dot','Quad9','DoT'),
+  ];
+  render(<Provider live={live} app={{command} as unknown as AppStore}><DNSPickerScreen/></Provider>);
+  const input=screen.getByLabelText('Search DNS providers or transports');
+  for(let cycle=0;cycle<5;cycle++){
+    fireEvent.changeText(input,'u');
+    expect(screen.getByRole('button',{name:'Cloudflare'})).toBeOnTheScreen();
+    expect(screen.getByRole('button',{name:'Quad9'})).toBeOnTheScreen();
+    expect(screen.queryByRole('button',{name:'HaGeZi DNS'})).toBeNull();
+    fireEvent.changeText(input,'uu');
+    expect(screen.getByText('No DNS providers found')).toBeOnTheScreen();
+    fireEvent.changeText(input,'  dOh  ');
+    expect(screen.getByRole('button',{name:'HaGeZi DNS'})).toBeOnTheScreen();
+    expect(screen.queryByRole('button',{name:'Quad9'})).toBeNull();
+    fireEvent.changeText(input,'');
+    expect(screen.getByRole('button',{name:'Quad9'})).toBeOnTheScreen();
+    expect(screen.getByLabelText('Search DNS providers or transports')).toBe(input);
+  }
+  expect(command).not.toHaveBeenCalled();
 });
 test('profile status distinguishes installed from selected without creating a profile on render',()=>{
   const live=tierSnapshot();live.dnsPatch={available:true,state:'disabled',busy:false,provider:dnsTier('quad9-dot','Quad9','DoT')};const command=jest.fn();
@@ -2412,6 +2648,23 @@ test('custom DNS opens the shared pushed form and a saved custom draft stays unc
   expect(screen.getByRole('button',{name:'Private resolver'})).toHaveProp('accessibilityState',expect.objectContaining({selected:true}));
   await act(async()=>fireEvent.press(screen.getByRole('button',{name:'Save selection'})));
   expect(command).toHaveBeenCalledTimes(1);
+});
+test.each(['','Cancel'])('custom DNS draft source name %s survives picker save and reopening the form',async sourceName=>{
+  configurePresentation({locale:'zh-Hant',textScales:null});
+  try {
+    mockExploreParams={target:'tier',index:0};const live=tierSnapshot();const command=jest.fn().mockResolvedValue('dns-editor-token');
+    const app={command} as unknown as AppStore;
+    let staged:DNSChoice|undefined;function Probe(){staged=useDNSEditor().draft.tiers[0];return null;}
+    const view=render(<Provider live={live} app={app}><DNSPickerScreen/><Probe/></Provider>);
+    await act(async()=>toolbarItems().find((item:{label:string})=>item.label===localized('Add custom DNS')).onPress());
+    const choice:DNSChoice={id:'custom-dns',name:sourceName||localized('Custom DNS'),sourceName,primary:'https://dns.example/query',secondary:'',transport:'DoH',metadata:'https://dns.example/query'};
+    view.rerender(<Provider live={{...live,dns:{...live.dns,customDraft:choice,customDraftToken:'dns-editor-token'}}} app={app}><DNSPickerScreen/><Probe/></Provider>);
+    expect(screen.getByRole('button',{name:choice.name})).toHaveProp('accessibilityState',expect.objectContaining({selected:true}));
+    await act(async()=>fireEvent.press(screen.getByRole('button',{name:localized('Save Selection')})));
+    expect(staged).toMatchObject(choice);
+    await act(async()=>toolbarItems().find((item:{label:string})=>item.label===localized('Add custom DNS')).onPress());
+    expect(command).toHaveBeenLastCalledWith({type:'dns.customDraft',choice});
+  } finally {configurePresentation();}
 });
 test('profile picker only offers its native eligible encrypted choices',()=>{
   mockExploreParams={target:'profile'};const live=tierSnapshot();live.dnsPatch={available:true,state:'disabled',busy:false,choices:[dnsTier('google-dot','Google','DoT'),dnsTier('cloudflare-doh','Cloudflare','DoH')]};
@@ -2547,8 +2800,9 @@ test('a failed DNS profile repair stays on the page and reports the failure',asy
 });
 
 function vpnSnapshot(overrides:Partial<NonNullable<AppSnapshot['vpn']>>={}):AppSnapshot {
-  const live=tierSnapshot();live.qaTools=false;
-  live.vpn={setup:true,enabled:false,canEnable:true,canEdit:true,fallback:false,canChangeFallback:true,
+  AppState.currentState='active';
+  const live=tierSnapshot();live.qaTools=false;live.plus={...live.plus,enabled:true};
+  live.vpn={authorized:true,setup:true,enabled:false,canEnable:true,canEdit:true,fallback:false,canChangeFallback:true,
     needsPlus:false,busy:false,restriction:'',error:'',unavailable:false,generation:'42',rows:[],...overrides};return live;
 }
 const vpnCommands=(rows:NonNullable<AppSnapshot['vpn']>['rows']=[])=>jest.fn(async(command:any):Promise<any>=>{
@@ -2686,12 +2940,44 @@ test('DNS numbered row switches preserve the last active row and disappear in ed
   act(()=>toolbarAction('Edit').onPress());
   expect(screen.UNSAFE_queryAllByType(require('../src').LavaToggleControl)).toHaveLength(0);
 });
-test('System DNS explanatory text follows both the provider and selection indicator',()=>{
+test.each(['zh-Hant','de'])('DNS choices and VPN profile switches preserve user names that match copy keys in %s',locale=>{
+  configurePresentation({locale,textScales:null});
+  try {
+    const live=tierSnapshot();live.dns.tiers=[dnsTier('custom-dns','Cancel')];live.dns.choices=[...live.dns.tiers];
+    live.dnsPatch={available:true,state:'enabled',busy:false,provider:dnsTier('custom-dns','Save','DoT')};
+    const command=jest.fn().mockResolvedValue(null);const app={command} as unknown as AppStore;
+    const view=render(<Provider live={live} app={app}><DNSScreen/></Provider>);
+    expect(screen.getByText('Cancel')).toBeOnTheScreen();expect(screen.getByText('Save')).toBeOnTheScreen();
+    expect(screen.getByRole('switch',{name:'Cancel'})).toBeOnTheScreen();
+    expect(screen.queryByRole('switch',{name:localized('Cancel')})).toBeNull();
+    mockExploreParams={target:'tier',index:0};
+    view.rerender(<Provider live={live} app={app}><DNSPickerScreen/></Provider>);
+    expect(screen.getByRole('button',{name:'Cancel'})).toBeOnTheScreen();
+    const rows=[{name:'Cancel',mode:localized('Split tunnel'),isEnabled:true}];
+    view.rerender(<Provider live={vpnSnapshot({rows,enabled:true})} app={app}><VPNChainingScreen/></Provider>);
+    expect(screen.getByText('Cancel')).toBeOnTheScreen();
+    expect(screen.getByRole('switch',{name:'Cancel'})).toBeOnTheScreen();
+    expect(screen.queryByRole('switch',{name:localized('Cancel')})).toBeNull();
+  } finally {configurePresentation();}
+});
+test('review-host Guard fallback translates app-authored identities and descriptions',()=>{
+  configurePresentation({locale:'zh-Hant',textScales:null});
+  try {
+    const view=render(<Provider><CustomizationScreen/></Provider>);
+    expect(screen.getByRole('button',{name:localized('Original')})).toBeOnTheScreen();
+    view.rerender(<Provider><GuardianScreen/></Provider>);
+    expect(screen.getByText(localized('A Lava a day keeps bad domains away.'))).toBeOnTheScreen();
+    expect(screen.queryByText('Original')).toBeNull();
+  } finally {configurePresentation();}
+});
+test('System DNS explanatory text sits between the selection indicator and uninstall row',()=>{
   const live=tierSnapshot();live.dnsPatch={available:true,state:'enabled',busy:false,provider:dnsTier('quad9-dot','Quad9','DoT')};
   render(<Provider live={live} app={{command:jest.fn()} as unknown as AppStore}><DNSScreen/></Provider>);
   const section=screen.UNSAFE_getAllByType(require('../review/primitives').Section).find(node=>node.props.title==='System DNS')!;
   const children=require('react').Children.toArray(section.props.children) as any[];
-  expect(children.at(-1)?.props.children).toBe('This profile handles system DNS requests and helps Lava filter with Connectivity Assist.');
+  expect(children.at(-3)?.props.children.props.title).toBe('Profile installed and selected');
+  expect(children.at(-2)?.props.children).toBe('This profile handles system DNS requests and helps Lava filter with Connectivity Assist.');
+  expect(children.at(-1)?.props.children.props.testID).toBe('dns.profile.uninstall');
 });
 test('a no-change checkmark exits WireGuard edit mode without committing or flashing a disabled action',async()=>{
   const command=vpnCommands();
@@ -2782,4 +3068,204 @@ test('failed VPN Save retains the staged values for retry without hiding the pag
     expect(toolbarAction('Save').disabled).toBe(false);
     expect(command).not.toHaveBeenCalledWith(expect.objectContaining({type:'vpn.cancel'}));
   }finally{alert.mockRestore();}
+});
+
+
+describe('contextual Lava Plus returns',()=>{
+  let previousState:typeof AppState.currentState;
+  beforeEach(()=>{previousState=AppState.currentState;AppState.currentState='active';jest.mocked(AccessibilityInfo.isReduceMotionEnabled).mockResolvedValue(false);});
+  afterEach(()=>{AppState.currentState=previousState;});
+  const subscription=(enabled=false)=>({enabled,checking:false,busy:false,offers:[],showsYearlyPaidMonthly:false,message:'',expiration:''} as AppSnapshot['plus']);
+  test.each(['blocked','allowed'] as const)('a full free %s domain list resumes into Review after Plus confirmation',async decision=>{
+    let attempts=0;
+    const command=jest.fn(async(input:AppCommand)=>{
+      if(input.type==='domains.query')return [{id:'event',domain:'tracker.example',metadata:'Now'}];
+      if(input.type==='domains.stage')return ++attempts===1
+        ?{rejection:{title:'Limit reached',message:'Upgrade or remove entries',limitReached:true}}
+        :{id:'active',standaloneReview:'upgraded-review'};
+      return null;
+    });
+    const live={...editingSnapshot(),plus:subscription()};const app={command} as unknown as AppStore;
+    const view=render(<Provider live={live} app={app}><DomainListScreen/></Provider>);
+    await waitFor(()=>expect(screen.getByTestId('domain-menu.event')).toBeOnTheScreen());
+    await act(async()=>fireEvent(screen.getByTestId('domain-menu.event'),'action',{nativeEvent:{id:decision}}));
+    expect(mockNavigate).toHaveBeenLastCalledWith('Upgrade',expect.objectContaining({reason:decision==='blocked'?'blockedDomains':'allowedDomains'}));
+    mockExploreParams=mockNavigate.mock.calls.at(-1)![1];
+    view.rerender(<Provider live={live} app={app}><DomainListScreen/><UpgradeScreen/></Provider>);
+    await act(async()=>view.rerender(<Provider live={{...live,plus:subscription(true)}} app={app}><DomainListScreen/><UpgradeScreen/></Provider>));
+    expect(command.mock.calls.filter(([input])=>input.type==='domains.stage')).toEqual([
+      [{type:'domains.stage',domain:'tracker.example',decision}],
+      [{type:'domains.stage',domain:'tracker.example',decision}],
+    ]);
+    expect(mockDispatch).toHaveBeenCalledWith({type:'REPLACE',payload:{name:'Review',params:{id:'active',standaloneReview:'upgraded-review'}}});
+    expect(command.mock.calls.some(([input])=>input.type==='filter.apply')).toBe(false);
+  });
+  test('Settings visits have no context panel and do not pop a paid subscriber',async()=>{
+    render(<Provider live={{plus:subscription(true)} as AppSnapshot}><UpgradeScreen/></Provider>);
+    await act(async()=>{});
+    expect(screen.queryByTestId('plus.context')).toBeNull();expect(mockGoBack).not.toHaveBeenCalled();
+  });
+  test('a free domain sheet becomes the normal form in place after native Plus confirmation',async()=>{
+    const live=editingSnapshot();live.limits.maxBlockedDomains=2;live.plus=subscription();
+    const command=jest.fn(async(_value:AppCommand)=>null);const app={command} as unknown as AppStore;
+    const view=render(<Provider live={live} app={app}><AddDomainScreen/></Provider>);
+    expect(screen.getByText('Upgrade to Lava Plus to block more domains')).toBeOnTheScreen();
+    expect(screen.queryByLabelText('Domain to block')).toBeNull();
+    view.rerender(<Provider live={{...live,plus:subscription(true),limits:{...live.limits,maxBlockedDomains:1000}}} app={app}><AddDomainScreen/></Provider>);
+    expect(screen.getByLabelText('Domain to block')).toBeOnTheScreen();
+    expect(mockNavigate).not.toHaveBeenCalled();expect(mockGoBack).not.toHaveBeenCalled();
+    expect(command.mock.calls.some(([value]:[AppCommand])=>value.type==='filter.domain')).toBe(false);
+  });
+  test('confirmed purchase replaces a custom-entry Plus push once and never saves the draft',async()=>{
+    const resume=jest.fn(async()=>({name:'CustomEntry' as const,params:{id:'native-token',kind:'dns' as const}}));
+    function Origin(){const upgrade=usePlusEntry();return <LavaActionButton title="Add custom DNS" onPress={()=>upgrade('customDNS',resume)}/>;}
+    let showUpgrade=false;
+    const live={plus:subscription()} as AppSnapshot;
+    const view=render(<Provider live={live}><Origin/>{showUpgrade&&<UpgradeScreen/>}</Provider>);
+    fireEvent.press(screen.getByRole('button',{name:'Add custom DNS'}));
+    mockExploreParams=mockNavigate.mock.calls.at(-1)![1];showUpgrade=true;
+    view.rerender(<Provider live={live}><Origin/><UpgradeScreen/></Provider>);
+    expect(screen.getByText('Upgrade to Lava Plus to add custom DNS')).toBeOnTheScreen();expect(resume).not.toHaveBeenCalled();
+    await act(async()=>view.rerender(<Provider live={{...live,plus:subscription(true)}}><Origin/><UpgradeScreen/></Provider>));
+    expect(resume).toHaveBeenCalledTimes(1);
+    expect(mockDispatch).toHaveBeenCalledWith({type:'REPLACE',payload:{name:'CustomEntry',params:{id:'native-token',kind:'dns'}}});
+    await act(async()=>view.rerender(<Provider live={{...live,plus:subscription(true)}}><Origin/><UpgradeScreen/></Provider>));
+    expect(resume).toHaveBeenCalledTimes(1);expect(mockGoBack).not.toHaveBeenCalled();
+  });
+  test('source removal retires its pending action',async()=>{
+    const resume=jest.fn(async()=>undefined);
+    function Origin(){const upgrade=usePlusEntry();return <LavaActionButton title="Add custom DNS" onPress={()=>upgrade('customDNS',resume)}/>;}
+    const view=render(<Provider live={{plus:subscription()} as AppSnapshot}><Origin/></Provider>);
+    fireEvent.press(screen.getByRole('button',{name:'Add custom DNS'}));mockExploreParams=mockNavigate.mock.calls.at(-1)![1];
+    view.rerender(<Provider live={{plus:subscription()} as AppSnapshot}><UpgradeScreen/></Provider>);
+    await act(async()=>view.rerender(<Provider live={{plus:subscription(true)} as AppSnapshot}><UpgradeScreen/></Provider>));
+    expect(resume).not.toHaveBeenCalled();
+  });
+  test.each([false,true])('an unpaid VPN prerequisite stays off with saved setup %s and opens Plus without changing settings',async setup=>{
+    const command=vpnCommands(),app={command} as unknown as AppStore;
+    // Entitlement is authoritative even when another device restriction masks needsPlus.
+    const live={...vpnSnapshot({setup,needsPlus:false,restriction:'Chaining is part of Lava Security Plus.'}),plus:subscription()};
+    render(<Provider live={live} app={app}><VPNChainingScreen/></Provider>);
+    const toggle=screen.getByRole('switch',{name:'I have a WireGuard configuration'});
+    expect(toggle.props.value).toBe(false);expect(toggle).toBeEnabled();
+    expect(screen.queryByTestId('vpn.configuration-panel')).toBeNull();expect(toolbarItems()).toEqual([]);
+    expect(screen.queryByText('Chaining is part of Lava Security Plus.')).toBeNull();
+    expect(screen.queryByText(localized('See Lava Security Plus'))).toBeNull();
+    await act(async()=>fireEvent(toggle,'valueChange',true));
+    expect(screen.getByRole('switch',{name:'I have a WireGuard configuration'}).props.value).toBe(false);
+    expect(mockNavigate).toHaveBeenLastCalledWith('Upgrade',expect.objectContaining({reason:'vpn'}));
+    expect(command.mock.calls.filter(([input])=>input.type.startsWith('vpn.'))).toEqual([]);
+  });
+  test('confirming VPN Plus returns to prerequisite setup without enabling or editing a profile',async()=>{
+    const rows=[{name:'Entry',mode:'Split tunnel'}],command=vpnCommands(rows),app={command} as unknown as AppStore;
+    const live={...vpnSnapshot({setup:false,rows,canEdit:false,needsPlus:true}),plus:subscription()};
+    const view=render(<Provider live={live} app={app}><VPNChainingScreen/></Provider>);
+    await act(async()=>fireEvent(screen.getByRole('switch',{name:'I have a WireGuard configuration'}),'valueChange',true));
+    expect(command.mock.calls.filter(([input])=>input.type.startsWith('vpn.'))).toEqual([]);
+    mockExploreParams=mockNavigate.mock.calls.at(-1)![1];expect(mockExploreParams.reason).toBe('vpn');
+    view.rerender(<Provider live={live} app={app}><VPNChainingScreen/><UpgradeScreen/></Provider>);
+    expect(screen.getByText('Upgrade to Lava Plus to use VPN chaining')).toBeOnTheScreen();
+    const paid={...live,plus:subscription(true),vpn:{...live.vpn!,canEdit:true,needsPlus:false}};
+    await act(async()=>view.rerender(<Provider live={paid} app={app}><VPNChainingScreen/><UpgradeScreen/></Provider>));
+    expect(command.mock.calls.filter(([input])=>input.type.startsWith('vpn.'))).toEqual([[{type:'vpn.toggle',key:'setup',value:true}]]);
+    expect(mockGoBack).toHaveBeenCalledTimes(1);
+    await act(async()=>view.rerender(<Provider live={{...paid,vpn:{...paid.vpn,setup:true}}} app={app}><VPNChainingScreen/></Provider>));
+    expect(screen.getByRole('switch',{name:'I have a WireGuard configuration'}).props.value).toBe(true);
+    expect(screen.getByTestId('vpn.configuration-panel')).toBeOnTheScreen();
+    expect(command.mock.calls.filter(([input])=>input.type.startsWith('vpn.'))).toHaveLength(1);
+  });
+  test('dismissing VPN Plus leaves setup off and retires its pending toggle',async()=>{
+    const command=vpnCommands(),app={command} as unknown as AppStore;
+    const live={...vpnSnapshot({setup:false,needsPlus:true}),plus:subscription()};
+    const view=render(<Provider live={live} app={app}><VPNChainingScreen/></Provider>);
+    await act(async()=>fireEvent(screen.getByRole('switch',{name:'I have a WireGuard configuration'}),'valueChange',true));
+    mockExploreParams=mockNavigate.mock.calls.at(-1)![1];
+    await act(async()=>view.rerender(<Provider live={live} app={app}><VPNChainingScreen/><UpgradeScreen/></Provider>));
+    await act(async()=>view.rerender(<Provider live={live} app={app}><VPNChainingScreen/></Provider>));
+    expect(screen.getByRole('switch',{name:'I have a WireGuard configuration'}).props.value).toBe(false);
+    const paid={...live,plus:subscription(true),vpn:{...live.vpn!,needsPlus:false}};
+    await act(async()=>view.rerender(<Provider live={paid} app={app}><VPNChainingScreen/><UpgradeScreen/></Provider>));
+    expect(command).not.toHaveBeenCalledWith(expect.objectContaining({type:'vpn.toggle'}));
+    expect(screen.getByRole('switch',{name:'I have a WireGuard configuration'}).props.value).toBe(false);
+  });
+  test('losing Plus retires an open VPN draft and its retained Save action',async()=>{
+    const rows=[{name:'Entry',mode:'Split tunnel'}],command=vpnCommands(rows),app={command} as unknown as AppStore;
+    const live=vpnSnapshot({rows});
+    const view=render(<Provider live={live} app={app}><VPNChainingScreen/></Provider>);
+    const edit=toolbarAction('Edit');await act(async()=>edit.onPress());
+    const save=toolbarAction('Save');const id=command.mock.calls.find(([input])=>input.type==='vpn.begin')![0].id;
+    await act(async()=>view.rerender(<Provider live={{...live,plus:subscription(),vpn:{...live.vpn!,needsPlus:true}}} app={app}><VPNChainingScreen/></Provider>));
+    expect(toolbarItems()).toEqual([]);expect(screen.queryByTestId('vpn.configuration-panel')).toBeNull();
+    expect(screen.getByRole('switch',{name:'I have a WireGuard configuration'}).props.value).toBe(false);
+    expect(command).toHaveBeenCalledWith({type:'vpn.cancel',id});
+    await act(async()=>save.onPress());
+    expect(command).not.toHaveBeenCalledWith(expect.objectContaining({type:'vpn.commit'}));
+    await act(async()=>edit.onPress());
+    expect(command.mock.calls.filter(([input])=>input.type==='vpn.begin')).toHaveLength(1);
+    await act(async()=>view.rerender(<Provider live={live} app={app}><VPNChainingScreen/></Provider>));
+    expect(toolbarAction('Edit')).toBeDefined();
+    expect(screen.getByText('Entry')).toBeOnTheScreen();
+  });
+  test('a VPN editor opened before entitlement loss cannot stage after a later renewal',async()=>{
+    let finish!:(value:any)=>void;let id='';const command=vpnCommands();
+    command.mockImplementation(async input=>{if(input.type==='vpn.begin'){id=input.id;return new Promise(resolve=>{finish=resolve;});}return null;});
+    const app={command} as unknown as AppStore,live=vpnSnapshot();
+    const view=render(<Provider live={live} app={app}><VPNChainingScreen/></Provider>);
+    act(()=>toolbarAction('Edit').onPress());
+    await act(async()=>view.rerender(<Provider live={{...live,plus:subscription()}} app={app}><VPNChainingScreen/></Provider>));
+    await act(async()=>view.rerender(<Provider live={live} app={app}><VPNChainingScreen/></Provider>));
+    await act(async()=>finish({id,revision:0,changed:false,containsFullTunnel:false,rows:[]}));
+    expect(command).toHaveBeenCalledWith({type:'vpn.cancel',id});
+    expect(toolbarAction('Edit')).toBeDefined();
+    expect(toolbarItems().some((item:{label:string})=>item.label==='Save')).toBe(false);
+    expect(command).not.toHaveBeenCalledWith(expect.objectContaining({type:'vpn.commit'}));
+  });
+  test('a pending VPN row change cannot restore a retired editor after renewal',async()=>{
+    let finish!:(value:any)=>void;const rows=[{name:'Entry',mode:'Split tunnel'}];
+    const command=vpnCommands(rows),base=command.getMockImplementation()!;
+    command.mockImplementation(async input=>input.type==='vpn.remove'?new Promise(resolve=>{finish=resolve;}):base(input));
+    const app={command} as unknown as AppStore,live=vpnSnapshot({rows});
+    const view=render(<Provider live={live} app={app}><VPNChainingScreen/></Provider>);
+    await act(async()=>toolbarAction('Edit').onPress());
+    const id=command.mock.calls.find(([input])=>input.type==='vpn.begin')![0].id;
+    act(()=>fireEvent.press(screen.getByRole('button',{name:'Remove'})));
+    await act(async()=>view.rerender(<Provider live={{...live,plus:subscription()}} app={app}><VPNChainingScreen/></Provider>));
+    await act(async()=>view.rerender(<Provider live={live} app={app}><VPNChainingScreen/></Provider>));
+    await act(async()=>finish({id,revision:1,changed:true,containsFullTunnel:false,rows:[]}));
+    expect(command).toHaveBeenCalledWith({type:'vpn.cancel',id});
+    expect(toolbarAction('Edit')).toBeDefined();expect(screen.getByText('Entry')).toBeOnTheScreen();
+    expect(toolbarItems().some((item:{label:string})=>item.label==='Save')).toBe(false);
+    expect(command).not.toHaveBeenCalledWith(expect.objectContaining({type:'vpn.commit'}));
+  });
+  test('pending actions are consumed once and privacy retirement clears them',()=>{
+    const intents=new PlusIntents(),resume=jest.fn(async()=>undefined),id=intents.add(resume);
+    expect(intents.take(id)).toBe(resume);expect(intents.take(id)).toBeUndefined();
+    const retired=intents.add(resume);intents.clear();expect(intents.take(retired)).toBeUndefined();
+  });
+});
+
+
+test.each([
+  ['protectedActions',SecurityScreen,protectedActionNames],
+  ['logs',PrivacyScreen,logNames],
+  ['notifications',CustomizationScreen,notificationNames],
+] as const)('%s preserves authored row order, values and native controls across unordered snapshot refreshes',async(group,Component,names)=>{
+  const live={...editingSnapshot(),liveActivityPause:{available:false},security:{hasAuthenticationMethod:true,showBiometrics:true},
+    session:{...initialSession(),passcode:true,biometrics:true}} as unknown as AppSnapshot;
+  const view=render(<Provider live={live}><Component/></Provider>);
+  await act(async()=>{});
+  const labels=names.map(title=>localized(title));
+  const controls=()=>screen.UNSAFE_getAllByType(NativeSwitch).filter(control=>labels.includes(control.props.label));
+  const original=controls();expect(original.map(control=>control.props.label)).toEqual(labels);
+  const scroll=screen.UNSAFE_getByType(ScrollView);
+  // Mimic fresh Swift dictionaries, including a value update in every frame.
+  for(let frame=0;frame<names.length+2;frame++){
+    const incoming=[...names.slice(frame%names.length),...names.slice(0,frame%names.length)].reverse();
+    const values=Object.fromEntries(incoming.map(title=>[title,((names as readonly string[]).indexOf(title)+frame)%2===0]));
+    view.rerender(<Provider live={{...live,session:{...live.session,[group]:values}}}><Component/></Provider>);
+    await act(async()=>{});
+    const current=controls();expect(current.map(control=>control.props.label)).toEqual(labels);
+    current.forEach((control,index)=>{expect(control).toBe(original[index]);expect(control.props.value).toBe(values[names[index]!]);});
+    expect(screen.UNSAFE_getByType(ScrollView)).toBe(scroll);
+  }
 });

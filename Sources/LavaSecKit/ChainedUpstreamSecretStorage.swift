@@ -145,11 +145,11 @@ public enum ChainedUpstreamSecretNaming {
 
 /// Why a chained-upstream store operation could not complete.
 ///
-/// Log/diagnostic identifiers, never user copy, and never any part of the secret. The
+/// Typed diagnostic payloads never contain secret material or become user copy. The
 /// unreadable/unusable split is load-bearing: one is "retry later" and one never gets better
 /// on its own, and collapsing them is how a permanently wedged install reports a transient
 /// fault forever.
-public enum ChainedUpstreamSecretStoreFailure: Error, Equatable, Sendable {
+public enum ChainedUpstreamSecretStoreFailure: Error, LocalizedError, Equatable, Sendable {
     /// The configuration file EXISTS but its content could not be read — Data Protection
     /// before first unlock, or transient I/O. `INV-PERSIST-1`: never reported as absent, and
     /// nothing is written or deleted while it holds. Carries only the coarse NSError
@@ -203,6 +203,40 @@ public enum ChainedUpstreamSecretStoreFailure: Error, Equatable, Sendable {
     /// commit protocol's deletes unserialized, which is durable and unrecoverable, so this
     /// case is the fail-closed half of `INV-CHAIN-4`.
     case writerExclusionUnavailable
+
+    /// Localized recovery copy for configuration save/delete failures. Keep the
+    /// storage breadcrumb and Keychain status in the typed error, outside UI text.
+    public var errorDescription: String? {
+        switch self {
+        case .configurationUnreadable:
+            LavaCoreStrings.localized("Your WireGuard configuration couldn't be read. Try again after unlocking your device.")
+        case .configurationUnusable:
+            LavaCoreStrings.localized("The saved WireGuard configuration is no longer usable. Import it again.")
+        case .keychainRefused(let status):
+            // Unlocking can repair a protected-item refusal, but cannot repair
+            // a build entitlement or a key that no longer decodes.
+            switch status {
+            case errSecInteractionNotAllowed:
+                LavaCoreStrings.localized("Lava couldn't access the saved WireGuard keys. Unlock your device and try again.")
+            case errSecMissingEntitlement:
+                LavaCoreStrings.localized("This build can't save a WireGuard configuration. Update Lava and try again.")
+            case errSecDecode:
+                LavaCoreStrings.localized("The saved WireGuard configuration is no longer usable. Import it again.")
+            default:
+                LavaCoreStrings.localized("Lava couldn't save the WireGuard configuration. Try again in a moment.")
+            }
+        case .accessGroupUnavailable:
+            LavaCoreStrings.localized("This build can't save a WireGuard configuration. Update Lava and try again.")
+        case .entropyUnavailable, .writerExclusionUnavailable:
+            LavaCoreStrings.localized("Lava couldn't save the WireGuard configuration. Try again in a moment.")
+        case .malformedPrivateKey, .unusablePrivateKey:
+            LavaCoreStrings.localized("The WireGuard private key isn't valid. Import your configuration again.")
+        case .malformedPresharedKey:
+            LavaCoreStrings.localized("The WireGuard pre-shared key isn't valid. Import your configuration again.")
+        case .privateKeyBelongsToThePeer:
+            LavaCoreStrings.localized("This WireGuard configuration uses the server's key. Import your device's configuration instead.")
+        }
+    }
 }
 
 /// One rotation: a configuration and the key that belongs to it.

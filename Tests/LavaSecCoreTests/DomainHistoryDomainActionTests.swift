@@ -3,6 +3,33 @@ import XCTest
 @testable import LavaSecKit
 
 final class DomainHistoryDomainActionTests: XCTestCase {
+    func testAllowingAppleTrackerFromHistoryReversesItsManualBlock() throws {
+        let validator = AllowlistValidator(nonAllowableThreatRules: DomainRuleSet())
+        let blocked = try AppConfiguration().applyingDomainHistoryDomainAction(
+            "gs-loc.apple.com", target: .blocked, allowlistValidator: validator
+        ).configuration
+        XCTAssertEqual(blocked.filterSnapshot().decision(for: "gs-loc.apple.com").action, .block)
+
+        let allowed = try blocked.applyingDomainHistoryDomainAction(
+            " GS-Loc.Apple.Com ", target: .allowed, allowlistValidator: validator
+        ).configuration
+        XCTAssertTrue(allowed.blockedDomains.isEmpty)
+        XCTAssertEqual(allowed.allowedDomains, ["gs-loc.apple.com"])
+        XCTAssertEqual(allowed.filterSnapshot().decision(for: "gs-loc.apple.com").reason, .localAllowlist)
+    }
+
+    func testHistoryStillRejectsAnExceptionForAnExplicitThreatRule() throws {
+        var threats = DomainRuleSet()
+        try threats.insert(domain: "danger.example")
+        XCTAssertThrowsError(try AppConfiguration().applyingDomainHistoryDomainAction(
+            "danger.example", target: .allowed,
+            allowlistValidator: AllowlistValidator(nonAllowableThreatRules: threats)
+        )) { error in
+            XCTAssertEqual(error as? DomainHistoryDomainActionError,
+                           .allowedDomainRejected(message: "Some dangerous domains cannot be allowed."))
+        }
+    }
+
     func testAddingBlockedDomainRemovesSameAllowedDomain() throws {
         let configuration = AppConfiguration(
             allowedDomains: ["tracker.example.com"],

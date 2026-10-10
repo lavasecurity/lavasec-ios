@@ -723,8 +723,8 @@ public struct BlocklistCatalogSynchronizer: Sendable {
     /// enabled source's parsed `DomainRuleSet` into one dictionary at once) AND unlike a
     /// per-source-callback variant (which would still build one full source's dirty
     /// `Set<String>` at a time, capping how large a single source can be), this STREAM-PARSES
-    /// each source straight through `BlocklistParser.forEachBlockRule` and hands each accepted,
-    /// protected-filtered rule to `onBlockRule` one at a time — NO per-source `DomainRuleSet`
+    /// each source straight through `BlocklistParser.forEachBlockRule` and hands each accepted
+    /// rule to `onBlockRule` one at a time — NO per-source `DomainRuleSet`
     /// is ever built. The caller folds each rule directly into an on-disk compact blob, so the
     /// only resident growth is the compact entry table (bounded by the caller's aggregate
     /// gate, which throws to stop the parse). The parsed-rules cache is intentionally NOT
@@ -845,8 +845,8 @@ public struct BlocklistCatalogSynchronizer: Sendable {
         )
     }
 
-    /// Stream-parses raw payload bytes, handing each accepted block rule (after the
-    /// `lavaSecProtectedDomains` post-filter, matching `parsePayload`) to `onRule`. No
+    /// Stream-parses raw payload bytes, handing each accepted block rule to `onRule`,
+    /// matching `parsePayload`. No
     /// per-source rule cap is applied — a single source streams uncapped, because the
     /// in-extension AGGREGATE is bounded by the caller's per-rule gate (which throws to stop
     /// the parse), so a too-large source fails CLOSED rather than being silently truncated.
@@ -860,9 +860,6 @@ public struct BlocklistCatalogSynchronizer: Sendable {
         try validateBlocklistSize(data.count, sourceID: sourceID)
         var count = 0
         try BlocklistParser(maxRules: Int.max).forEachBlockRule(data: data, format: parseFormat) { rule in
-            guard !DomainRuleSet.lavaSecProtectedDomains.containsNormalized(rule.domain) else {
-                return
-            }
             count += 1
             try onRule(rule)
         }
@@ -1569,9 +1566,6 @@ public struct BlocklistCatalogSynchronizer: Sendable {
         var exceededRuleLimit = false
         do {
             try BlocklistParser(maxRules: Int.max).forEachBlockRule(data: data, format: format) { rule in
-                guard !DomainRuleSet.lavaSecProtectedDomains.containsNormalized(rule.domain) else {
-                    return
-                }
                 ruleSet.insert(rule)
                 if ruleSet.count > ruleLimit {
                     exceededRuleLimit = true

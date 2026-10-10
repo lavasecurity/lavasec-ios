@@ -2,6 +2,9 @@
 // installation for layout review; none are production settings or credentials.
 import type {SudokuGame} from './sudoku-model';
 export const protectedActionNames = ['App Unlock', 'Turn on/off Lava', 'Pause Lava', 'Update domains and lists', 'View Activities', 'Update App Settings'] as const;
+// Presentation order belongs to the schema, never to native JSON object order.
+export const logNames = ['Filtering Counts', 'Domain logs', 'Network activity', 'Lava Guard Progress'] as const;
+export const notificationNames = ['Filter changes', "Filter couldn't switch", 'Protection resumed', 'Connection updates'] as const;
 type ProtectedActions = Record<typeof protectedActionNames[number], boolean>;
 export type PreviewSession = {
   sudoku?: SudokuGame;

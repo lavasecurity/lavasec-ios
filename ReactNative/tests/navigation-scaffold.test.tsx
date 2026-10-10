@@ -1,8 +1,24 @@
 import {act,renderHook,waitFor} from '@testing-library/react-native';
 import {AccessibilityInfo,Platform} from 'react-native';
-import {floatingTabMinimizeBehavior,ordinaryPushPresentation,useOrdinaryPushPresentation,useReducedMotionPreference} from '../review/navigation-scaffold';
+import {floatingTabMinimizeBehavior,ordinaryPageHeader,ordinaryPushPresentation,useOrdinaryPushPresentation,useReducedMotionPreference} from '../review/navigation-scaffold';
 
 afterEach(()=>jest.restoreAllMocks());
+
+test.each(['18.6','26.5','27.0'])('native page translucency is independent of title size on iOS %s',version=>{
+  jest.spyOn(Platform,'Version','get').mockReturnValue(version);
+  const options=ordinaryPageHeader();
+  expect(options.headerTransparent).toBe(true);
+  expect(options.headerStyle).toEqual({backgroundColor:'transparent'});
+  expect(options.headerLargeTitleEnabled).toBeUndefined();
+  expect(options.headerBlurEffect).toBe(version==='18.6'?'systemChromeMaterial':undefined);
+  expect(options.headerBackground).toBeUndefined();
+  expect(options.scrollEdgeEffects).toBeUndefined();
+});
+
+test('native page material and layout do not override Android navigation',()=>{
+  jest.replaceProperty(Platform,'OS','android');
+  expect(ordinaryPageHeader()).toEqual({});
+});
 
 test.each([
   ['18.6',undefined],
