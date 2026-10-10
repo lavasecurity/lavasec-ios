@@ -1,0 +1,22 @@
+{
+  "normalSimulatorMinimumTests": 75,
+  "separateMotionTests": ["testExplicitCrossFadeNavigation"],
+  "installedQAFixtureTests": [
+    "testRound8EntitledVPNEditorSavesSyntheticSplitConfigurationWithGuardOff",
+    "testRound8PaidVPNEditorMaximumDynamicTypeKeepsDraftAndFooterVisible",
+    "testRound8PaidVPNEditorInButtonDragScrollsWithoutActivation",
+    "testRound8NativeContinueDisabledNoOpAndLocalInvalidCodeError",
+    "testRound8PaidVPNChooseFileCancellationPreservesDraftAndStoredMetadata",
+    "testRound8PaidVPNImportsPublicFileIntoDraftAndCancelsWithoutSaving",
+    "testRound8PaidVPNAndDNSProviderRowsAtUnchangedPortraitScale",
+    "testRound8NativeRenameDiscardPreservesStoredIdentityWithoutReset",
+    "testRound8ReadOnlyAdvancedDNSAndFeedbackLayoutWithoutReset",
+    "testRound8PaidSyntheticVPNReauthorizesRetainedAndResumedPage",
+    "testRound8EntitledVPNPreferencesAndEditorContinueWithGuardOff",
+    "testRound8EntitledVPNRotationSeparatesPageSheetAndKeyboard",
+    "testRound8RemoveInterruptedSyntheticAppPasscodeThroughUI",
+    "testRound8EntitledVPNRetainedTabReturnWithGuardOff",
+    "testRound8SetupCodeEditorLandscapeKeyboardPreservesVisibleDraft"
+  ],
+  "installedQAFixtureRequirement": "Existing explicitly opted-in com.lavasec.dev.qa installation on simulator 67BAF9F5-5742-4BCB-8DBF-4400F3035A1C with its exact saved synthetic split metadata and, for import, the indexed public fixture. These tests do not apply to a fresh com.lavasec.app simulator. They remain available by explicit test identifier and are not represented as passed by this lane."
+}

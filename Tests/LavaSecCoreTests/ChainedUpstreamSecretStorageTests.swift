@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import Security
 import XCTest
 
 @testable import LavaSecKit
@@ -12,6 +13,33 @@ import XCTest
 final class ChainedUpstreamSecretStorageTests: XCTestCase {
     private typealias Naming = ChainedUpstreamSecretNaming
     private typealias Failure = ChainedUpstreamSecretStoreFailure
+
+    func testKeychainRecoveryDistinguishesUnlockBuildRepairAndReimport() {
+        let unlock = LavaCoreStrings.localized("Lava couldn't access the saved WireGuard keys. Unlock your device and try again.")
+        let repairBuild = LavaCoreStrings.localized("This build can't save a WireGuard configuration. Update Lava and try again.")
+        let reimport = LavaCoreStrings.localized("The saved WireGuard configuration is no longer usable. Import it again.")
+        let retry = LavaCoreStrings.localized("Lava couldn't save the WireGuard configuration. Try again in a moment.")
+        let recoveries: [(OSStatus, String)] = [
+            (errSecInteractionNotAllowed, unlock),
+            (errSecMissingEntitlement, repairBuild),
+            (errSecDecode, reimport),
+            (errSecNotAvailable, retry),
+            (errSecAuthFailed, retry),
+            (-12345, retry),
+        ]
+        for (status, expected) in recoveries {
+            let failure = Failure.keychainRefused(status)
+            XCTAssertEqual(failure.localizedDescription, expected)
+            XCTAssertEqual(ChainedUpstreamStagingRefusal.rotationRefused(failure).localizedDescription, expected,
+                           "The import/save path must carry the same useful recovery as the secret store.")
+            XCTAssertFalse(failure.localizedDescription.contains(String(status)), "The Keychain status remains diagnostic data.")
+            if status != errSecInteractionNotAllowed {
+                XCTAssertNotEqual(failure.localizedDescription, unlock, "Unlocking cannot repair this failure: \(status).")
+            }
+        }
+        XCTAssertEqual(Failure.accessGroupUnavailable.localizedDescription, repairBuild)
+        XCTAssertNotEqual(Failure.accessGroupUnavailable.localizedDescription, unlock)
+    }
 
     // MARK: - Naming
 

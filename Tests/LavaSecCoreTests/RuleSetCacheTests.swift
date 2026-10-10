@@ -6,6 +6,14 @@ import XCTest
 final class RuleSetCacheTests: XCTestCase {
     private let sampleHash = String(repeating: "ab", count: 32)
 
+    func testLegacyProtectedDomainExemptionCacheIsRejected() throws {
+        let rules = DomainRuleSet()
+        var bytes = RuleSetCache.encode(rules, contentSHA256: "abc", parseFormat: .plainDomains, payloadByteSize: 20)
+        // Version 4 omitted protected domains even when the source included them.
+        bytes.replaceSubrange(8..<12, with: [4, 0, 0, 0])
+        XCTAssertNil(RuleSetCache.decode(bytes, contentSHA256: "abc", parseFormat: .plainDomains))
+    }
+
     func testLegacyBroadGoogleExceptionCacheIsRejected() throws {
         var rules = DomainRuleSet()
         try rules.insert(domain: "blocked.example", matchesSubdomains: true)

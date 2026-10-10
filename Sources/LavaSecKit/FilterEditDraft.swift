@@ -42,6 +42,8 @@ public struct FilterEditDraft: Equatable {
 
 /// Outcome of a draft domain edit, surfaced to the UI as an accept/reject toast.
 public struct DomainDraftResult: Equatable {
+    /// Capacity rejection after domain safety and duplicate checks pass.
+    public let limitReached: Bool
     public let normalizedDomain: String?
     public let isAccepted: Bool
     public let title: String
@@ -49,6 +51,7 @@ public struct DomainDraftResult: Equatable {
 
     public static func accepted(_ domain: String, message: String) -> DomainDraftResult {
         DomainDraftResult(
+            limitReached: false,
             normalizedDomain: domain,
             isAccepted: true,
             title: LavaCoreStrings.localizedFormat("Added %@", domain),
@@ -56,8 +59,9 @@ public struct DomainDraftResult: Equatable {
         )
     }
 
-    public static func rejected(title: String, message: String) -> DomainDraftResult {
+    public static func rejected(title: String, message: String, limitReached: Bool = false) -> DomainDraftResult {
         DomainDraftResult(
+            limitReached: limitReached,
             normalizedDomain: nil,
             isAccepted: false,
             title: title,
@@ -93,7 +97,8 @@ public enum FilterEditDraftEditor {
         guard draft.blockedDomains.count < maxBlockedDomains else {
             return (draft, .rejected(
                 title: LavaCoreStrings.localized("Blocked domain limit reached"),
-                message: LavaCoreStrings.localizedFormat("core.domainError.freeBlockedLimit", maxBlockedDomains)
+                message: LavaCoreStrings.localizedFormat("core.domainError.freeBlockedLimit", maxBlockedDomains),
+                limitReached: true
             ))
         }
 
@@ -141,7 +146,8 @@ public enum FilterEditDraftEditor {
         guard draft.allowedDomains.count < maxAllowedDomains else {
             return (draft, .rejected(
                 title: LavaCoreStrings.localized("Allowed exception limit reached"),
-                message: LavaCoreStrings.localizedFormat("core.domainError.freeAllowedLimit", maxAllowedDomains)
+                message: LavaCoreStrings.localizedFormat("core.domainError.freeAllowedLimit", maxAllowedDomains),
+                limitReached: true
             ))
         }
 

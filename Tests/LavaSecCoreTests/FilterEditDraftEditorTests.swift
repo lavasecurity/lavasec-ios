@@ -20,11 +20,22 @@ final class FilterEditDraftEditorTests: XCTestCase {
         return AllowlistValidator(nonAllowableThreatRules: guardrail)
     }
 
+    func testSafetyRejectionsDoNotOfferAnUpgradeAtCapacity() {
+        let (_, blocked) = FilterEditDraftEditor.addBlockedDomain("not a domain", to: draft(), maxBlockedDomains: 0)
+        XCTAssertFalse(blocked.isAccepted)
+        XCTAssertFalse(blocked.limitReached)
+        let (_, allowed) = FilterEditDraftEditor.addAllowedDomain("malware.example.com", to: draft(),
+            maxAllowedDomains: 0, validator: validator(threats: ["malware.example.com"]))
+        XCTAssertFalse(allowed.isAccepted)
+        XCTAssertFalse(allowed.limitReached)
+    }
+
     // MARK: - Blocked domains
 
     func testAddBlockedDomainNormalizesAndAccepts() {
         let (next, result) = FilterEditDraftEditor.addBlockedDomain("Ads.Example.com.", to: draft(), maxBlockedDomains: 10)
         XCTAssertTrue(result.isAccepted)
+        XCTAssertFalse(result.limitReached)
         XCTAssertEqual(result.normalizedDomain, "ads.example.com")
         XCTAssertTrue(next.blockedDomains.contains("ads.example.com"))
     }
@@ -33,6 +44,7 @@ final class FilterEditDraftEditorTests: XCTestCase {
         let (next, result) = FilterEditDraftEditor.addBlockedDomain("not a domain", to: draft(), maxBlockedDomains: 10)
         XCTAssertFalse(result.isAccepted)
         XCTAssertTrue(next.blockedDomains.isEmpty)
+        XCTAssertFalse(result.limitReached)
     }
 
     func testAddBlockedDomainRejectsDuplicate() {
@@ -43,6 +55,7 @@ final class FilterEditDraftEditorTests: XCTestCase {
         )
         XCTAssertFalse(result.isAccepted)
         XCTAssertEqual(result.title, "Already blocked")
+        XCTAssertFalse(result.limitReached)
         XCTAssertEqual(next.blockedDomains.count, 1)
     }
 
@@ -54,6 +67,7 @@ final class FilterEditDraftEditorTests: XCTestCase {
         )
         XCTAssertFalse(result.isAccepted)
         XCTAssertEqual(result.title, "Blocked domain limit reached")
+        XCTAssertTrue(result.limitReached)
         XCTAssertEqual(next.blockedDomains.count, 2)
     }
 
@@ -91,6 +105,7 @@ final class FilterEditDraftEditorTests: XCTestCase {
             validator: validator()
         )
         XCTAssertTrue(result.isAccepted)
+        XCTAssertFalse(result.limitReached)
         XCTAssertTrue(next.allowedDomains.contains("good.example.com"))
     }
 
@@ -103,6 +118,7 @@ final class FilterEditDraftEditorTests: XCTestCase {
         )
         XCTAssertFalse(result.isAccepted)
         XCTAssertTrue(next.allowedDomains.isEmpty)
+        XCTAssertFalse(result.limitReached)
     }
 
     func testAddAllowedDomainRejectsDuplicate() {
@@ -114,6 +130,7 @@ final class FilterEditDraftEditorTests: XCTestCase {
         )
         XCTAssertFalse(result.isAccepted)
         XCTAssertEqual(result.title, "Already allowed")
+        XCTAssertFalse(result.limitReached)
         XCTAssertEqual(next.allowedDomains.count, 1)
     }
 
@@ -126,6 +143,7 @@ final class FilterEditDraftEditorTests: XCTestCase {
         )
         XCTAssertFalse(result.isAccepted)
         XCTAssertEqual(result.title, "Allowed exception limit reached")
+        XCTAssertTrue(result.limitReached)
     }
 
     func testRemoveAndUndoAllowedDomain() {

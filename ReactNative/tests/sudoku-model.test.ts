@@ -1,4 +1,4 @@
-import {cellAt, cellLabel, editCell, freshPuzzle, isComplete, isSolved, keyAt, keyAtColumn, keypadColumnGeometry, keypadGeometry, keypadShortSide, newGame, referencePuzzle, remainingCount, workingBoard} from '../review/sudoku-model';
+import {cellAt, cellLabel, challengePuzzles, editCell, freshChallengePuzzle, freshPuzzle, isComplete, isSolved, keyAt, keyAtColumn, keypadColumnGeometry, keypadGeometry, keypadShortSide, newGame, referencePuzzle, remainingCount, workingBoard} from '../review/sudoku-model';
 
 test('locked clues and invalid input cannot mutate the board',()=>{
   const game=newGame();
@@ -33,7 +33,7 @@ test('new review puzzles preserve legal rows, columns, boxes, clue count and clu
   for(let round=0;round<30;round++){
     const next=freshPuzzle(puzzle);
     expect(next.givens).not.toEqual(puzzle.givens);
-    expect(next.givens.filter(Boolean)).toHaveLength(40);
+    expect(next.givens.filter(Boolean)).toHaveLength(referencePuzzle.givens.filter(Boolean).length);
     expect(next.givens.every((value,index)=>!value||value===next.solution[index])).toBe(true);
     for(let unit=0;unit<9;unit++){
       expect(next.solution.slice(unit*9,unit*9+9).sort()).toEqual(expected);
@@ -42,6 +42,25 @@ test('new review puzzles preserve legal rows, columns, boxes, clue count and clu
     }
     puzzle=next;
   }
+});
+test('bundled challenge puzzles are legal and under thirty clues',()=>{
+  expect(challengePuzzles.length).toBeGreaterThan(0);
+  const expected=[1,2,3,4,5,6,7,8,9];
+  for(const puzzle of challengePuzzles){
+    expect(puzzle.givens).toHaveLength(81);
+    expect(puzzle.solution).toHaveLength(81);
+    expect(puzzle.givens.filter(Boolean).length).toBeLessThan(30);
+    expect(puzzle.givens.every((value,index)=>!value||value===puzzle.solution[index])).toBe(true);
+    for(let unit=0;unit<9;unit++){
+      expect(puzzle.solution.slice(unit*9,unit*9+9).sort()).toEqual(expected);
+      expect(Array.from({length:9},(_,row)=>puzzle.solution[row*9+unit]).sort()).toEqual(expected);
+      expect(Array.from({length:9},(_,offset)=>puzzle.solution[(Math.floor(unit/3)*3+Math.floor(offset/3))*9+(unit%3)*3+offset%3]).sort()).toEqual(expected);
+    }
+  }
+  expect(challengePuzzles).toContain(freshChallengePuzzle(undefined,()=>0));
+  expect(challengePuzzles).toContain(freshChallengePuzzle(undefined,()=>0.999999));
+  // A repeat hold never redraws the board it is replacing.
+  expect(freshChallengePuzzle(challengePuzzles[0],()=>0)).not.toBe(challengePuzzles[0]);
 });
 test('board and connected keypad tracking use actual bounds and cross segment boundaries',()=>{
   expect(cellAt(0,0,360)).toBe(0);expect(cellAt(359,359,360)).toBe(80);

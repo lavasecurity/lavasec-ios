@@ -1415,7 +1415,7 @@ final class AppViewModel: ObservableObject {
         case .paused:
             return "Lava will try to resume at %@.".lavaLocalizedFormat(formattedTemporaryProtectionResumeTime)
         case .establishing:
-            return Self.chainedEstablishingMessage
+            return Self.chainedEstablishingMessage.lavaLocalized
         case .tunnelReady:
             return "Waiting for traffic to confirm VPN forwarding."
         case .vpnUnconfirmed:
@@ -1842,12 +1842,14 @@ final class AppViewModel: ObservableObject {
     // since the Phase D3 account peel — views observe it as its own environment object.
 
     var dnsResolverSummaryText: String {
+        let preset = configuration.resolverPreset
+        let name = LavaStrings.resolverName(preset, customName: configuration.customResolverName, short: true)
         guard configuration.resolverLadderInputs.isConfiguredFallbackEnabled
         else {
-            return configuration.resolverPreset.shortDisplayName
+            return name
         }
 
-        return "%@ + Fallback".lavaLocalizedFormat(configuration.resolverPreset.shortDisplayName)
+        return "%@ + Fallback".lavaLocalizedFormat(name)
     }
 
     var supportsDNSOverQUIC: Bool {
@@ -2160,6 +2162,9 @@ final class AppViewModel: ObservableObject {
     // VPN settings readback and the credential-write mutex shared with QA staging.
     // Refresh the snapshot on entry/resume or profile mutation, never while rendering.
     @Published var dnsSettingsProfileStatus: ChainedUpstreamSurfaceStatus?
+    var dnsSettingsPresentationRevision: UInt64 = 0
+    var dnsSettingsPresentationTask: Task<Void, Never>?
+    var dnsSettingsPresentationNeedsRefresh = false
     @Published var isStagingChainedUpstreamForQA = false
 
     // From AppViewModel/AppViewModel+ReportSurfaces.swift:

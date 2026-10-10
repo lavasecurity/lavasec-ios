@@ -1,4 +1,5 @@
 import BackgroundTasks
+import Combine
 import GoogleSignIn
 import Darwin
 import LavaSecKit
@@ -274,23 +275,70 @@ private final class BGTaskCompletion: @unchecked Sendable {
 }
 
 @MainActor
-final class LavaPrivacyShield {
+final class LavaPrivacyShield: NSObject {
     private let overlayTag = 0x4C415650
+    private var overlays = [UIView]()
+    private var coveredWindows = [(window: UIWindow, accessibilityWasHidden: Bool)]()
 
-    func show(in application: UIApplication) {
-        application.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-        for window in windows(in: application) {
+    override init() {
+        super.init()
+        // SwiftUI owns scenes. Application delegate activation alone is not the
+        // lifetime of a scene's windows, especially around presented RN sheets.
+        for name in [UIScene.didActivateNotification, UIApplication.didBecomeActiveNotification] {
+            NotificationCenter.default.addObserver(self, selector: #selector(activated), name: name, object: nil)
+        }
+    }
+
+    @objc private func activated() { reconcileActive(in: UIApplication.shared) }
+
+    func reconcileActive(in application: UIApplication) {
+        guard application.applicationState == .active else { return }
+        let security = LavaProtectionShortcutRuntime.shared.security
+        #if LAVA_REACT_NATIVE
+        let authenticating = security.isAppUnlockBlockingUI || security.isAppUnlockPrivacyMaskVisible
+        #else
+        let authenticating = false // The non-RN lock is an overlay in the ordinary window.
+        #endif
+        if authenticating || !security.protectedDataIsAvailableForPresentation && security.backgroundPrivacyCoverRequired {
+            // Keep the ordinary app windows covered while the dedicated lock
+            // window owns authentication. Do not resign its passcode responder.
+            show(in: application, resignFirstResponder: false)
+        } else { hide(from: application) }
+    }
+
+    func show(in application: UIApplication, resignFirstResponder: Bool = true) {
+        if resignFirstResponder {
+            application.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        }
+        // RN modal controllers live in the normal app window. System keyboard
+        // and authentication windows must remain interactive above this shield.
+        for window in windows(in: application) where window.windowLevel == .normal
+            && window.accessibilityIdentifier != "lava-security-window" {
             addShield(to: window)
         }
     }
 
     func hide(from application: UIApplication) {
+        // Remove the exact views we installed, including windows no longer in
+        // connectedScenes after a sheet/key-window transition.
+        for overlay in overlays { overlay.removeFromSuperview() }
+        overlays.removeAll()
+        for covered in coveredWindows {
+            covered.window.accessibilityElementsHidden = covered.accessibilityWasHidden
+        }
+        coveredWindows.removeAll()
         for window in windows(in: application) {
             window.viewWithTag(overlayTag)?.removeFromSuperview()
         }
     }
 
     private func addShield(to window: UIWindow) {
+        if !coveredWindows.contains(where: { $0.window === window }) {
+            coveredWindows.append((window, window.accessibilityElementsHidden))
+        }
+        // The dedicated security window owns accessibility while locked. A
+        // second modal AX cover here can make its visible Retry unreachable.
+        window.accessibilityElementsHidden = true
         if let existingOverlay = window.viewWithTag(overlayTag) {
             window.bringSubviewToFront(existingOverlay)
             return
@@ -302,6 +350,8 @@ final class LavaPrivacyShield {
         overlay.frame = window.bounds
         overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         overlay.isUserInteractionEnabled = true
+        overlay.accessibilityElementsHidden = true
+        overlays.append(overlay)
 
         let dimmingView = UIView(frame: overlay.bounds)
         dimmingView.backgroundColor = UIColor.systemBackground.withAlphaComponent(0.64)
@@ -325,6 +375,7 @@ final class LavaPrivacyShield {
 @MainActor
 final class LavaNotificationDelegate: NSObject, UIApplicationDelegate, @preconcurrency UNUserNotificationCenterDelegate {
     private let privacyShield = LavaPrivacyShield()
+    private var securityPresentationSubscription: AnyCancellable?
 
     func application(
         _ application: UIApplication,
@@ -333,6 +384,10 @@ final class LavaNotificationDelegate: NSObject, UIApplicationDelegate, @preconcu
         #if LAVA_QA_TOOLS
         QAMetricKitCollector.start()
         #endif
+        securityPresentationSubscription = LavaProtectionShortcutRuntime.shared.security.objectWillChange.sink { [weak self] _ in
+            // Observe the completed controller transaction, not @Published's old value.
+            Task { @MainActor [weak self] in self?.privacyShield.reconcileActive(in: application) }
+        }
         UNUserNotificationCenter.current().delegate = self
         BackgroundCatalogRefresh.registerHandler()
         BackgroundWarmTopUp.registerHandler()
@@ -340,6 +395,9 @@ final class LavaNotificationDelegate: NSObject, UIApplicationDelegate, @preconcu
     }
 
     func applicationWillResignActive(_ application: UIApplication) {
+        // Our own credential prompt is an interruption, not a background lock.
+        // The real background/protected-data callbacks still cover immediately.
+        guard !LavaProtectionShortcutRuntime.shared.security.isBiometricAuthenticationInProgress else { return }
         updatePrivacyShield(in: application)
     }
 
@@ -376,12 +434,7 @@ final class LavaNotificationDelegate: NSObject, UIApplicationDelegate, @preconcu
     }
 
     private func updateActivePrivacyShield(in application: UIApplication) {
-        let security = LavaProtectionShortcutRuntime.shared.security
-        if security.protectedDataIsAvailableForPresentation || !security.backgroundPrivacyCoverRequired {
-            privacyShield.hide(from: application)
-        } else {
-            privacyShield.show(in: application)
-        }
+        privacyShield.reconcileActive(in: application)
     }
 
     func applicationWillTerminate(_ application: UIApplication) {
@@ -402,6 +455,7 @@ final class LavaNotificationDelegate: NSObject, UIApplicationDelegate, @preconcu
     }
 
     func applicationDidBecomeActive(_ application: UIApplication) {
+        LavaProtectionShortcutRuntime.shared.security.sceneDidBecomeActive()
         updateActivePrivacyShield(in: application)
     }
 

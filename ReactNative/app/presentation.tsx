@@ -5,14 +5,28 @@ export type Presentation = {locale:string;textScales:Record<string,number>|null}
 export const PresentationContext = createContext<Presentation>({locale:'en',textScales:null});
 let locale = 'en';
 export function configurePresentation(value?:Presentation) {locale=value?.locale??'en';}
+function translationLocale(value:string):string {
+  const parts=value.replace(/_/g,'-').toLowerCase().split('-');
+  const supported=Object.keys(translations);
+  for(let length=parts.length;length>0;length--) {
+    const candidate=parts.slice(0,length).join('-');
+    const match=supported.find(language=>language.toLowerCase()===candidate);
+    if(match)return match;
+  }
+  // Native bundles normally send their resolved catalog language. Regional
+  // language tags from other hosts must select the same supported script.
+  if(parts[0]==='zh')return parts.includes('hant')||parts.some(part=>['tw','hk','mo'].includes(part))?'zh-Hant':'zh-Hans';
+  if(parts[0]==='pt')return 'pt-BR';
+  return 'en';
+}
 // Tests observe lookups the native catalog lacks; production leaves this unset.
 let missingTranslationObserver:((value:string)=>void)|undefined;
 export function observeMissingTranslations(observer?:(value:string)=>void) {missingTranslationObserver=observer;}
 export function localized(value:string):string {
-  const table=translations[locale]??translations[locale.split('-')[0]!]??{};
+  const table=translations[translationLocale(locale)]??translations.en??{};
   const translated=table[value];
   if(translated===undefined&&missingTranslationObserver&&value&&!(value in (translations.en??{})))missingTranslationObserver(value);
-  return translated??value;
+  return translated??translations.en?.[value]??value;
 }
 export function localizedNumber(value:number):string {return value.toLocaleString(locale.replace(/_/g,'-'));}
 // Native catalog object/integer placeholders, including positional forms. Select the

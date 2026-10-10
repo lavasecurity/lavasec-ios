@@ -766,11 +766,11 @@ struct VPNChainingConfigurationEditor: View {
         var message: String {
             switch self {
             case .unreadable:
-                return "Couldn't open that file. Try moving it to Files first."
+                return "Couldn't open that file. Try moving it to Files first.".lavaLocalized
             case .tooLarge(let bytes):
-                return "That file is \(bytes / 1024) KB — far too big for a WireGuard config. Wrong file?"
+                return "That file is %lld KB — far too big for a WireGuard config. Wrong file?".lavaLocalizedFormat(bytes / 1024)
             case .notText:
-                return "That file isn't text, so it isn't a WireGuard config."
+                return "That file isn't text, so it isn't a WireGuard config.".lavaLocalized
             }
         }
     }

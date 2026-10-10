@@ -113342,6 +113342,1581 @@
           }
         }
       }
+    },
+    "Challenge mode applied to this board": {
+      "comment": "Quiet Sudoku caption shown after the hidden three-second New-puzzle hold applies challenge mode (a fresh board under 30 clues).",
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Herausforderungsmodus auf dieses Spielfeld angewendet"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Challenge mode applied to this board"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Modo desafío aplicado a este tablero"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mode défi appliqué à cette grille"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Modalità sfida applicata a questa griglia"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "チャレンジモードをこの盤面に適用しました"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이 보드에 챌린지 모드를 적용했습니다"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Modo desafio aplicado a este tabuleiro"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已将挑战模式应用到此棋盘"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已將挑戰模式套用到此棋盤"
+          }
+        }
+      }
+    },
+    "Upgrade to Lava Plus to add custom DNS": {
+      "comment": "Contextual Lava Plus entry panel. Settings visits omit this panel.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Upgrade to Lava Plus to add custom DNS"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava PlusにアップグレードしてカスタムDNSを追加"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "升級至 Lava Plus 以加入自訂 DNS"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "升级至 Lava Plus 以添加自定义 DNS"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Upgrade auf Lava Plus, um eigenes DNS hinzuzufügen"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Passez à Lava Plus pour ajouter un DNS personnalisé"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mejora a Lava Plus para añadir DNS personalizado"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava Plus로 업그레이드하여 사용자 지정 DNS 추가"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Assine o Lava Plus para adicionar DNS personalizado"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Passa a Lava Plus per aggiungere DNS personalizzati"
+          }
+        }
+      }
+    },
+    "Upgrade to Lava Plus to add more exceptions": {
+      "comment": "Contextual Lava Plus entry panel. Settings visits omit this panel.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Upgrade to Lava Plus to add more exceptions"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava Plusにアップグレードしてさらに多くの例外を追加"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "升級至 Lava Plus 以加入更多例外"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "升级至 Lava Plus 以添加更多例外"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Upgrade auf Lava Plus, um mehr Ausnahmen hinzuzufügen"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Passez à Lava Plus pour ajouter plus d’exceptions"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mejora a Lava Plus para añadir más excepciones"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava Plus로 업그레이드하여 더 많은 예외 추가"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Assine o Lava Plus para adicionar mais exceções"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Passa a Lava Plus per aggiungere più eccezioni"
+          }
+        }
+      }
+    },
+    "Upgrade to Lava Plus to add more filters": {
+      "comment": "Contextual Lava Plus entry panel. Settings visits omit this panel.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Upgrade to Lava Plus to add more filters"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava Plusにアップグレードしてさらに多くのフィルターを追加"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "升級至 Lava Plus 以加入更多篩選器"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "升级至 Lava Plus 以添加更多过滤器"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Upgrade auf Lava Plus, um mehr Filter hinzuzufügen"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Passez à Lava Plus pour ajouter plus de filtres"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mejora a Lava Plus para añadir más filtros"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava Plus로 업그레이드하여 더 많은 필터 추가"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Assine o Lava Plus para adicionar mais filtros"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Passa a Lava Plus per aggiungere più filtri"
+          }
+        }
+      }
+    },
+    "Upgrade to Lava Plus to add your blocklists": {
+      "comment": "Contextual Lava Plus entry panel. Settings visits omit this panel.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Upgrade to Lava Plus to add your blocklists"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava Plusにアップグレードして自分のブロックリストを追加"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "升級至 Lava Plus 以加入你的封鎖清單"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "升级至 Lava Plus 以添加你的屏蔽列表"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Upgrade auf Lava Plus, um eigene Blocklisten hinzuzufügen"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Passez à Lava Plus pour ajouter vos listes de blocage"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mejora a Lava Plus para añadir tus listas de bloqueo"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava Plus로 업그레이드하여 내 차단 목록 추가"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Assine o Lava Plus para adicionar suas listas de bloqueio"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Passa a Lava Plus per aggiungere le tue liste di blocco"
+          }
+        }
+      }
+    },
+    "Upgrade to Lava Plus to block more domains": {
+      "comment": "Contextual Lava Plus entry panel. Settings visits omit this panel.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Upgrade to Lava Plus to block more domains"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava Plusにアップグレードしてさらに多くのドメインをブロック"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "升級至 Lava Plus 以封鎖更多網域"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "升级至 Lava Plus 以屏蔽更多域名"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Upgrade auf Lava Plus, um mehr Domains zu blockieren"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Passez à Lava Plus pour bloquer plus de domaines"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mejora a Lava Plus para bloquear más dominios"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava Plus로 업그레이드하여 더 많은 도메인 차단"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Assine o Lava Plus para bloquear mais domínios"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Passa a Lava Plus per bloccare più domini"
+          }
+        }
+      }
+    },
+    "Upgrade to Lava Plus to unlock all Lava Guards": {
+      "comment": "Contextual Lava Plus entry panel. Settings visits omit this panel.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Upgrade to Lava Plus to unlock all Lava Guards"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava PlusにアップグレードしてすべてのLava Guardをアンロック"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "升級至 Lava Plus 以解鎖所有 Lava Guards"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "升级至 Lava Plus 以解锁所有 Lava Guards"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Upgrade auf Lava Plus, um alle Lava Guards freizuschalten"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Passez à Lava Plus pour débloquer tous les Lava Guards"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mejora a Lava Plus para desbloquear todos los Lava Guards"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava Plus로 업그레이드하여 모든 Lava Guards 잠금 해제"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Assine o Lava Plus para desbloquear todos os Lava Guards"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Passa a Lava Plus per sbloccare tutti i Lava Guards"
+          }
+        }
+      }
+    },
+    "Upgrade to Lava Plus to use VPN chaining": {
+      "comment": "Contextual Lava Plus entry panel. Settings visits omit this panel.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Upgrade to Lava Plus to use VPN chaining"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava PlusにアップグレードしてVPNチェーンを使用"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "升級至 Lava Plus 以使用 VPN 串接"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "升级至 Lava Plus 以使用 VPN 串联"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Upgrade auf Lava Plus, um VPN-Verkettung zu nutzen"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Passez à Lava Plus pour utiliser le chaînage VPN"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mejora a Lava Plus para usar el encadenamiento VPN"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava Plus로 업그레이드하여 VPN 체이닝 사용"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Assine o Lava Plus para usar o encadeamento de VPN"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Passa a Lava Plus per usare il concatenamento VPN"
+          }
+        }
+      }
+    },
+    "Upgrade to Lava Plus to use more blocklist rules": {
+      "comment": "Contextual Lava Plus entry panel. Settings visits omit this panel.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Upgrade to Lava Plus to use more blocklist rules"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava Plusにアップグレードしてさらに多くのブロックリストルールを使用"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "升級至 Lava Plus 以使用更多封鎖清單規則"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "升级至 Lava Plus 以使用更多屏蔽列表规则"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Upgrade auf Lava Plus, um mehr Blocklistenregeln zu nutzen"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Passez à Lava Plus pour utiliser plus de règles de blocage"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mejora a Lava Plus para usar más reglas de listas de bloqueo"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava Plus로 업그레이드하여 더 많은 차단 목록 규칙 사용"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Assine o Lava Plus para usar mais regras de listas de bloqueio"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Passa a Lava Plus per usare più regole delle liste di blocco"
+          }
+        }
+      }
+    },
+    "Use Lava Plus for full import": {
+      "comment": "Contextual Lava Plus entry panel. Settings visits omit this panel.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use Lava Plus for full import"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "すべてをインポートするにはLava Plusをご利用ください"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "使用 Lava Plus 完整匯入"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "使用 Lava Plus 完整导入"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nutze Lava Plus für den vollständigen Import"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Utilisez Lava Plus pour une importation complète"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Usa Lava Plus para importar todo"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "전체 가져오기는 Lava Plus를 사용하세요"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use o Lava Plus para importar tudo"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Usa Lava Plus per importare tutto"
+          }
+        }
+      }
+    },
+    "Upgrade to Lava Plus to manage this filter": {
+      "comment": "Contextual Lava Plus entry panel. Settings visits omit this panel.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Upgrade to Lava Plus to manage this filter"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava Plusにアップグレードしてこのフィルターを管理"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "升級至 Lava Plus 以管理此篩選器"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "升级至 Lava Plus 以管理此过滤器"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Upgrade auf Lava Plus, um diesen Filter zu verwalten"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Passez à Lava Plus pour gérer ce filtre"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mejora a Lava Plus para gestionar este filtro"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava Plus로 업그레이드하여 이 필터 관리"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Assine o Lava Plus para gerenciar este filtro"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Passa a Lava Plus per gestire questo filtro"
+          }
+        }
+      }
+    },
+    "Complete this step before continuing.": {
+      "comment": "Foreground session validation, localized by the native command boundary.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Complete this step before continuing."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Schließe diesen Schritt ab, bevor du fortfährst."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Completa este paso antes de continuar."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Terminez cette étape avant de continuer."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Completa questo passaggio prima di continuare."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "この手順を完了してから続けてください。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "계속하기 전에 이 단계를 완료하세요."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conclua esta etapa antes de continuar."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请完成此步骤后再继续。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "請完成此步驟後再繼續。"
+          }
+        }
+      }
+    },
+    "Feedback is being submitted.": {
+      "comment": "Foreground session validation, localized by the native command boundary.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Feedback is being submitted."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dein Feedback wird gesendet."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Se están enviando tus comentarios."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vos commentaires sont en cours d’envoi."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Invio del feedback in corso."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "フィードバックを送信中です。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "피드백을 제출하는 중입니다."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Seu feedback está sendo enviado."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在提交反馈。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在提交意見回饋。"
+          }
+        }
+      }
+    },
+    "Review your feedback before submitting.": {
+      "comment": "Foreground session validation, localized by the native command boundary.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review your feedback before submitting."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Überprüfe dein Feedback vor dem Senden."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Revisa tus comentarios antes de enviarlos."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vérifiez vos commentaires avant de les envoyer."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Controlla il feedback prima di inviarlo."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "送信前にフィードバックを確認してください。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "제출하기 전에 피드백을 검토하세요."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Revise seu feedback antes de enviar."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请在提交前检查反馈内容。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "請在提交前確認意見回饋內容。"
+          }
+        }
+      }
+    },
+    "Your filters changed. Close Review and check your changes.": {
+      "comment": "Foreground session validation, localized by the native command boundary.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your filters changed. Close Review and check your changes."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deine Filter haben sich geändert. Schließe die Übersicht und überprüfe deine Änderungen."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tus filtros han cambiado. Cierra la revisión y comprueba los cambios."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vos filtres ont changé. Fermez la vérification et contrôlez vos modifications."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I filtri sono cambiati. Chiudi la revisione e controlla le modifiche."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "フィルターが変更されました。確認画面を閉じて変更内容を確認してください。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "필터가 변경되었습니다. 검토 화면을 닫고 변경 사항을 확인하세요."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Seus filtros mudaram. Feche a revisão e confira suas alterações."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "筛选器已更改。请关闭检查页面并检查更改。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "篩選器已變更。請關閉確認頁面並檢查變更。"
+          }
+        }
+      }
+    },
+    "Setting up VPN chaining.": {
+      "comment": "Guard subtitle while establishing the user’s VPN chain. VPN is a protocol abbreviation.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Setting up VPN chaining."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "VPNチェーン接続を設定しています。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在設定 VPN 串接。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在设置 VPN 串接。"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "VPN-Verkettung wird eingerichtet."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Configuration du chaînage VPN en cours."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Configurando el encadenamiento VPN."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "VPN 연결 체인을 설정하고 있습니다."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Configurando o encadeamento de VPN."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Configurazione del concatenamento VPN in corso."
+          }
+        }
+      }
+    },
+    "Protection was force-stopped to restore your connection. You may need to allow the VPN again the next time you turn it on.": {
+      "comment": "Guard recovery after stopping the system VPN to restore connectivity. Allow refers to approving the iOS VPN permission again.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Protection was force-stopped to restore your connection. You may need to allow the VPN again the next time you turn it on."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "接続を復旧するため、保護を強制的に停止しました。次に保護をオンにするとき、VPN の許可が再び必要になる場合があります。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已強制停止防護以恢復連線。下次開啟防護時，你可能需要再次允許 VPN。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已强制停止防护以恢复连接。下次开启防护时，你可能需要再次允许 VPN。"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Der Schutz wurde zwangsweise gestoppt, um deine Verbindung wiederherzustellen. Beim nächsten Einschalten musst du das VPN möglicherweise erneut erlauben."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La protection a été arrêtée de force pour rétablir votre connexion. Vous devrez peut-être autoriser à nouveau le VPN lors de la prochaine activation."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La protección se detuvo de forma forzada para restablecer tu conexión. Puede que debas volver a permitir la VPN la próxima vez que la actives."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "연결을 복원하기 위해 보호를 강제로 중지했습니다. 다음에 보호를 켤 때 VPN을 다시 허용해야 할 수 있습니다."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A proteção foi interrompida à força para restaurar sua conexão. Talvez você precise permitir a VPN novamente na próxima vez que a ativar."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La protezione è stata arrestata forzatamente per ripristinare la connessione. Alla prossima attivazione potrebbe essere necessario autorizzare di nuovo la VPN."
+          }
+        }
+      }
+    },
+    "Couldn't open that file. Try moving it to Files first.": {
+      "comment": "WireGuard import failed to read a selected file. Files is the localized name of Apple’s Files app.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn't open that file. Try moving it to Files first."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ファイルを開けませんでした。まず「ファイル」アプリに移動してみてください。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法開啟這個檔案。請先將它移至「檔案」App。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法打开这个文件。请先将它移到「文件」App。"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Datei konnte nicht geöffnet werden. Verschiebe sie zuerst in die App „Dateien“."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible d’ouvrir ce fichier. Essayez d’abord de le déplacer dans Fichiers."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudo abrir el archivo. Prueba a moverlo primero a Archivos."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "파일을 열 수 없습니다. 먼저 파일 앱으로 옮겨 보세요."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível abrir o arquivo. Tente movê-lo para o app Arquivos primeiro."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossibile aprire il file. Prova prima a spostarlo nell’app File."
+          }
+        }
+      }
+    },
+    "That file is %lld KB — far too big for a WireGuard config. Wrong file?": {
+      "comment": "WireGuard import rejects a file that is too large. %lld is its size in kilobytes; preserve the integer placeholder.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "That file is %lld KB — far too big for a WireGuard config. Wrong file?"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このファイルは %lld KB あり、WireGuard 設定としては大きすぎます。別のファイルではありませんか？"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這個檔案有 %lld KB，對 WireGuard 設定來說太大了。是否選錯檔案？"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这个文件有 %lld KB，对于 WireGuard 配置来说太大了。是否选错了文件？"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Datei ist %lld KB groß — viel zu groß für eine WireGuard-Konfiguration. Ist es die falsche Datei?"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ce fichier fait %lld Ko — bien trop volumineux pour une configuration WireGuard. Est-ce le bon fichier ?"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "El archivo tiene %lld KB, demasiado para una configuración de WireGuard. ¿Es el archivo correcto?"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이 파일은 %lld KB로 WireGuard 구성 파일로 쓰기에는 너무 큽니다. 다른 파일을 선택하셨나요?"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Esse arquivo tem %lld KB, grande demais para uma configuração do WireGuard. Você selecionou o arquivo certo?"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Il file è di %lld KB, troppo grande per una configurazione WireGuard. Hai selezionato il file giusto?"
+          }
+        }
+      }
+    },
+    "That file isn't text, so it isn't a WireGuard config.": {
+      "comment": "WireGuard import rejects non-text input. WireGuard is the protocol name.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "That file isn't text, so it isn't a WireGuard config."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このファイルはテキストではないため、WireGuard 設定ではありません。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這不是文字檔案，因此不是 WireGuard 設定檔。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这不是文本文件，因此不是 WireGuard 配置文件。"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Datei enthält keinen Text und ist daher keine WireGuard-Konfiguration."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ce fichier n’est pas un fichier texte, ce n’est donc pas une configuration WireGuard."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "El archivo no es de texto, por lo que no es una configuración de WireGuard."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이 파일은 텍스트 파일이 아니므로 WireGuard 구성 파일이 아닙니다."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Esse arquivo não é de texto, portanto não é uma configuração do WireGuard."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Il file non è di testo, quindi non è una configurazione WireGuard."
+          }
+        }
+      }
+    },
+    "Your VPN connection is still running the configuration it started with. Turn protection off and on to switch to the one you just saved.": {
+      "comment": "VPN configuration-rotation warning. Restart means turn protection off then on, not restart the device. The active connection can continue using its old configuration until it stops.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your VPN connection is still running the configuration it started with. Turn protection off and on to switch to the one you just saved."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "VPN 接続は開始時の設定を引き続き使用しています。保存した設定に切り替えるには、保護を一度オフにしてからオンにしてください。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "VPN 連線仍在使用啟動時的設定。請先關閉防護再開啟，以切換至剛儲存的設定。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "VPN 连接仍在使用启动时的配置。请先关闭防护再开启，以切换到刚保存的配置。"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deine VPN-Verbindung verwendet noch die Konfiguration vom Start. Schalte den Schutz aus und wieder ein, um zur gerade gespeicherten Konfiguration zu wechseln."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Votre connexion VPN utilise encore la configuration avec laquelle elle a démarré. Désactivez puis réactivez la protection pour utiliser celle que vous venez d’enregistrer."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tu conexión VPN sigue usando la configuración con la que se inició. Desactiva y vuelve a activar la protección para usar la que acabas de guardar."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "VPN 연결이 시작할 때의 구성을 계속 사용하고 있습니다. 방금 저장한 구성으로 바꾸려면 보호를 껐다가 다시 켜세요."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sua conexão VPN ainda usa a configuração com a qual foi iniciada. Desative e reative a proteção para usar a configuração que você acabou de salvar."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La connessione VPN usa ancora la configurazione con cui è stata avviata. Disattiva e riattiva la protezione per passare a quella appena salvata."
+          }
+        }
+      }
+    },
+    "Your VPN connection is still running the configuration you removed, and will until protection stops. Turn protection off, or import a configuration to replace it.": {
+      "comment": "VPN configuration-rotation warning. Restart means turn protection off then on, not restart the device. The active connection can continue using its old configuration until it stops.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your VPN connection is still running the configuration you removed, and will until protection stops. Turn protection off, or import a configuration to replace it."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保護を停止するまで、VPN 接続は削除した設定を使用し続けます。保護をオフにするか、別の設定をインポートして置き換えてください。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "VPN 連線仍在使用你已移除的設定，直到防護停止。請關閉防護，或匯入設定來取代它。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "VPN 连接仍在使用你已移除的配置，直到防护停止。请关闭防护，或导入配置来替换它。"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deine VPN-Verbindung verwendet die entfernte Konfiguration weiter, bis der Schutz stoppt. Schalte den Schutz aus oder importiere eine andere Konfiguration."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Votre connexion VPN continue d’utiliser la configuration supprimée jusqu’à l’arrêt de la protection. Désactivez la protection ou importez une configuration pour la remplacer."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tu conexión VPN sigue usando la configuración que eliminaste hasta que se detenga la protección. Desactiva la protección o importa otra configuración para reemplazarla."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "보호가 중지될 때까지 VPN 연결은 삭제한 구성을 계속 사용합니다. 보호를 끄거나 대체할 구성을 가져오세요."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sua conexão VPN continuará usando a configuração removida até a proteção parar. Desative a proteção ou importe outra configuração para substituí-la."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La connessione VPN continua a usare la configurazione rimossa finché la protezione non si arresta. Disattiva la protezione o importa una configurazione per sostituirla."
+          }
+        }
+      }
+    },
+    "Restart to use the new configuration": {
+      "comment": "VPN configuration-rotation warning. Restart means turn protection off then on, not restart the device. The active connection can continue using its old configuration until it stops.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restart protection to use the new configuration"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保護を再開して新しい設定を使用"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重新開啟防護以使用新設定"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重新开启防护以使用新配置"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Schutz neu starten, um die neue Konfiguration zu verwenden"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Relancez la protection pour utiliser la nouvelle configuration"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reinicia la protección para usar la nueva configuración"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "새 구성을 사용하려면 보호를 다시 시작하세요"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reinicie a proteção para usar a nova configuração"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Riavvia la protezione per usare la nuova configurazione"
+          }
+        }
+      }
+    },
+    "Still using the configuration you removed": {
+      "comment": "VPN configuration-rotation warning. Restart means turn protection off then on, not restart the device. The active connection can continue using its old configuration until it stops.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Still using the configuration you removed"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "削除した設定を使用しています"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仍在使用已移除的設定"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仍在使用已移除的配置"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die entfernte Konfiguration wird noch verwendet"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La configuration supprimée est toujours utilisée"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Se sigue usando la configuración que eliminaste"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "삭제한 구성을 계속 사용 중"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ainda usando a configuração removida"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La configurazione rimossa è ancora in uso"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

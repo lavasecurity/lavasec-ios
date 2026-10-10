@@ -32,12 +32,14 @@ extension LavaAppBridge {
             guard library.hasChanges else { throw CommandError("There are no changes to save.") }
         }
         let reviewedSession = library.editSession
+        next.reviewedLibrarySession = reviewedSession
         let result: (String?, Bool) = await withCheckedContinuation { continuation in
             var confirmed = false
             var createdID: String?
             var completed = false
             next.createFilterDraft = { templateID in
-                guard library.canBeginCreatingFilter else { return false }
+                guard library.editSession == reviewedSession, library.canBeginCreatingFilter,
+                      templateID == nil || library.filters.contains(where: { $0.id == templateID }) else { return false }
                 guard let id = self.model.beginCreatingFilter(duplicatingFilterID: templateID) else { return false }
                 createdID = id
                 return true
@@ -61,6 +63,11 @@ extension LavaAppBridge {
         let draft: FilterEditDraft
         var applying = false
         var cancelRequested = false
+    }
+    func discardStandaloneDomainResult(_ result: Any) {
+        if let token = (result as? [String: Any])?["standaloneReview"] as? String {
+            cancelStandaloneDomainReview(token)
+        }
     }
     func cancelStandaloneDomainReview(_ token: String) {
         guard var owned = standaloneDomainReviews[token] else { return }
@@ -167,7 +174,7 @@ extension LavaAppBridge {
             guard model.filterEditDraft != nil, flow == nil,
                   let filter = model.filter(id: id) else { throw CommandError("Start editing this filter first.") }
             var next = LavaAppNativeFlow(name: "renameFilter", filterID: id,
-                                         filterName: filter.name, filterEmoji: filter.emoji)
+                                         filterVisitEpoch: filterPresentationEpoch, filterName: filter.name, filterEmoji: filter.emoji)
             let dismissed: Bool = await withCheckedContinuation { continuation in
                 next.onDismiss = { continuation.resume(returning: true) }
                 flow = next
@@ -179,19 +186,14 @@ extension LavaAppBridge {
             // callback cannot replace a draft the first callback already opened.
             if model.filterEditDraft == nil { model.beginFilterEditing() }
         case "filter.save":
-            if model.filterDrafts.sessions.newFilter?.id == id {
+            if model.filterDrafts.sessions.newFilter?.id == id, !model.filterDraftHasChanges {
                 if let error = model.saveNewFilterDraft() { throw CommandError(error) }
                 return "saved"
             }
             guard model.filterDraftHasChanges else { model.cancelFilterEditing(); return "saved" }
-            if model.isViewingNonActiveFilter {
-                if let error = model.saveNonActiveFilterDraft() { throw CommandError(error) }
-                return "saved"
-            }
-            let diff = model.filterDraftDiff
-            if !diff.removedBlocklistIDs.isEmpty || !diff.removedBlockedDomains.isEmpty || !diff.addedAllowedDomains.isEmpty { return "review" }
-            await model.prepareAndApplyFilterDraft(origin: .filters)
-            return "saved"
+            // Every changed draft shares the confirmation boundary, including
+            // additions and edits of inactive or newly created filters.
+            return "review"
         case "filter.undoList":
             guard model.filterEditDraft != nil, let sourceID = input["sourceID"] as? String else { throw CommandError("Start editing this filter first.") }
             model.filterDrafts.undoBlocklistDraftChange(sourceID)
@@ -212,7 +214,7 @@ extension LavaAppBridge {
             guard Set(ids).isSubset(of: available) else { throw CommandError("This blocklist is no longer available.") }
             if name == "filter.customList" {
                 // Budget the picker selection without saving its unconfirmed edits.
-                pushedCustomEntry = LavaAppNativeFlow(name: "customBlocklist", filterID: id, blocklistSelection: Set(ids))
+                pushedCustomEntry = LavaAppNativeFlow(name: "customBlocklist", filterID: id, filterVisitEpoch: filterPresentationEpoch, blocklistSelection: Set(ids))
                 return pushedCustomEntry!.id.uuidString
             }
             if let error = model.setDraftBlocklists(Set(ids)) { throw CommandError(error) }

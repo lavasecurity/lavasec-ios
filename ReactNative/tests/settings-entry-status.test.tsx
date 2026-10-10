@@ -10,9 +10,9 @@ import {initialSession} from '../review/session';
 
 const mockNavigate = jest.fn();
 const mockGoBack = jest.fn();
-const mockNavigation = {navigate: mockNavigate, goBack: mockGoBack, setOptions: jest.fn()};
+const mockNavigation = {navigate: mockNavigate, goBack: mockGoBack, setOptions: jest.fn(),addListener:jest.fn(()=>()=>{})};
 jest.mock('@react-navigation/native', () => ({useNavigation: () => mockNavigation, useIsFocused: () => true, usePreventRemove: jest.fn(), useScrollToTop: jest.fn()}));
-jest.mock('react-native-safe-area-context', () => ({useSafeAreaInsets: () => ({top: 59, bottom: 34, left: 0, right: 0})}));
+jest.mock('react-native-safe-area-context', () => ({SafeAreaInsetsContext:require('react').createContext(null),useSafeAreaInsets: () => ({top: 59, bottom: 34, left: 0, right: 0})}));
 jest.mock('../specs/LavaDecorationNativeComponent', () => ({__esModule: true, default: require('react-native').View}));
 jest.mock('../specs/LavaNativePageNativeComponent', () => ({__esModule: true, default: require('react-native').View}));
 jest.mock('../specs/LavaChoiceNativeComponent', () => require('./native-choice-mock'));
@@ -57,7 +57,6 @@ test('Settings Feedback opens its native sheet while Device QA preserves its set
 });
 
 test.each([
-  [FeedbackSettingsScreen, 'feedback-settings-page', 'feedback'],
   [DeviceQAScreen, 'device-qa-page', 'phoneQA'],
 ] as const)('native Settings page %s returns through its owning React stack', (Component, id, page) => {
   render(<Provider app={{command: jest.fn()} as unknown as AppStore}><Component /></Provider>);
@@ -65,6 +64,14 @@ test.each([
   expect(nativePage.props.page).toBe(page);
   fireEvent(nativePage, 'back');
   expect(mockGoBack).toHaveBeenCalledTimes(1);
+});
+
+test('preview feedback returns through its React sheet and has no native page body',()=>{
+  render(<Provider><FeedbackSettingsScreen/></Provider>);
+  expect(screen.queryByTestId('feedback-settings-page')).toBeNull();
+  expect(screen.getByText('Choose a topic')).toBeTruthy();
+  const options=mockNavigation.setOptions.mock.calls.at(-1)![0];
+  options.unstable_headerLeftItems()[0].onPress();expect(mockGoBack).toHaveBeenCalledTimes(1);
 });
 
 test.each([

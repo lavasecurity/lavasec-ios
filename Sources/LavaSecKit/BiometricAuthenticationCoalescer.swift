@@ -43,7 +43,8 @@ public final class BiometricAuthenticationCoalescer {
     /// Revoked callers receive false; their results cannot authorize a replacement turn.
     ///
     /// - Parameters:
-    ///   - scope: View-authentication turn, or nil for the distinct foreground App Unlock owner.
+    ///   - scope: Current authorization token. App Unlock uses a distinct, revocable foreground
+    ///     token; protected views use their view-turn token. Nil is the unscoped default.
     ///   - isCurrent: Whether this caller still owns its turn. Revoked callers cannot reuse results
     ///     or start replacement prompts after the OS finishes an earlier evaluation.
     ///   - evaluate: Performs one OS evaluation. Different turns serialize without sharing results.

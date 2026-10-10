@@ -18,8 +18,7 @@ public enum BlocklistFormat: String, Codable, Sendable {
 // Invalidation constant for caches of PARSED rules (RuleSetCache). Bump when
 // parse behavior changes in any way that can alter output for the same input
 // bytes: clean()/candidateDomains()/auto-format detection, DomainName.normalize
-// semantics, the maxLineLength/maxRules defaults, or the
-// DomainRuleSet.lavaSecProtectedDomains list (cached entries are post-filter).
+// semantics, the maxLineLength/maxRules defaults, or ingestion policy.
 package enum BlocklistParsingRules {
     // v2: parseHosts now emits every host on a multi-domain line (was: first only),
     // so the same source bytes can yield more rules. Bumped to orphan stale RuleSetCache
@@ -31,7 +30,9 @@ package enum BlocklistParsingRules {
     // added alongside is output-identical for LF/CR/CRLF text and would not require a
     // bump on its own.)
     // v4: retain Google subdomain rules outside the existing sign-in exception.
-    package static let rulesVersion = 4
+    // v5: retain every valid service-domain rule without built-in exemptions.
+    // Invalidates parsed caches and prepared snapshots compiled with omitted rules.
+    package static let rulesVersion = 5
 }
 
 /// A blocklist line that could not be converted into a rule.

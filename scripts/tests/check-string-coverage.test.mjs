@@ -157,6 +157,35 @@ test("native bridge display errors and package lookups cannot bypass catalog cov
   }}), /core.unregistered/);
 });
 
+test("aliased static display messages require catalog keys without changing state identity", () => {
+  const source = `
+static let chainedEstablishingMessage = "Setting up VPN chaining."
+static let protectionForceStoppedMessage =
+  "Protection was force-stopped."
+let stateMatches = vpnMessage == Self.chainedEstablishingMessage
+`;
+  const missing = runFixture({ sources: { "LavaSecApp/AppViewModel.swift": source } });
+  assertFailed(missing, /Setting up VPN chaining.*static chainedEstablishingMessage/);
+  assert.match(missing.stderr, /Protection was force-stopped.*static protectionForceStoppedMessage/);
+  assertPassed(runFixture({
+    appKeys: ["Setting up VPN chaining.", "Protection was force-stopped."],
+    sources: { "LavaSecApp/AppViewModel.swift": source }
+  }));
+});
+
+test("static display message coverage ignores comments and stripped QA branches", () => {
+  assertPassed(runFixture({ sources: { "LavaSecApp/AppViewModel.swift": `
+// static let commentedMessage = "Comment example."
+/* static let commentedNotice = "Block comment example." */
+let documentation = #"""
+static let documentedMessage = "Raw string example."
+"""#
+#if DEBUG || LAVA_QA_TOOLS
+static let debugMessage = "Debug example."
+#endif
+` } }));
+});
+
 test("ordinary app labels cannot resolve keys from package or InfoPlist tables", () => {
   const result=runFixture({infoKeys:["Info only"],coreStrings:'"Package only" = "Package only";\n',sources:{
     "LavaSecApp/Fixture.swift": 'Text("Package only")\nText("Info only")\n'

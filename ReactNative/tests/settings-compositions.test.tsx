@@ -13,8 +13,8 @@ import {AppearanceStore} from '../review/appearance-store';
 import type {AppSnapshot} from '../app/contract';
 const mockNavigate=jest.fn();
 const mockSetOptions=jest.fn();
-jest.mock('@react-navigation/native',()=>({usePreventRemove:jest.fn(),useNavigation:()=>({navigate:mockNavigate,setOptions:mockSetOptions}),useIsFocused:()=>true,useRoute:()=>({params:{}}),useScrollToTop:jest.fn()}));
-jest.mock('react-native-safe-area-context',()=>({SafeAreaProvider:require('react-native').View,SafeAreaView:require('react-native').View,useSafeAreaInsets:()=>({top:59,bottom:34,left:0,right:0})}));
+jest.mock('@react-navigation/native',()=>({usePreventRemove:jest.fn(),useNavigation:()=>({addListener:jest.fn(()=>()=>{}),navigate:mockNavigate,setOptions:mockSetOptions}),useIsFocused:()=>true,useRoute:()=>({params:{}}),useScrollToTop:jest.fn()}));
+jest.mock('react-native-safe-area-context',()=>({SafeAreaProvider:require('react-native').View,SafeAreaView:require('react-native').View,SafeAreaInsetsContext:require('react').createContext(null),useSafeAreaInsets:()=>({top:59,bottom:34,left:0,right:0})}));
 jest.mock('../specs/LavaDecorationNativeComponent',()=>({__esModule:true,default:require('react-native').View}));
 jest.mock('../specs/LavaTextFieldNativeComponent',()=>({__esModule:true,default:require('react-native').View}));
 jest.mock('../specs/LavaSliderNativeComponent',()=>({__esModule:true,default:require('react-native').View}));
@@ -40,7 +40,7 @@ test('Customization and the catalog use the actual same Guard row while preservi
   expect(choice).toHaveProp('accessibilityState',expect.objectContaining({selected:true}));
   fireEvent.press(preview);expect(open).toHaveBeenCalledTimes(1);expect(select).not.toHaveBeenCalled();
   fireEvent.press(choice);expect(select).toHaveBeenCalledTimes(1);
-  expect(screen.getByRole('button',{name:'Locked Guard'})).toBeDisabled();expect(select).toHaveBeenCalledTimes(1);
+  expect(screen.getByRole('button',{name:'Locked Guard'})).toBeEnabled();fireEvent.press(screen.getByRole('button',{name:'Locked Guard'}));expect(select).toHaveBeenCalledTimes(2);
 });
 test('Spotlight contains only the active Guard copy so inactive long descriptions cannot reserve height',()=>{
   const variants=[{id:'original',title:'Original',description:'Short description.',tip:'Short tip.'},
@@ -94,4 +94,14 @@ test('filter editing keeps add actions in their matching rule section and opens 
   expect(mockNavigate).toHaveBeenLastCalledWith('AddDomain',{decision:'blocked',id:undefined});
   fireEvent.press(screen.getByRole('button',{name:'Add an exception'}));
   expect(mockNavigate).toHaveBeenLastCalledWith('AddDomain',{decision:'allowed',id:undefined});
+});
+
+
+test('mystery Guards keep their hidden title while the locked row opens contextual Plus',()=>{
+  const live={guards:[{id:'original',title:'Original',description:'Guard',tip:'Tip',selectable:true},
+    {id:'secret',title:'???',subtitle:'Keep Lava protecting you',description:'',tip:'',selectable:false}],plus:{enabled:false}} as unknown as AppSnapshot;
+  render(<Provider live={live}><GuardianScreen/></Provider>);
+  const row=screen.getByTestId('guardian.option.secret');expect(row).toBeEnabled();
+  expect(row.props.accessibilityLabel).toContain('???');fireEvent.press(row);
+  expect(mockNavigate).toHaveBeenLastCalledWith('Upgrade',{reason:'guards',intent:undefined});
 });

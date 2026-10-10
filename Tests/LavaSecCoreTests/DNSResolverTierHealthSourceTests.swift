@@ -24,7 +24,7 @@ final class DNSResolverTierHealthSourceTests: XCTestCase {
         XCTAssertTrue(bridge.contains("\"actionTone\": m.protectionActionTone"))
         XCTAssertTrue(bridge.contains("\"action\": m.protectionButtonTitle.lavaLocalized"))
         XCTAssertTrue(bridge.contains("model.performProtectionPrimaryAction(primaryAction)"))
-        XCTAssertTrue(bridge.contains("model.refreshDNSSettingsPresentation()\n            await refreshManagedDNSPatch()"))
+        XCTAssertTrue(bridge.contains("model.requestDNSSettingsPresentationRefresh()\n            await refreshManagedDNSPatch()"))
     }
 
     func testAuthorizationPreservesTheTappedRepairAndRejectsNewerOffIntent() throws {

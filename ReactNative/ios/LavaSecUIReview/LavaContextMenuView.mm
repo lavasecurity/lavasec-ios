@@ -1,5 +1,6 @@
 #import "LavaContextMenuView.h"
 #import <React/RCTConversions.h>
+#import <React/RCTSurfaceTouchHandler.h>
 #import <react/renderer/components/LavaUIReviewSpec/ComponentDescriptors.h>
 #import <react/renderer/components/LavaUIReviewSpec/EventEmitters.h>
 #import <react/renderer/components/LavaUIReviewSpec/Props.h>
@@ -29,6 +30,19 @@ using namespace facebook::react;
 - (UIContextMenuConfiguration *)contextMenuInteraction:(UIContextMenuInteraction *)interaction configurationForMenuAtLocation:(CGPoint)location {
   const auto &props = *std::static_pointer_cast<const LavaContextMenuProps>(_props);
   if (props.actions.empty()) return nil;
+  // A descendant UIKit menu recognizer does not prevent Fabric's surface touch
+  // recognizer. Consume the pending React press before returning a menu, so
+  // releasing/dismissing this hold cannot also run the child's primary action.
+  // Use the same cancellation primitive as Fabric itself; leave the menu and
+  // scroll recognizers alone, and restore only handlers that were enabled.
+  for (UIView *ancestor = self; ancestor; ancestor = ancestor.superview) {
+    for (UIGestureRecognizer *recognizer in ancestor.gestureRecognizers) {
+      if ([recognizer isKindOfClass:RCTSurfaceTouchHandler.class] && recognizer.enabled) {
+        recognizer.enabled = NO;
+        recognizer.enabled = YES;
+      }
+    }
+  }
   NSString *context = [NSString stringWithUTF8String:props.contextID.c_str()];
   NSMutableArray<UIMenuElement *> *items = [NSMutableArray array];
   __weak LavaContextMenuView *weakSelf = self;
@@ -36,6 +50,7 @@ using namespace facebook::react;
     NSString *identifier = [NSString stringWithUTF8String:action.id.c_str()];
     UIImage *image = [UIImage systemImageNamed:[NSString stringWithUTF8String:action.symbol.c_str()]];
     if (action.id == "blocked") image = [image imageWithTintColor:RCTUIColorFromSharedColor(props.blockedTintColor) renderingMode:UIImageRenderingModeAlwaysOriginal];
+    if (action.id == "allowed") image = [image imageWithTintColor:RCTUIColorFromSharedColor(props.allowedTintColor) renderingMode:UIImageRenderingModeAlwaysOriginal];
     [items addObject:[UIAction actionWithTitle:[NSString stringWithUTF8String:action.title.c_str()]
         image:image identifier:identifier
         handler:^(__kindof UIAction *selected) { [weakSelf emitAction:identifier context:context]; }]];

@@ -474,7 +474,7 @@ struct LavaSheetScaffold<Header: View, Content: View, Footer: View>: View {
             .frame(maxWidth: .infinity, alignment: .topLeading)
             .background {
                 Rectangle()
-                    .fill(LavaStyle.groupedBackground)
+                    .fill(.bar)
                     .ignoresSafeArea(edges: .top)
             }
     }
@@ -501,15 +501,33 @@ struct LavaSheetScaffold<Header: View, Content: View, Footer: View>: View {
     }
 }
 
+private struct LavaParentNavigationBarKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    /// Embedded pages share their parent native stack's bar. Their content may
+    /// reuse sheet layouts without overriding that stack's navigation appearance.
+    var lavaNavigationBarIsOwnedByParent: Bool {
+        get { self[LavaParentNavigationBarKey.self] }
+        set { self[LavaParentNavigationBarKey.self] = newValue }
+    }
+}
+
 private struct LavaSheetNavigationToolbarBackground: ViewModifier {
+    @Environment(\.lavaNavigationBarIsOwnedByParent) private var navigationBarIsOwnedByParent
     let hasHeader: Bool
 
     @ViewBuilder
     func body(content: Content) -> some View {
-        if hasHeader {
+        if navigationBarIsOwnedByParent {
+            content
+        } else if hasHeader {
             content.toolbarBackground(.hidden, for: .navigationBar)
         } else {
-            content.toolbarBackground(LavaStyle.groupedBackground, for: .navigationBar)
+            // Standalone sheet stacks own their native scroll-edge appearance.
+            // A page color here replaces the system material with a solid bar.
+            content
         }
     }
 }
@@ -1642,6 +1660,7 @@ struct LavaSetupSection<Actions: View>: View {
                 .padding(.horizontal, LavaSpacing.infoPanelHorizontalInset)
                 .padding(.vertical, LavaSpacing.infoPanelVerticalInset)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                LavaCondensedDivider(leadingInset: 16)
                 actions()
             }
             .lavaPanelBackground()

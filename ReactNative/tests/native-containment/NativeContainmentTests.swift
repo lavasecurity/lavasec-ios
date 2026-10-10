@@ -118,6 +118,37 @@ final class NativeContainmentTests: UIResponder, UIApplicationDelegate {
             movingContainer.removeFromSuperview()
         }
 
+        // Embedded SwiftUI pages are not RN ScrollView children. The owning
+        // native route must explicitly track their scroll view across layouts
+        // and release it when that route's hosted content moves or recycles.
+        let pageContainer = UIView(frame: screen.view.bounds)
+        screen.view.addSubview(pageContainer)
+        let page = UIHostingController(rootView: ScrollView { Color.green.frame(height: 1800) })
+        window.rootViewController = navigation
+        window.layoutIfNeeded()
+        let mountPage = { LavaNativeContainment.update(page, in: pageContainer, tracksContentScrollView: true) { _ in } }
+        mountPage()
+        page.view.insertSubview(UITextView(frame: .zero), at: 0)
+        mountPage()
+        let contentScrollView = screen.contentScrollView(for: .top)
+        expect(contentScrollView != nil, "Native navigation must track an actual hosted SwiftUI scroll view")
+        expect(!(contentScrollView is UITextView), "An earlier text editor must not replace the content scroll view")
+        expect(contentScrollView?.isDescendant(of: page.view) == true, "Tracked scroll view belongs to the hosted page")
+        contentScrollView?.setContentOffset(CGPoint(x: 0, y: 90), animated: false)
+        let retainedOffset = contentScrollView?.contentOffset
+        mountPage()
+        expect(screen.contentScrollView(for: .top) === contentScrollView, "Layout updates preserve the scroll view and its offset")
+        expect(contentScrollView?.contentOffset == retainedOffset, "Layout updates must not reset a page's scroll position")
+        let nextPageOwner = UIViewController()
+        nextPageOwner.view.addSubview(pageContainer)
+        mountPage()
+        expect(screen.contentScrollView(for: .top) == nil, "Reparenting releases the previous route's scroll association")
+        expect(nextPageOwner.contentScrollView(for: .top) === contentScrollView, "Reparenting transfers the scroll association")
+        LavaNativeContainment.remove(page)
+        expect(nextPageOwner.contentScrollView(for: .top) == nil, "Recycling releases the tracked content scroll view")
+        expect(page.parent == nil, "Recycling still releases the hosted controller")
+        window.rootViewController = parent
+
         // Real UIKit ancestors may locally invert transparent-toolbar traits.
         // The actual SF Symbol tint resolver must keep the app-selected palette.
         let symbol = UIImageView(image: UIImage(systemName: "chevron.left"))

@@ -41,7 +41,7 @@ test('native title options use the supported dependency contract, including inli
   expect(routeOption).toBeDefined();
   const excluded=descendants(routeOption,node=>ts.isArrayLiteralExpression(node))[0];
   expect(excluded.elements.map(node=>node.text)).toEqual([
-    'Library','Filter','Share','Guardian','Review','Import','ShareDetail','Passcode','AddDomain','AddBlocklist',
+    'Filter','Guardian','Review','Import','ShareDetail','Passcode','AddDomain','AddBlocklist',
   ]);
   expect(routeOption.initializer.getText(source)).toMatch(/\.includes\(name\)$/);
   for(const route of ['Passcode','AutoSwitch','DNSPatch']){
@@ -51,6 +51,7 @@ test('native title options use the supported dependency contract, including inli
   }
   const scaffold=parse('review/scaffold.tsx');
   const fullSheet=descendants(scaffold,node=>ts.isVariableDeclaration(node)&&node.name.getText(scaffold)==='fullSheetPresentation')[0];
+  expect(titleProperties(fullSheet).map(node=>node.initializer.getText(scaffold))).toEqual(['false']);
   expect(descendants(fullSheet,ts.isSpreadAssignment).map(node=>node.expression.getText(scaffold))).toContain('nativeInlineHeader');
   const inlineHeader=descendants(scaffold,node=>ts.isVariableDeclaration(node)&&node.name.getText(scaffold)==='nativeInlineHeader')[0];
   expect(titleProperties(inlineHeader).map(node=>node.initializer.getText(scaffold))).toEqual(['false']);
@@ -72,11 +73,11 @@ test('embedded native settings retain one enclosing navigation bar and visit-sco
   const routes=read('review/LavaUIReview.tsx');
   const event=read('ios/LavaSecUIReview/LavaNativePageView.mm');
   const spec=read('specs/LavaNativePageNativeComponent.ts');
-  // Feedback and Device QA own a native toolbar while the React header is hidden.
-  expect(native).toContain('NavigationStack { BugReportSettingsView(onDismissRequested: onBack, usesPageNavigation: true) }');
+  // Device QA retains its bounded native toolbar. Live feedback is the shared flow.
+  expect(routes).toContain("!['Import','Passcode','Feedback'].includes(name)");
   expect(native).toContain('NavigationStack {\n                PhoneQASettingsView()');
   expect(routes).toContain("['AutoSwitch','DNSPatch'].includes(name)?{headerLargeTitleEnabled:false}:{}");
-  expect(routes).toContain("name==='DeviceQA'||name==='Feedback'&&app?{headerShown:false}");
+  expect(routes).toContain("name==='DeviceQA'?{headerShown:false}");
   expect(routes).not.toContain("['VPNChaining','DeviceQA'].includes(name)||name==='Feedback'&&app?{headerShown:false}");
   expect(native).toContain('self.visit == currentVisit, self.interactionAllowed');
   expect(native).toContain('onOpenDNSSettings: { onNavigate("DNS") }');
@@ -108,4 +109,30 @@ test('production navigation registers VPN chaining while keeping test destinatio
     expect(allows('Components',{}, {current:qa})).toBe(qa);
   }
   expect(allows('VPNChaining',undefined,{current:true})).toBe(false);
+});
+
+test('read-only foreground reentry renews App Unlock without weakening editing or exact native visit fences',()=>{
+  // These Swift authorization calls cannot execute in Jest. Pin the native
+  // bridge boundary, including the checks after suspended authentication.
+  const source=read('native-app/LavaAppFlows.swift');
+  const command=source.slice(source.indexOf('func foregroundFlowCommand('),source.indexOf('func customEntryProjection('));
+  const entry=command.match(/if action == "foreground\.enter", (\[[^\]]+\])\.contains\(flow\.name\) \{\s*try await authorize\(\.appUnlock, "Unlock Lava"\)\s*\} else \{\s*try await authorize\(\.filterEditing, "Manage filters"\)\s*\}/);
+  expect(entry).not.toBeNull();
+  const names=JSON.parse(entry[1]);
+  expect(names).toEqual(['automation','licenses']);
+  const requiredSurface=(action,name)=>action==='foreground.enter'&&names.includes(name)?'appUnlock':'filterEditing';
+  for(const name of ['automation','licenses'])expect(requiredSurface('foreground.enter',name)).toBe('appUnlock');
+  for(const name of ['createFilter','renameFilter','deleteFilters','feedback','vpnConfiguration'])expect(requiredSurface('foreground.enter',name)).toBe('filterEditing');
+  for(const name of names)expect(requiredSurface('foreground.submit',name)).toBe('filterEditing');
+  const currentID=command.indexOf('guard let flow, flow.usesReactPresentation, input["id"] as? String == flow.id.uuidString');
+  const postAuthorization=command.indexOf('guard UIApplication.shared.applicationState == .active, self.flow?.id == flow.id');
+  const acceptedEntry=command.indexOf('if action == "foreground.enter" { return NSNull() }');
+  expect(currentID).toBeGreaterThanOrEqual(0);
+  expect(currentID).toBeLessThan(entry.index);
+  expect(postAuthorization).toBeGreaterThan(entry.index+entry[0].length);
+  expect(postAuthorization).toBeLessThan(acceptedEntry);
+  // The projection itself requires only App Unlock for the two read-only kinds.
+  const projection=source.slice(source.indexOf('func foregroundFlowProjection('),source.indexOf('func foregroundFlowCommand('));
+  expect(projection).toContain('guard canReadPresentation(.appUnlock) else { return nil }');
+  expect(projection).toContain('if ["createFilter", "renameFilter", "deleteFilters"].contains(flow.name), !canReadPresentation(.filterEditing) { return nil }');
 });

@@ -11,11 +11,10 @@ public enum FilterDecisionReason: String, Codable, Sendable {
     case blocklist
     case threatGuardrail
     case invalidDomain
-    /// The domain would otherwise have gone through normal filtering, but protection was
-    /// temporarily paused, so the query was forwarded without evaluating allow/block rules.
-    /// Kept distinct from `.defaultAllow` so Domain History and the aggregate allow count
-    /// can tell "cleared the normal filter" apart from "let through because paused"; the
-    /// diagnostics store also excludes it from Top Domains ranking (not a real filter match).
+    /// The query or a reachable answer alias would have been blocked, but protection was
+    /// temporarily paused, so the query was allowed. Normal passes retain `.defaultAllow`
+    /// or `.localAllowlist`; only pause-overridden blocks receive this reason and are
+    /// excluded from Top Domains ranking by the diagnostics store.
     case pausedAllow
     /// The query was blocked because protection could not serve it safely — the runtime
     /// is fail-closed (no usable rule snapshot is resident: over budget, a build failure,

@@ -2,6 +2,135 @@ import XCTest
 
 /// The behavioral policy is executable; these pins cover the app/native bridge wiring.
 final class WireGuardSetupSourceTests: XCTestCase {
+    func testRNWireGuardDismissChecksCurrentNativeDirtyBeforeRetirement() throws {
+        let source = try readSource(.reactNativeAppFlows)
+        let dismiss = try sourceBlock(in: source, startingAt: "if action == \"foreground.dismiss\" {",
+            endingBefore: "if action == \"foreground.dirty\" {")
+        let vpn = try sourceBlock(in: dismiss, startingAt: "if flow.name == \"vpnConfiguration\" {",
+            endingBefore: "if flow.name == \"feedback\" {")
+        // Source-boundary coverage: actual UIKit owner behavior remains in the
+        // app target, while this cross-platform target pins the safety ordering.
+        XCTAssertTrue(sourceContainsInOrder([
+            "if let visit = wireGuardEditorVisit", "guard visit.id == flow.id",
+            "guard !visit.dirty || input[\"discardConfirmed\"] as? Bool == true else { return false }",
+            "visit.retire(); wireGuardEditorVisit = nil"
+        ], in: vpn))
+        XCTAssertTrue(sourceContainsInOrder([
+            "else { return false }", "visit.retire()", "self.flow = nil; foregroundDraftIsDirty = false"
+        ], in: dismiss))
+        XCTAssertFalse(vpn.contains("wireGuardEditorOwner("), "Close cannot create or replace a visit")
+        XCTAssertFalse(vpn.contains("configuration"), "Dismissal returns only a confirmation result, never Content")
+        XCTAssertFalse(vpn.contains("authorize("), "A clean Cancel must retain its existing cancellation behavior")
+    }
+
+    func testRNWireGuardNameUsesCurrentNativeOwnerAndCannotMutateThroughRetainedUIKitInput() throws {
+        let editor = try readSource(.reactNativeAppWireGuardEditor)
+        let nameGate = try sourceBlock(in: editor, startingAt: "func canEditWireGuardName(ownerID: String)",
+            endingBefore: "func wireGuardEditorOwner(")
+        XCTAssertTrue(sourceContainsInOrder([
+            "flow.name == \"vpnConfiguration\"", "flow.id.uuidString == ownerID",
+            "let visit = wireGuardEditorVisit", "visit.id == flow.id",
+            "flow.wireGuardDraftID == visit.draftID", "flow.wireGuardDraftRevision == visit.draftRevision",
+            "return visit.canEdit"
+        ], in: nameGate))
+        XCTAssertFalse(nameGate.contains("wireGuardEditorOwner("), "Admission must not create a native visit")
+        XCTAssertFalse(nameGate.contains("configuration"), "Name admission must not read private configuration")
+        XCTAssertFalse(nameGate.contains("authorize("), "A keyboard event cannot start authentication")
+
+        // The first registered internal source read above supplies public-export
+        // skipping. These UIKit leaves are inspected without importing UIKit into
+        // the cross-platform policy test target.
+        let field = try String(contentsOf: packageRootURL.appendingPathComponent("ReactNative/ios/LavaSecUIReview/LavaTextFieldView.mm"), encoding: .utf8)
+        let admission = try sourceBlock(in: field, startingAt: "static BOOL mayEditWireGuardName", endingBefore: "@interface")
+        XCTAssertTrue(admission.contains("if (props.kind != \"wireGuardName\") return YES;"), "Other ordinary fields retain their existing policy")
+        XCTAssertTrue(admission.contains("props.editable && [[LavaAppBridge shared] canEditWireGuardNameForOwnerID:"))
+        XCTAssertTrue(admission.contains("props.ownerID.c_str()"))
+        XCTAssertTrue(admission.contains("#else\n  return NO;"))
+        for notification in ["UIApplicationWillResignActiveNotification", "UIApplicationProtectedDataWillBecomeUnavailable"] {
+            XCTAssertTrue(field.contains("selector:@selector(suspendWireGuardName) name:\(notification)"))
+        }
+        let suspension = try sourceBlock(in: field, startingAt: "- (void)suspendWireGuardName {", endingBefore: "- (void)refreshWireGuardNameAdmission {")
+        XCTAssertTrue(sourceContainsInOrder(["_wireGuardNameSuspended = YES", "if (props.kind != \"wireGuardName\") return;", "_field.enabled = NO", "[_field resignFirstResponder]"], in: suspension))
+        XCTAssertFalse(suspension.contains("_field.text"), "Revocation preserves the accepted Name buffer")
+        XCTAssertFalse(suspension.contains("_confidentialInput"), "Only the ordinary Name responder resigns")
+        let refresh = try sourceBlock(in: field, startingAt: "- (void)refreshWireGuardNameAdmission {", endingBefore: "- (void)updateProps:")
+        XCTAssertTrue(refresh.contains("applicationState != UIApplicationStateActive"))
+        XCTAssertTrue(refresh.contains("!UIApplication.sharedApplication.protectedDataAvailable"))
+        XCTAssertTrue(refresh.contains("BOOL editable = [self admitsWireGuardNameEdit]"))
+        XCTAssertFalse(refresh.contains("becomeFirstResponder"))
+        let props = try sourceBlock(in: field, startingAt: "- (void)updateProps:", endingBefore: "- (void)didMoveToWindow")
+        XCTAssertTrue(props.contains("next.kind == \"search\" || next.kind == \"wireGuardName\""), "Name keeps ordinary seed/reset/keyboard behavior")
+        XCTAssertTrue(props.contains("const BOOL ordinaryReseed = ordinary && (!_ordinarySeeded || next.ownerID != previous.ownerID || next.resetRevision != previous.resetRevision);"), "A recycled ordinary buffer reseeds for its current owner and reset revision")
+        XCTAssertTrue(props.contains("!_wireGuardNameSuspended && mayEditWireGuardName(next)"))
+        XCTAssertTrue(props.contains("_field.enabled = next.editable && nameEditable"))
+        let reconciliation = try sourceBlock(in: props, startingAt: "[super updateProps:props oldProps:oldProps];")
+        XCTAssertTrue(sourceContainsInOrder([
+            "next.kind == \"wireGuardName\" && next.editable && nameEditable",
+            "NSString *ownerID", "const int resetRevision", "dispatch_async(dispatch_get_main_queue()",
+            "current.kind != \"wireGuardName\"", "current.ownerID != ownerID.UTF8String",
+            "current.resetRevision != resetRevision", "!current.editable", "!strongSelf.window",
+            "![strongSelf admitsWireGuardNameEdit]", "strongSelf->_field.markedTextRange",
+            "strongSelf->_field.text", "[strongSelf textChanged]"
+        ], in: reconciliation))
+        XCTAssertFalse(reconciliation.contains("_confidentialInput"))
+        XCTAssertFalse(reconciliation.contains("becomeFirstResponder"))
+        XCTAssertFalse(reconciliation.contains("_field.text ="), "Restoration reports the live retained buffer and cannot overwrite newer typing")
+        let changes = try sourceBlock(in: field, startingAt: "- (void)textChanged {", endingBefore: "- (BOOL)textField:")
+        XCTAssertTrue(sourceContainsInOrder(["if (![self admitsWireGuardNameEdit]) return;", "NSString *accepted", "emitter->onChange"], in: changes))
+        let delegates = try sourceBlock(in: field, startingAt: "- (BOOL)textField:", endingBefore: "- (void)textFieldDidBeginEditing:")
+        XCTAssertTrue(sourceContainsInOrder(["if (![self admitsWireGuardNameEdit]) return NO;", "field.text = accepted"], in: delegates))
+        XCTAssertTrue(delegates.contains("textFieldShouldBeginEditing:(UITextField *)field { return [self admitsWireGuardNameEdit]; }"))
+        XCTAssertTrue(delegates.contains("textFieldShouldClear:(UITextField *)field { return [self admitsWireGuardNameEdit]; }"))
+        let submit = try sourceBlock(in: field, startingAt: "- (BOOL)textFieldShouldReturn:", endingBefore: "- (void)prepareForRecycle")
+        XCTAssertTrue(sourceContainsInOrder(["if (![self admitsWireGuardNameEdit]) return NO;", "emitter->onSubmit"], in: submit))
+        XCTAssertTrue(field.contains("mayPerformEditAction = ^BOOL"))
+        XCTAssertTrue(field.contains("strongSelf && [strongSelf admitsWireGuardNameEdit]"))
+        let content = try String(contentsOf: packageRootURL.appendingPathComponent("ReactNative/ios/LavaSecUIReview/LavaDecorationContent.swift"), encoding: .utf8)
+        let ordinaryField = try sourceBlock(in: content, startingAt: "final class LavaEmojiTextField", endingBefore: "/// The small, native drawing surface")
+        XCTAssertTrue(ordinaryField.contains("(mayPerformEditAction?() ?? true) && super.canPerformAction"))
+    }
+
+    func testRNPrivateDraftRetentionDoesNotReadOrEditWithoutAuthority() throws {
+        let source = try readSource(.reactNativeAppWireGuardEditor)
+        let update = try sourceBlock(in: source, startingAt: "private func update()", endingBefore: "@objc private func showConfiguration()")
+        let revoked = try sourceBlock(in: update,
+            startingAt: "guard let owner, bridge.canReadPresentation(.appSettings) else {",
+            endingBefore: "cover.rootView = AnyView(LavaPrivateContentCover(title: \"Configuration hidden\",\n")
+        XCTAssertTrue(revoked.contains("SecurityPrivacyPolicy.canRetainAcceptedPrivateDraftDisplay("))
+        XCTAssertTrue(revoked.contains("ownerIsCurrent: owner?.id == bridge.flow?.id && owner != nil"))
+        XCTAssertTrue(revoked.contains("backgroundCoverRequired: bridge.security.backgroundPrivacyCoverRequired"))
+        XCTAssertTrue(revoked.contains("freezeInteraction(); return"))
+        XCTAssertFalse(revoked.contains("owner.configuration"))
+        XCTAssertFalse(revoked.contains("isEditable = true"))
+        let frozen = try sourceBlock(in: source, startingAt: "private func freezeInteraction()", endingBefore: "private func concealImmediately()")
+        XCTAssertTrue(frozen.contains("textView.interactionFrozen = true"))
+        XCTAssertTrue(frozen.contains("textView.isAccessibilityElement = false"))
+        XCTAssertFalse(frozen.contains("resignFirstResponder"))
+        XCTAssertFalse(frozen.contains("becomeFirstResponder"))
+        XCTAssertFalse(frozen.contains("isUserInteractionEnabled"))
+        XCTAssertFalse(frozen.contains("isEditable"))
+        XCTAssertFalse(frozen.contains("textView.text"))
+        XCTAssertFalse(frozen.contains("owner.configuration"))
+        XCTAssertTrue(source.contains("if owner?.id != nextOwner?.id { concealImmediately() }"))
+        XCTAssertTrue(source.contains("hasAcceptedRevealedDisplay = false"))
+        let textView = try sourceBlock(in: source, startingAt: "private final class LavaWireGuardTextView", endingBefore: "/// Confidential text")
+        XCTAssertTrue(textView.contains("!interactionFrozen && mayInteract?() == true"))
+        XCTAssertTrue(textView.contains("isInteractionAdmitted && super.point(inside: point, with: event)"))
+        XCTAssertTrue(textView.contains("isInteractionAdmitted && super.canPerformAction"))
+        XCTAssertTrue(source.contains("textView.mayInteract = { [weak self] in self?.owner?.canEdit == true && self?.owner?.concealed == false }"))
+        XCTAssertTrue(update.contains("let editable = owner.canEdit && !owner.concealed"))
+        XCTAssertTrue(update.contains("textView.interactionFrozen = !editable"))
+        let delegates = try sourceBlock(in: source, startingAt: "func textViewDidChange", endingBefore: "func textViewDidBeginEditing")
+        XCTAssertTrue(delegates.contains("guard let owner, self.textView.isInteractionAdmitted else { update(); return }"))
+        XCTAssertTrue(delegates.contains("func textViewShouldBeginEditing(_ textView: UITextView) -> Bool { self.textView.isInteractionAdmitted }"))
+        XCTAssertTrue(delegates.contains("shouldChangeTextIn range: NSRange"))
+        XCTAssertTrue(delegates.contains("self.textView.isInteractionAdmitted\n"))
+        let conceal = try sourceBlock(in: source, startingAt: "private func concealImmediately()", endingBefore: "private func update()")
+        XCTAssertTrue(conceal.contains("hasAcceptedRevealedDisplay = false"))
+        XCTAssertTrue(conceal.contains("textView.resignFirstResponder(); textView.text = \"\"; textView.isHidden = true"))
+        XCTAssertFalse(source.contains("becomeFirstResponder"))
+    }
+
     func testConsumerVPNWiringIsAvailableWithoutDebugOrQAFlags() throws {
         let sources: [(SourceFile, [String])] = [
             (.vpnChainingSettingsView, ["struct VPNChainingSettingsView", "struct VPNChainingConfigurationEditor"]),
@@ -81,6 +210,27 @@ final class WireGuardSetupSourceTests: XCTestCase {
         XCTAssertTrue(editGate.contains("security.hasCurrentAuthorization(for: .appSettings)"))
     }
 
+    func testRNVPNRouteAdmissionUsesTheCurrentNativeGrantWithoutMutatingOrRetiringItsDraft() throws {
+        let source = try readSource(.reactNativeAppSettings)
+        let metadata = try sourceBlock(in: source, startingAt: "func vpnSettingsState()", endingBefore: "private func wireGuardDraftMetadata")
+        XCTAssertTrue(sourceContainsInOrder([
+            "guard canReadPresentation(.appSettings) else { return [\"authorized\": false] }",
+            "guard let status = model.dnsSettingsProfileStatus",
+            "\"authorized\": true"
+        ], in: metadata))
+        let entry = try sourceBlock(in: source, startingAt: "if action == \"vpn.enter\"", endingBefore: "// Discard belongs")
+        XCTAssertTrue(sourceContainsInOrder([
+            "try await authorize(.appSettings, \"Open VPN chaining settings\")",
+            "guard canReadPresentation(.appSettings)",
+            "model.refreshDNSSettingsPresentation()",
+            "return NSNull()"
+        ], in: entry))
+        XCTAssertFalse(entry.contains("wireGuardDraft"))
+        XCTAssertFalse(entry.contains("setWireGuardSetupEnabled"))
+        XCTAssertFalse(entry.contains("commitWireGuardPage"))
+        XCTAssertFalse(entry.contains("flow ="))
+    }
+
     func testVPNMetadataRefreshesFromProviderSignalsAndConnectionTransitions() throws {
         let model = try readAppViewModelSource()
         let signal = try sourceBlock(in: model, startingAt: "func handleTunnelHealthNudge()",
@@ -149,6 +299,12 @@ final class WireGuardSetupSourceTests: XCTestCase {
     }
 
     func testSetupAndRoutingHaveIndependentControlsAndSavingDoesNotEnable() throws {
+        let bridge = try readSource(.reactNativeAppSettings)
+        let toggle = try sourceBlock(in: bridge, startingAt: "if action == \"vpn.toggle\"", endingBefore: "if action == \"vpn.rowToggle\"")
+        XCTAssertTrue(sourceContainsInOrder([
+            "case \"setup\":", "guard !value || model.hasLavaSecurityPlus",
+            "model.setWireGuardSetupEnabled(value)", "case \"enabled\":"
+        ], in: toggle), "Setup ON must revalidate native entitlement before persistence; OFF must stay available")
         let view = try readSource(.vpnChainingSettingsView)
         XCTAssertTrue(sourceContainsInOrder([
             "I have a WireGuard configuration", "if setupEnabled {", "configurationRow(status)",

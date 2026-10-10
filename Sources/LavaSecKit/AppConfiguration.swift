@@ -690,11 +690,9 @@ public struct AllowlistValidationResult: Equatable, Sendable {
 
 public struct AllowlistValidator: Sendable {
     public let nonAllowableThreatRules: DomainRuleSet
-    public let protectedDomains: DomainRuleSet
 
-    public init(nonAllowableThreatRules: DomainRuleSet, protectedDomains: DomainRuleSet = .lavaSecProtectedDomains) {
+    public init(nonAllowableThreatRules: DomainRuleSet) {
         self.nonAllowableThreatRules = nonAllowableThreatRules
-        self.protectedDomains = protectedDomains
     }
 
     public func validate(_ rawDomain: String) -> AllowlistValidationResult {
@@ -703,43 +701,11 @@ public struct AllowlistValidator: Sendable {
             if nonAllowableThreatRules.containsNormalized(normalized) {
                 return .rejected("Some dangerous domains cannot be allowed.")
             }
-            if protectedDomains.containsNormalized(normalized) {
-                return .rejected("This domain is protected so Lava can keep essential services working.")
-            }
             return .allowed(normalized)
         } catch {
             return .rejected(error.localizedDescription)
         }
     }
-}
-
-public extension DomainRuleSet {
-    /// Essential service exceptions for downloaded lists; explicit user blocks still apply.
-    static let lavaSecProtectedDomains: DomainRuleSet = {
-        var set = DomainRuleSet()
-        let domains = [
-            "apple.com",
-            "icloud.com",
-            "mzstatic.com",
-            "itunes.apple.com",
-            "apps.apple.com",
-            "lavasecurity.com",
-            "lavasecurity.app",
-            "api.lavasecurity.app",
-            "lavasec.app",
-            "lavasec.example",
-            "accounts.google.com",
-            "google.com"
-        ]
-
-        for domain in domains {
-            // Keep the apex out of downloaded suffix rules so it cannot block sign-in.
-            // Other Google hosts remain eligible for explicit downloaded rules.
-            try? set.insert(domain: domain, matchesSubdomains: domain != "google.com")
-        }
-
-        return set
-    }()
 }
 
 /// The configuration inputs that determine a resolution ladder.

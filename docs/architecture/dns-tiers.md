@@ -302,14 +302,12 @@ connections can bypass name filtering, including with chaining. DNS activity can
 in the background and does not establish page visits. Settings and activity screens state
 these limits explicitly.
 
-Downloaded lists omit the compiled essential-service domains. The Google exception covers
-`accounts.google.com` and the exact `google.com` apex; other Google subdomains are eligible
-for blocking. The apex stays excluded because a downloaded suffix rule for it would also
-block the sign-in host. Google's [OpenID Connect documentation](https://developers.google.com/identity/openid-connect/openid-connect)
-identifies the accounts host as its authorization endpoint. Explicit user blocks still
-apply. Apple and Lava service exceptions remain unchanged pending a verified host inventory.
-Parser rules version 4 invalidates parsed caches that dropped ordinary Google subdomains;
-existing raw payloads can be parsed again without requiring an upstream content change.
+Downloaded catalog and custom lists retain all valid domain rules, including Apple,
+sign-in and Lava service domains. There are no built-in service-domain exemptions.
+Explicit allowed exceptions override ordinary list and manual blocks; reviewed threat
+guardrails retain their separate precedence. Parser rules version 5 invalidates parsed
+caches and prepared snapshots that omitted service-domain rules. Existing raw payloads
+can be parsed again without requiring an upstream content change.
 
 ### Ordered two-hop WireGuard chains
 

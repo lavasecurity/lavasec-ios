@@ -15,6 +15,9 @@
 // (4) Standalone, ordinary-quoted literal assignments to explicitly registered render-bound
 //     message properties must localize at the producer. Raw Swift string assignments are rejected
 //     conservatively. This is deliberately a narrow registry, not Swift dataflow analysis.
+// (5) Static message/notice source keys need catalog coverage even when a projection
+//     localizes the identifier later. Keep their English identity stable for state
+//     comparisons; missing aliased keys must not evade the literal call-site gate.
 //
 // Conservative: only literal arguments at high-confidence localizing sites are checked;
 // interpolated literals (except .lavaLocalized), identifiers, URLs, and QA-only UI are skipped.
@@ -98,6 +101,10 @@ const summaryToKey = (raw) =>
 const presReturn = new RegExp(`\\breturn\\s+${L}`, "g");
 const coreRef = new RegExp(`LavaCoreStrings\\.(?:localized|localizedFormat)\\(\\s*${L}`, "g");
 const lavaCall = /\.lavaLocalized(?:Format)?/g;
+const staticMessageDeclaration = new RegExp(
+  `\\bstatic\\s+(?:let|var)\\s+(\\w*(?:Message|Notice))\\s*(?::\\s*String\\??)?\\s*=\\s*${L}`,
+  "g"
+);
 const renderBoundMessageProperties = new Set(["lavaSecurityPlusMessage"]);
 const renderBoundAssignment = new RegExp(
   `(?:^|[;{}])[\\t ]*(?:self\\.)?(${[...renderBoundMessageProperties].join("|")})\\s*=(?!=)\\s*${L}\\s*(\\.lavaLocalized(?:Format)?\\b)?`,
@@ -298,6 +305,20 @@ for (const file of scanDirs.flatMap(walk)) {
   const generalLabel = isIntents
     ? "LavaSecIntents catalog"
     : isExt ? "LavaSecCore .strings" : "app catalog";
+  const codeMask = swiftCodeMask(txt);
+
+  // App projections often return a static source key and localize that value
+  // only at the bridge. Checking declarations covers this indirection without
+  // translating constants that also participate in control flow.
+  staticMessageDeclaration.lastIndex = 0;
+  let staticMessage;
+  while (!isPackage && (staticMessage = staticMessageDeclaration.exec(txt)) !== null) {
+    if (!codeMask[staticMessage.index]) continue;
+    const key = clean(staticMessage[2]);
+    if (key && !general.has(key)) {
+      flag(missing, key, `${rel} [static ${staticMessage[1]}; needs: ${generalLabel}]`);
+    }
+  }
 
   // Package models carry English display keys that app callers localize, while their
   // LavaCoreStrings lookups must resolve in Bundle.module. Scan those refs below.
@@ -349,7 +370,6 @@ for (const file of scanDirs.flatMap(walk)) {
   // literal and localize that literal directly; aliases, computed expressions, and arbitrary state
   // intentionally remain outside this gate's claim. Raw string assignments fail rather than silently
   // bypassing the ordinary-literal grammar.
-  const codeMask = swiftCodeMask(txt);
   renderBoundAssignment.lastIndex = 0;
   let rm;
   while ((rm = renderBoundAssignment.exec(txt)) !== null) {

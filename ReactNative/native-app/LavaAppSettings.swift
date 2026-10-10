@@ -7,7 +7,10 @@ import LavaSecAppServices
 extension LavaAppBridge {
     // Metadata-only, event-refreshed snapshot. No configuration content crosses the RN bridge.
     func vpnSettingsState() -> [String: Any] {
-        guard let status = model.dnsSettingsProfileStatus else { return [:] }
+        // A revoked Settings turn may keep its mounted draft owner, but cannot
+        // republish private row metadata or admit its retained React controls.
+        guard canReadPresentation(.appSettings) else { return ["authorized": false] }
+        guard let status = model.dnsSettingsProfileStatus else { return ["authorized": true] }
         let presentation = model.dnsSettingsPresentation(from: status)
         let state = model.chainedOperationalState(from: status)
         let inputs = model.chainedSurfaceInputs(from: status)
@@ -32,7 +35,8 @@ extension LavaAppBridge {
             runningGeneration: model.tunnelHealth.isChainedUpstreamActive ? model.tunnelHealth.runningChainedUpstreamGeneration : 0,
             storedRotation: storedRotation)
         let applying = model.chainedSettingsApplyState.pending != nil || model.chainedSettingsApplyState.applying != nil
-        return ["rotationNote": rotation.deservesSurfacing && !applying ? rotation.detail.lavaLocalized : "",
+        return ["authorized": true,
+            "rotationNote": rotation.deservesSurfacing && !applying ? rotation.detail.lavaLocalized : "",
             "draft": wireGuardDraft.map(wireGuardDraftMetadata) ?? NSNull(),
             "needsRepair": wireGuardCleanupPending || status.hasConfigurationWithoutKey || status.storeUnavailableReason != nil,
             "setup": model.configuration.wireGuardSetupEnabled, "enabled": model.configuration.chainedUpstreamEnabled,
@@ -59,9 +63,23 @@ extension LavaAppBridge {
     }
 
     func vpnCommand(_ action: String, _ input: [String: Any]) async throws -> Any {
+        if action == "vpn.enter" {
+            // Presentation admission never begins, commits, or discards a draft.
+            // It may run beneath the resume cover once native foreground fields
+            // exist; reopening still depends on the current native projection.
+            try await authorize(.appSettings, "Open VPN chaining settings")
+            guard canReadPresentation(.appSettings) else { throw CommandError("Read access changed.") }
+            model.refreshDNSSettingsPresentation()
+            return NSNull()
+        }
         // Discard belongs to the originating visit and never mutates saved settings.
         if action == "vpn.cancel" {
-            if wireGuardDraft?.id == input["id"] as? String { wireGuardDraft = nil }
+            if let id = input["id"] as? String {
+                if wireGuardDraft?.id == id { wireGuardDraft = nil }
+                if flow?.name == "vpnConfiguration", flow?.wireGuardDraftID == id {
+                    flow = nil
+                }
+            }
             return NSNull()
         }
         try await authorize(.appSettings, "Edit VPN chaining")
@@ -75,6 +93,9 @@ extension LavaAppBridge {
             let applied: Bool
             switch key {
             case "setup":
+                // Authentication can yield while the entitlement changes. Admit ON
+                // against the current native plan; OFF remains available for cleanup.
+                guard !value || model.hasLavaSecurityPlus else { throw CommandError("Authentication cancelled.") }
                 model.setWireGuardSetupEnabled(value)
                 applied = model.configuration.wireGuardSetupEnabled == value
             case "enabled":
@@ -134,12 +155,15 @@ extension LavaAppBridge {
         if action == "vpn.edit" {
             guard ChainedSetupPolicy.canEditConfiguration(model.chainedSurfaceInputs(from: status)), index <= draft.rows.count else { throw WireGuardChainFailure.changed }
             var editor = LavaAppNativeFlow(name: "vpnConfiguration")
+            editor.wireGuardDraftID = draft.id
+            editor.wireGuardDraftRevision = draft.revision
             editor.wireGuardIndex = index
             editor.wireGuardName = draft.rows.indices.contains(index) ? draft.rows[index].configuration.displayName : ""
             editor.wireGuardExists = index < draft.rows.count
             let sessionID = draft.id
+            let editorRevision = draft.revision
             editor.saveWireGuardDraft = { [weak self] name, conf in
-                guard let self, var current = self.wireGuardDraft, current.id == sessionID else { return WireGuardChainFailure.changed.localizedDescription }
+                guard let self, var current = self.wireGuardDraft, current.id == sessionID, current.revision == editorRevision else { return WireGuardChainFailure.changed.localizedDescription }
                 do {
                     let replacement = try conf.map { try ChainedUpstreamConfParser.rotation(from: $0) }
                     try current.save(index: index, name: name, replacement: replacement)
@@ -156,10 +180,18 @@ extension LavaAppBridge {
     func dnsChoice(_ selection: DNSResolutionSelection) -> [String: Any] {
         let preset = selection.resolver ?? .device
         let metadata = preset.transport == .deviceDNS ? "" : resolverMetadata(preset)
-        return ["id": selection.id, "name": selection.id != DNSResolverPreset.customID || selection.name.isEmpty ? preset.settingsBasePreset.displayName : selection.name,
+        return ["id": selection.id, "name": dnsResolverDisplayName(preset.settingsBasePreset, customName: selection.name),
+            "sourceName": selection.name,
             "primary": selection.primary, "secondary": selection.secondary, "isEnabled": selection.isEnabled,
             "transport": preset.transport == .deviceDNS ? "Device" : transportLabel(preset.transport),
             "metadata": metadata]
+    }
+
+    /// Provider and user-authored names are identities, even when their text
+    /// happens to equal an app catalog key. Only Lava's empty-name defaults
+    /// and device resolver label belong to localization.
+    func dnsResolverDisplayName(_ preset: DNSResolverPreset, customName: String? = nil) -> String {
+        LavaStrings.resolverName(preset, customName: customName)
     }
 
     func saveDNSTiers(_ input: [String: Any]) async throws -> Any {
@@ -167,7 +199,7 @@ extension LavaAppBridge {
         guard model.mayEditDNSSettingsNow() else { throw CommandError("Review VPN chaining before changing DNS tiers.") }
         guard input["context"] as? String == json(encode(model.configuration.dnsResolutionSelections)),
               let rows = input["tiers"] as? [[String: Any]] else { throw CommandError("DNS settings changed. Reopen the editor before saving.") }
-        let selections = try JSONDecoder().decode([DNSResolutionSelection].self, from: JSONSerialization.data(withJSONObject: rows))
+        let selections = try rows.map { try DNSResolutionChoiceInput.selection(from: $0) }
         for selection in selections where selection.id == DNSResolverPreset.customID {
             if let message = DNSResolverPreset.customValidationMessage(primaryRawValue: selection.primary,
                 secondaryRawValue: selection.secondary, supportsDNSOverQUIC: model.supportsDNSOverQUIC) { throw CommandError(message) }
@@ -192,9 +224,7 @@ extension LavaAppBridge {
     func editCustomDNSDraft(_ input: [String: Any]) async throws -> Any {
         try await authorize(.appSettings, "Edit DNS settings")
         guard model.configuration.limits.allowsCustomDNS else { throw DNSSelectionError.customRequiresPlus }
-        let initial = try (input["choice"] as? [String: Any]).map {
-            try JSONDecoder().decode(DNSResolutionSelection.self, from: JSONSerialization.data(withJSONObject: $0))
-        }
+        let initial = try (input["choice"] as? [String: Any]).map { try DNSResolutionChoiceInput.selection(from: $0) }
         var editor = LavaAppNativeFlow(name: "customDNSDraft")
         let token = editor.id.uuidString
         dnsPickerCustomChoice = nil
@@ -286,7 +316,7 @@ extension LavaAppBridge {
             let enabled = try boolean()
             let revision = security.viewAuthenticationRevision
             if !enabled {
-                guard await security.requireBiometricAuthentication(reason: "Turn off %@".lavaLocalizedFormat(security.biometricToggleTitle)) else { throw CommandError("Authentication cancelled.") }
+                guard await security.requireFreshCredentialAuthentication(reason: "Turn off %@".lavaLocalizedFormat(security.biometricToggleTitle)) else { throw CommandError("Authentication cancelled.") }
             }
             guard security.viewAuthenticationRevision == revision, !Task.isCancelled else { throw CommandError("Authentication cancelled.") }
             await security.setBiometricEnabled(enabled)

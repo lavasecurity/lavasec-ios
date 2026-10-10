@@ -6,7 +6,7 @@ import {Screen} from '../review/primitives';
 import {ActivityFlowBar} from '../review/detail-scaffold';
 import {ActivityCharts} from '../review/activity-scaffold';
 import {activityRate,type ActivityBucket} from '../review/activity-model';
-jest.mock('react-native-safe-area-context',()=>({SafeAreaProvider:require('react-native').View}));
+jest.mock('react-native-safe-area-context',()=>({SafeAreaProvider:require('react-native').View,SafeAreaInsetsContext:require('react').createContext(null)}));
 jest.mock('../app/text-metrics',()=>({useTextScale:()=>1}));
 jest.mock('@react-navigation/native',()=>({useIsFocused:()=>true}));
 jest.mock('react-native/Libraries/Utilities/useColorScheme',()=>({__esModule:true,default:jest.fn(()=> 'light')}));

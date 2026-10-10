@@ -33,13 +33,13 @@ final class FullSharedFilterTests: XCTestCase {
         let caps = ShareableFilterImportCapabilities(availableCuratedBlocklistIDs: [], allowsCustomBlocklists: true,
                                                      maxBlockedDomains: 10, maxAllowedDomains: 1)
         let plan = incoming.importPlan(capabilities: caps)
-        XCTAssertEqual(plan.applied.allowedDomains, ["other.example"])
-        XCTAssertEqual(plan.droppedCount(of: .invalidDomain), 2)
-        XCTAssertEqual(plan.droppedCount(of: .exceedsLimit), 1)
+        XCTAssertEqual(plan.applied.allowedDomains, ["apple.com"])
+        XCTAssertEqual(plan.droppedCount(of: .invalidDomain), 1)
+        XCTAssertEqual(plan.droppedCount(of: .exceedsLimit), 2)
         let review = plan.applied.replacementSummary(for: Filter(name: "Core", allowedDomains: ["previous.example"]))
         XCTAssertEqual(review.after?.name, "Core")
         XCTAssertEqual(review.selectionDiff.removedAllowedDomains, ["previous.example"])
-        XCTAssertEqual(review.selectionDiff.addedAllowedDomains, ["other.example"])
+        XCTAssertEqual(review.selectionDiff.addedAllowedDomains, ["apple.com"])
     }
     func testLegacyThreatArtifactsCannotBeReusedAfterOverlapFix() throws {
         let configuration = AppConfiguration(allowedDomains: ["example.com"])

@@ -28,6 +28,7 @@ enum SourceFile: String, CaseIterable {
     // MARK: React Native production app and fixture host
     case reactNativeReviewProject = "ReactNative/ios/project.json"
     case reactNativeAppFlows = "ReactNative/native-app/LavaAppFlows.swift"
+    case reactNativeAppWireGuardEditor = "ReactNative/native-app/LavaAppWireGuardEditor.swift"
     case reactNativeAppSettings = "ReactNative/native-app/LavaAppSettings.swift"
     case reactNativeAppFilters = "ReactNative/native-app/LavaAppFilters.swift"
     case reactNativeAppReadCache = "ReactNative/app/read-cache.ts"

@@ -142,3 +142,21 @@
 "Exception cannot be added" = "无法添加此例外";
 "Already allowed" = "已放行";
 "Allowed exception limit reached" = "已达放行例外上限";
+
+/* WireGuard file, parser, and stored-key recovery. Never include imported secrets or directives. */
+"Couldn't open that file. Try moving it to Files first." = "无法打开这个文件。请先将它移到「文件」App。";
+"That file is %lld KB — far too big for a WireGuard config. Wrong file?" = "这个文件有 %lld KB，对于 WireGuard 配置来说太大了。是否选错了文件？";
+"That file isn't text, so it isn't a WireGuard config." = "这不是文本文件，因此不是 WireGuard 配置文件。";
+"This build can't save a WireGuard configuration. Update Lava and try again." = "这个版本无法保存 WireGuard 配置。请更新 Lava 后重试。";
+"This WireGuard configuration uses a setting Lava doesn't support." = "这个 WireGuard 配置使用了 Lava 不支持的选项。";
+"A required WireGuard setting is missing or repeated." = "必要的 WireGuard 选项缺失或重复。";
+"A WireGuard setting is in the wrong section." = "WireGuard 选项放在了错误的部分中。";
+"A WireGuard setting has an invalid value." = "WireGuard 选项的值无效。";
+"This WireGuard configuration isn't valid. Check its addresses, routes, MTU, and public key." = "这个 WireGuard 配置无效。请检查地址、路由、MTU 和公钥。";
+"Your WireGuard configuration couldn't be read. Try again after unlocking your device." = "无法读取 WireGuard 配置。请解锁设备后重试。";
+"The saved WireGuard configuration is no longer usable. Import it again." = "已保存的 WireGuard 配置无法再使用。请重新导入。";
+"Lava couldn't access the saved WireGuard keys. Unlock your device and try again." = "Lava 无法访问已保存的 WireGuard 密钥。请解锁设备后重试。";
+"Lava couldn't save the WireGuard configuration. Try again in a moment." = "Lava 无法保存 WireGuard 配置。请稍后重试。";
+"The WireGuard private key isn't valid. Import your configuration again." = "WireGuard 私钥无效。请重新导入配置。";
+"The WireGuard pre-shared key isn't valid. Import your configuration again." = "WireGuard 预共享密钥无效。请重新导入配置。";
+"This WireGuard configuration uses the server's key. Import your device's configuration instead." = "这个 WireGuard 配置使用了服务器的密钥。请改为导入你的设备配置。";

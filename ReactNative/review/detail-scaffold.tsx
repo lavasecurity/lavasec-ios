@@ -39,10 +39,10 @@ export function DetailNotice({title,description,icon,children}:PropsWithChildren
   return <Info title={title} description={description} icon={icon}>{children}</Info>;
 }
 
-export function DetailSteps({titles,current,furthest,onSelect}:{titles:readonly string[];current:number;furthest:number;onSelect:(step:number)=>void}) {
+export function DetailSteps({titles,current,furthest,onSelect,disabled=false}:{titles:readonly string[];current:number;furthest:number;onSelect:(step:number)=>void;disabled?:boolean}) {
   return <View style={detailStyles.actions}>{titles.map((title,index)=><Pressable key={title} accessibilityRole="button"
-    accessibilityLabel={`${index+1}. ${localized(title)}`} accessibilityState={{selected:current===index,disabled:index>furthest}}
-    disabled={index>furthest} onPress={()=>onSelect(index)} style={({pressed})=>[detailStyles.step,current===index&&detailStyles.stepSelected,index>furthest&&detailStyles.disabled,pressed&&detailStyles.pressed]}>
+    accessibilityLabel={`${index+1}. ${localized(title)}`} accessibilityState={{selected:current===index,disabled:disabled||index>furthest}}
+    disabled={disabled||index>furthest} onPress={()=>onSelect(index)} style={({pressed})=>[detailStyles.step,current===index&&detailStyles.stepSelected,(disabled||index>furthest)&&detailStyles.disabled,pressed&&detailStyles.pressed]}>
     <Copy role="caption" weight="600" center>{`${index+1}. ${localized(title)}`}</Copy>
   </Pressable>)}</View>;
 }

@@ -20,7 +20,7 @@ final class AccessibilityDNSResolverSourceTests: XCTestCase {
     func testPresetProviderRowExposesNameLabelAndAddressValue() throws {
         let block = try providerPickerSource()
         XCTAssertTrue(
-            block.contains(".accessibilityLabel(preset.displayName.lavaLocalized)"),
+            block.contains(".accessibilityLabel(preset.displayName)"),
             "Each preset provider row must lead with the provider name as its VoiceOver label."
         )
         XCTAssertTrue(
@@ -46,7 +46,7 @@ final class AccessibilityDNSResolverSourceTests: XCTestCase {
     func testProviderRowAccessibilityOrdering() throws {
         let block = try providerPickerSource()
 
-        let presetLabel = try XCTUnwrap(block.range(of: ".accessibilityLabel(preset.displayName.lavaLocalized)"))
+        let presetLabel = try XCTUnwrap(block.range(of: ".accessibilityLabel(preset.displayName)"))
         let presetValue = try XCTUnwrap(block.range(of: ".accessibilityValue(metadata(for: preset).lavaLocalized)"))
         let customLabel = try XCTUnwrap(block.range(of: ".accessibilityLabel(\"Custom DNS\".lavaLocalized)"))
         let customValue = try XCTUnwrap(block.range(of: ".accessibilityValue(customResolverMetadata.lavaLocalized)"))

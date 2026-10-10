@@ -1352,15 +1352,24 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         // gates on that origin so the always-mounted Filters cover can't steal the presentation.
         let review = try readSource(.filterReviewFlowView)
         let bridge = try readSource(.reactNativeAppFilters)
-        XCTAssertTrue(bridge.contains("prepareAndApplyFilterDraft(origin: .filters)"))
         XCTAssertTrue(bridge.contains("prepareAndApplyFilterDraft(origin: standaloneToken == nil ? .filters : .domainHistory)"))
         XCTAssertTrue(bridge.contains("standaloneDomainReviews"))
 
-        // The shared failure screen tailors its affordances: "Try Again" only when the failure is
-        // retryable (a deleted/frozen switch target is a dead end), and "Back to Edit"/"Back to
-        // Review" only when there's an editor/review to return to (a switch has neither).
-        XCTAssertTrue(review.contains("if drafts.preparationFailureIsRetryable {"),
-                      "Try Again must be hidden for a non-retryable (deleted/frozen-target) failure.")
+        // A confirmed upgrade can make a frozen switch target available again. Deleted targets
+        // still cannot be retried, and switches still have no editor/review return.
+        XCTAssertTrue(review.contains("else if drafts.preparationFailureIsRetryable || viewModel.filterPreparationCanResumeAfterUpgrade {"))
+        let recovery = try readSource(.appViewModelFilterEditingDrafts)
+        let upgradeReason = try sourceBlock(
+            in: recovery,
+            startingAt: "var filterPreparationUpgradeReason: String? {",
+            endingBefore: "var filterPreparationCanResumeAfterUpgrade: Bool {"
+        )
+        XCTAssertTrue(upgradeReason.contains("if let id = pendingSwitchFilterID {"))
+        XCTAssertTrue(upgradeReason.contains("return library.filter(id: id) != nil && isFilterFrozen(id) ? \"frozenFilter\" : nil"),
+                      "A non-frozen switch must not inherit an unrelated edit draft's capacity failure.")
+        XCTAssertTrue(recovery.contains("guard configuration.hasLavaSecurityPlus, let id = pendingSwitchFilterID else { return false }"))
+        XCTAssertTrue(recovery.contains("return library.filter(id: id) != nil && !isFilterFrozen(id)"),
+                      "Upgrade recovery must still reject a deleted or frozen target.")
         XCTAssertTrue(review.contains("if viewModel.filterPreparationFailureOffersEditReturn {"),
                       "Back to Edit/Review must be hidden when there's no editor (a filter switch).")
         XCTAssertTrue(app.contains("var filterPreparationFailureOffersEditReturn: Bool {"))
@@ -1374,6 +1383,37 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         XCTAssertTrue(source.contains("if model.isFilterFrozen(id) { model.cancelFilterEditing()"))
         XCTAssertTrue(source.contains("try await authorize(.filterEditing, \"Manage filters\")"))
         XCTAssertTrue(source.contains("try await authorize(.filterEditing, \"Switch filter\", fresh: true)"))
+    }
+
+    func testEveryChangedFilterDraftUsesReviewBeforeSaving() throws {
+        let source = try readSource(.reactNativeAppFilters)
+        let save = try sourceBlock(in: source, startingAt: "case \"filter.save\":", endingBefore: "case \"filter.undoList\":")
+        // An untouched creation can save its initial template. Once any rules
+        // change, new, inactive and active filters must all reach Review first.
+        XCTAssertTrue(save.contains("model.filterDrafts.sessions.newFilter?.id == id, !model.filterDraftHasChanges"))
+        let changed = try sourceBlock(in: save, startingAt: "guard model.filterDraftHasChanges else")
+        XCTAssertTrue(changed.contains("return \"review\""))
+        XCTAssertFalse(changed.contains("saveNewFilterDraft()"))
+        XCTAssertFalse(changed.contains("saveNonActiveFilterDraft()"))
+        XCTAssertFalse(changed.contains("prepareAndApplyFilterDraft"))
+        XCTAssertFalse(changed.contains("addedAllowedDomains"))
+
+        let apply = try sourceBlock(in: source, startingAt: "case \"filter.apply\":", endingBefore: "default: throw CommandError")
+        let tokenCheck = try XCTUnwrap(apply.range(of: "review.draft == model.filterEditDraft")?.lowerBound)
+        let librarySave = try XCTUnwrap(apply.range(of: "saveNonActiveFilterDraft()")?.lowerBound)
+        let activeSave = try XCTUnwrap(apply.range(of: "prepareAndApplyFilterDraft")?.lowerBound)
+        XCTAssertLessThan(tokenCheck, librarySave)
+        XCTAssertLessThan(tokenCheck, activeSave)
+    }
+
+    func testNativeDomainReviewRejectionDiscardsItsOwnedDraftBeforeDelivery() throws {
+        let query = try readSource(.reactNativeAppQueries)
+        let bridge = try readSource(.reactNativeAppBridge)
+        let filters = try readSource(.reactNativeAppFilters)
+        XCTAssertTrue(query.contains("if policy == .domainReview { discardStandaloneDomainResult(result) }"))
+        XCTAssertTrue(bridge.contains("if name == \"domains.stage\" { discardStandaloneDomainResult(privateRead.value) }"))
+        XCTAssertTrue(filters.contains("cancelStandaloneDomainReview(token)"))
+        XCTAssertTrue(filters.contains("guard model.filterDrafts.sessions.drafts[owned.filterID] == owned.draft else { return }"))
     }
 
     // MARK: - Helpers

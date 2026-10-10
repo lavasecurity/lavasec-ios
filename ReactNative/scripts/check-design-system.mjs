@@ -11,6 +11,10 @@ compositions.add('guard-material.tsx');
 compositions.add('FilterShareCard.tsx');
 // One opaque lifecycle composition serves the root and separate UIKit routes.
 compositions.add('PresentationCover.tsx');
+// Shared native-hosted form fields, keyboard/action insets and confidential-input layout.
+compositions.add('form-scaffold.tsx');
+// Shared setup heading, selection-row and step/footer anatomy.
+compositions.add('onboarding-scaffold.tsx');
 // Screens arrange shared pieces and own state. Paint, typography and control
 // geometry belong to the foundation/composition layer. Data geometry belongs to
 // its chart/game renderer rather than a second copy of a standard control.

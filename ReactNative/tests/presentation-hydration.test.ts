@@ -39,3 +39,24 @@ test('retiring a blurred read cannot wait forever and reset cancels the covered 
   gate.settleRead(read);await Promise.resolve();expect(gate.getSnapshot().required).toBe(false);
   gate.beginBoundary();gate.registerRead();gate.reset();await Promise.resolve();expect(gate.getSnapshot().required).toBe(false);
 });
+
+test('cold admission waits for the committed viewport and reads without scheduling a second frame',async()=>{
+  const gate=new PresentationHydration(()=>{});
+  gate.beginInitialPresentation();const read=gate.registerRead();
+  gate.settleRead(read);await Promise.resolve();
+  expect(gate.getSnapshot().required).toBe(true);
+  gate.completeLayout(gate.getSnapshot().epoch);
+  expect(gate.getSnapshot().required).toBe(true);
+  await Promise.resolve();expect(gate.getSnapshot().required).toBe(false);
+});
+
+test('a queued release cannot admit a later boundary or newly registered read',async()=>{
+  const gate=new PresentationHydration(()=>{});
+  gate.beginInitialPresentation();gate.completeLayout(gate.getSnapshot().epoch);
+  gate.beginBoundary();const read=gate.registerRead();
+  await Promise.resolve();expect(gate.getSnapshot().required).toBe(true);
+  gate.completeLayout(gate.getSnapshot().epoch);gate.settleRead(read);
+  const replacement=gate.registerRead();
+  await Promise.resolve();expect(gate.getSnapshot().required).toBe(true);
+  gate.settleRead(replacement);await Promise.resolve();expect(gate.getSnapshot().required).toBe(false);
+});

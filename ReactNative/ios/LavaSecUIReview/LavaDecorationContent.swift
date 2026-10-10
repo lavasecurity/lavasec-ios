@@ -2,6 +2,26 @@ import SwiftUI
 import UIKit
 import LavaSecKit
 
+/// The shared RN identity form retains the system emoji keyboard and the native
+/// grapheme policy as a bounded field leaf; RN owns the surrounding form.
+@objc(LavaEmojiTextField)
+@MainActor
+final class LavaEmojiTextField: UITextField {
+    @objc var emojiEnabled = false
+    /// Only a scoped owner supplies this gate; ordinary/emoji fields keep UIKit's admission.
+    @objc var mayPerformEditAction: (() -> Bool)?
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        (mayPerformEditAction?() ?? true) && super.canPerformAction(action, withSender: sender)
+    }
+    override var textInputContextIdentifier: String? { emojiEnabled ? "lava.filter.emoji" : super.textInputContextIdentifier }
+    override var textInputMode: UITextInputMode? {
+        emojiEnabled ? UITextInputMode.activeInputModes.first { $0.primaryLanguage == "emoji" } ?? super.textInputMode : super.textInputMode
+    }
+    @objc static func committedEmoji(_ input: String, fallback: String) -> String {
+        FilterIdentityPolicy.committedEmoji(input, fallback: fallback)
+    }
+}
+
 /// The small, native drawing surface behind the semantic React Native primitive.
 @objc(LavaDecorationContent)
 @MainActor
@@ -35,7 +55,9 @@ final class LavaDecorationContent: UIView {
     private var staticExport = false
     private var drawingTint = UIColor.clear
     private var drawingPointSize: CGFloat = 0
-    private var showsDrawing: Bool { symbol.isEmpty || symbol == "share.qr" || symbol == "lava.shield.fill" || symbol == LavaGlyphSymbol.ranking }
+    private var isFormSeparator: Bool { symbol == "form.separator" }
+    private var isCatalogControl: Bool { symbol == "catalog.control.material" }
+    private var showsDrawing: Bool { isFormSeparator || symbol.isEmpty || symbol == "share.qr" || symbol == "lava.shield.fill" || symbol == LavaGlyphSymbol.ranking }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -58,6 +80,7 @@ final class LavaDecorationContent: UIView {
         revealSymbolView.layer.mask = aperture
         addSubview(revealSymbolView)
         NotificationCenter.default.addObserver(self, selector: #selector(settleReveal), name: UIAccessibility.reduceMotionStatusDidChangeNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(refreshCatalogMaterial), name: UIAccessibility.reduceTransparencyStatusDidChangeNotification, object: nil)
         material.isHidden = true
         material.isUserInteractionEnabled = false
         material.layer.cornerRadius = LavaSurface.controlCornerRadius
@@ -68,9 +91,9 @@ final class LavaDecorationContent: UIView {
     required init?(coder: NSCoder) { nil }
 
     @objc func setGuardianGestures(_ enabled: Bool) {
-        guardianGesturesEnabled = enabled
-        guardianHold.isEnabled = enabled && window != nil
-        guardianTap.isEnabled = enabled && window != nil
+        guardianGesturesEnabled = enabled && !isFormSeparator && !isCatalogControl
+        guardianHold.isEnabled = guardianGesturesEnabled && window != nil
+        guardianTap.isEnabled = guardianGesturesEnabled && window != nil
     }
 
     @objc private func cancelGuardianContact() {
@@ -106,6 +129,8 @@ final class LavaDecorationContent: UIView {
         overrideUserInterfaceStyle = .unspecified
         drawingTint = .clear
         drawingPointSize = 0
+        isUserInteractionEnabled = true
+        accessibilityElementsHidden = false
         symbolView.image = nil
         revealEnabled = false
         revealVisible = false
@@ -113,6 +138,8 @@ final class LavaDecorationContent: UIView {
         revealSymbolView.isHidden = true
         aperture.removeAllAnimations()
         material.isHidden = true
+        material.backgroundColor = .clear
+        if #available(iOS 26.0, *) { material.cornerConfiguration = .corners(radius: .fixed(0)) }
     }
 
     @objc func configure(symbol: String, mood: String, look: String, tone: String, colorScheme: String, fontPointSize: Double, fontWeight: String, staticExport: Bool) {
@@ -121,10 +148,26 @@ final class LavaDecorationContent: UIView {
         self.symbol = symbol
         self.staticExport = staticExport
         overrideUserInterfaceStyle = staticExport ? .light : .unspecified
+        if isFormSeparator { overrideUserInterfaceStyle = colorScheme == "dark" ? .dark : .light }
+        isUserInteractionEnabled = !isFormSeparator && !isCatalogControl
+        accessibilityElementsHidden = isFormSeparator || isCatalogControl
         drawingPointSize = CGFloat(fontPointSize)
         drawingTint = LavaSymbolPalette.color(for: tone, colorScheme: colorScheme)
         let drawing = showsDrawing
-        material.isHidden = symbol != "privacy.material"
+        let isSheetHeader = symbol == "sheet.header.material"
+        material.isHidden = symbol != "privacy.material" && !isSheetHeader && !isCatalogControl
+        if !material.isHidden {
+            if isSheetHeader || isCatalogControl { overrideUserInterfaceStyle = colorScheme == "dark" ? .dark : .light }
+            if isCatalogControl {
+                refreshCatalogMaterial()
+            } else {
+                let radius = isSheetHeader ? 0 : LavaSurface.controlCornerRadius
+                material.backgroundColor = .clear
+                material.layer.cornerRadius = radius
+                if #available(iOS 26.0, *) { material.cornerConfiguration = .corners(radius: .fixed(Double(radius))) }
+                material.effect = UIBlurEffect(style: isSheetHeader ? .systemChromeMaterial : .systemUltraThinMaterial)
+            }
+        }
         symbolView.isHidden = drawing || !material.isHidden
         guardian?.viewIfLoaded?.isHidden = !drawing
         if drawing {
@@ -155,12 +198,39 @@ final class LavaDecorationContent: UIView {
         setNeedsLayout()
     }
 
+    /// A control owns its material; the catalog's surrounding sticky strip stays
+    /// clear. RN retains the input/action owner above this decorative native leaf.
+    @objc private func refreshCatalogMaterial() {
+        guard isCatalogControl else { return }
+        material.backgroundColor = .clear
+        if UIAccessibility.isReduceTransparencyEnabled {
+            material.effect = nil
+            material.backgroundColor = .secondarySystemGroupedBackground
+        } else if #available(iOS 26.0, *) {
+            // Regular glass adapts its contrast to the scrolling backdrop. It
+            // also owns the rim, without a simulated opacity or painted border.
+            if !(material.effect is UIGlassEffect) {
+                let glass = UIGlassEffect(style: .regular)
+                glass.isInteractive = false
+                material.effect = glass
+            }
+        } else {
+            material.effect = UIBlurEffect(style: .systemMaterial)
+        }
+        if #available(iOS 26.0, *) { material.cornerConfiguration = .capsule() }
+        material.layer.cornerRadius = bounds.height / 2
+    }
+
     override func layoutSubviews() {
         super.layoutSubviews()
         symbolView.frame = bounds
         revealSymbolView.frame = bounds
         material.frame = bounds
-        if showsDrawing && renderedSize != min(bounds.width, bounds.height) { updateGuardian() }
+        if isCatalogControl { material.layer.cornerRadius = bounds.height / 2 }
+        // The separator's hosting view follows the whole RN rectangle. Its
+        // flexible SwiftUI width also updates when rotation keeps the same
+        // hairline height; it must not use the mascot's minimum-size cache.
+        if showsDrawing && !isFormSeparator && renderedSize != min(bounds.width, bounds.height) { updateGuardian() }
         updateContainment()
     }
 
@@ -230,7 +300,16 @@ final class LavaDecorationContent: UIView {
         let style = GuardianShieldStyle(rawValue: look) ?? .original
         let size = min(bounds.width, bounds.height)
         let drawing: AnyView
-        if symbol == LavaGlyphSymbol.ranking {
+        if isFormSeparator {
+            // SwiftUI's semantic Divider paint can differ from UIKit's
+            // separatorColor. RN allocates the hairline and owns the form;
+            // this passive leaf keeps the actual native divider appearance.
+            drawing = AnyView(VStack(spacing: 0) {
+                Divider()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .accessibilityHidden(true))
+        } else if symbol == LavaGlyphSymbol.ranking {
             let glyphSize = drawingPointSize > 0 ? drawingPointSize : size
             drawing = AnyView(LavaRankingGlyph().fill(Color(uiColor: drawingTint)).frame(width: glyphSize, height: glyphSize))
         } else if symbol == "lava.shield.fill" {
@@ -262,10 +341,14 @@ final class LavaDecorationContent: UIView {
         }
         let exportedDrawing = staticExport ? AnyView(drawing.environment(\.colorScheme, .light)) : drawing
         if let guardian {
+            guardian.safeAreaRegions = isFormSeparator ? [] : .all
             guardian.rootView = exportedDrawing
             guardian.viewIfLoaded?.isHidden = false
         } else {
             let controller = UIHostingController(rootView: exportedDrawing)
+            // This is a paint leaf inside an already-inset RN row, rather than
+            // a page. Safe-area padding must not consume its hairline bounds.
+            if isFormSeparator { controller.safeAreaRegions = [] }
             guardian = controller
             updateContainment()
         }

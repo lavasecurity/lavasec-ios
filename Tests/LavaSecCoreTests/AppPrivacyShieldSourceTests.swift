@@ -20,6 +20,25 @@ final class AppPrivacyShieldSourceTests: XCTestCase {
         XCTAssertFalse(update.contains("refreshAuthenticationAvailability"))
     }
 
+    func testSceneActivationRemovesEveryInstalledShieldAndFaceIDDoesNotAddOne() throws {
+        let app = try readSource(.lavaSecApp)
+        XCTAssertTrue(app.contains("UIScene.didActivateNotification"))
+        XCTAssertTrue(app.contains("for overlay in overlays { overlay.removeFromSuperview() }"))
+        XCTAssertTrue(app.contains("overlays.removeAll()"))
+        XCTAssertTrue(app.contains("window.accessibilityIdentifier != \"lava-security-window\""))
+        XCTAssertTrue(app.contains("window.windowLevel == .normal"))
+        XCTAssertTrue(app.contains("securityPresentationSubscription = LavaProtectionShortcutRuntime.shared.security.objectWillChange.sink"))
+        let inactive = try sourceBlock(in: app, startingAt: "func applicationWillResignActive", endingBefore: "func applicationDidEnterBackground")
+        XCTAssertTrue(inactive.contains("guard !LavaProtectionShortcutRuntime.shared.security.isBiometricAuthenticationInProgress else { return }"))
+        let background = try sourceBlock(in: app, startingAt: "func applicationDidEnterBackground", endingBefore: "private func updatePrivacyShield")
+        XCTAssertFalse(background.contains("isBiometricAuthenticationInProgress"), "A real background must cover even during Face ID")
+        let host = try readSource(.reactNativeAppHost)
+        let surface = try sourceBlock(in: host, startingAt: "private struct LavaAppSecuritySurface", endingBefore: "private final class LavaAppDependencyProvider")
+        let passcode = try XCTUnwrap(surface.range(of: "if let request = security.passcodeAuthenticationRequest"))
+        let mask = try XCTUnwrap(surface.range(of: "else if security.isAppUnlockPrivacyMaskVisible"))
+        XCTAssertLessThan(passcode.lowerBound, mask.lowerBound, "A stale passive mask cannot obscure the interactive credential sheet")
+    }
+
     func testPrivacyShieldSettlesCurrentUIBeforeSnapshot() throws {
         let appSource = try readSource(.lavaSecApp)
 
@@ -35,9 +54,11 @@ final class AppPrivacyShieldSourceTests: XCTestCase {
         let active = try sourceBlock(in: appSource, startingAt: "func applicationDidBecomeActive", endingBefore: "func userNotificationCenter")
         XCTAssertTrue(active.contains("updateActivePrivacyShield(in: application)"))
         let recovery = try sourceBlock(in: appSource, startingAt: "private func updateActivePrivacyShield", endingBefore: "func applicationWillTerminate")
-        XCTAssertTrue(recovery.contains("security.protectedDataIsAvailableForPresentation || !security.backgroundPrivacyCoverRequired"))
-        XCTAssertTrue(recovery.contains("privacyShield.show(in: application)"))
-        XCTAssertTrue(recovery.contains("privacyShield.hide(from: application)"))
+        XCTAssertTrue(recovery.contains("privacyShield.reconcileActive(in: application)"))
+        let policy = try sourceBlock(in: appSource, startingAt: "func reconcileActive", endingBefore: "func show(in")
+        XCTAssertTrue(policy.contains("security.isAppUnlockBlockingUI || security.isAppUnlockPrivacyMaskVisible"))
+        XCTAssertTrue(policy.contains("show(in: application, resignFirstResponder: false)"))
+        XCTAssertTrue(policy.contains("hide(from: application)"))
     }
 
     func testPrivacyShieldCoversWindowsWithBlurredMaterial() throws {

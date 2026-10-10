@@ -8,17 +8,48 @@ import ReactAppDependencyProvider
 /// Embeds only React presentation. RootView still owns app lifecycle and security.
 struct LavaAppHost: UIViewControllerRepresentable {
     var onboardingPreview = false
-    func makeUIViewController(context: Context) -> UIViewController { LavaAppViewController(onboardingPreview: onboardingPreview) }
+    @Environment(\.dismiss) private var dismiss
+    func makeUIViewController(context: Context) -> UIViewController { LavaAppViewController(onboardingPreview: onboardingPreview, onPreviewDismiss: { dismiss() }) }
     func updateUIViewController(_ controller: UIViewController, context: Context) {
         controller.traitOverrides.preferredContentSizeCategory = LavaAppBridge.shared.preferredContentSize
     }
+    static func dismantleUIViewController(_ controller: UIViewController, coordinator: ()) {
+        (controller as? LavaAppViewController)?.retirePreview()
+    }
+}
+
+/// A second surface in the existing React runtime. Native import keeps its
+/// staged payload and owns dismissal; purchase authority is still native.
+struct LavaAppPlusContent: UIViewRepresentable {
+    @MainActor static var makeRoot: ((String) -> UIView?)?
+    let context: String
+    func makeUIView(context: Context) -> UIView { Self.makeRoot?(self.context) ?? UIView() }
+    func updateUIView(_ view: UIView, context: Context) {}
+    static func dismantleUIView(_ view: UIView, coordinator: ()) { (view as? LavaAppReactSurface)?.retire() }
+}
+
+/// Bounded RN body in the same runtime and UIKit modal owner as native flows.
+/// Its independent command port can complete a parent command awaiting dismissal.
+struct LavaAppForegroundContent: UIViewRepresentable {
+    @MainActor static var makeRoot: ((String) -> UIView?)?
+    let id: String
+    func makeUIView(context: Context) -> UIView { Self.makeRoot?(id) ?? UIView() }
+    func updateUIView(_ view: UIView, context: Context) {}
+    static func dismantleUIView(_ view: UIView, coordinator: ()) { (view as? LavaAppReactSurface)?.retire() }
 }
 
 @MainActor
 private final class LavaAppViewController: UIViewController {
     private let onboardingPreview: Bool
-    init(onboardingPreview: Bool) { self.onboardingPreview = onboardingPreview; super.init(nibName: nil, bundle: nil) }
+    private let onPreviewDismiss: () -> Void
+    private var onboardingID: String?
+    init(onboardingPreview: Bool, onPreviewDismiss: @escaping () -> Void) { self.onboardingPreview = onboardingPreview; self.onPreviewDismiss = onPreviewDismiss; super.init(nibName: nil, bundle: nil) }
     required init?(coder: NSCoder) { nil }
+    func retirePreview() {
+        reactSurface?.retire()
+        if onboardingPreview, let onboardingID { LavaAppBridge.shared.endOnboarding(onboardingID) }
+    }
+    private var reactSurface: LavaAppReactSurface?
     private var exportDirectory: URL?
     private var exportSubscription: AnyCancellable?
     private let preparationFlow = LavaAppNativeFlow(name: "preparation")
@@ -28,7 +59,10 @@ private final class LavaAppViewController: UIViewController {
     private var securitySubscription: AnyCancellable?
     private var stagingSubscription: AnyCancellable?
     private var feedbackDraftSubscription: AnyCancellable?
+    private var foregroundDraftSubscription: AnyCancellable?
     private var bootstrapSubscriptions = Set<AnyCancellable>()
+    private var onboardingChromeObserver: String?
+    private weak var onboardingChromeController: UIViewController?
     private weak var presentedFlow: LavaAppFlowController?
     private var presentedFlowID: UUID?
     private var isChangingFlow = false
@@ -36,12 +70,16 @@ private final class LavaAppViewController: UIViewController {
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         if !onboardingPreview, let scene = view.window?.windowScene { securityWindow.attach(to: scene) }
+        updateOnboardingChrome()
     }
     private var factory: RCTReactNativeFactory?
     private var factoryDelegate: LavaAppReactDelegate?
     override func viewDidLoad() {
         super.viewDidLoad()
         LavaAppBridge.shared.attach()
+        onboardingChromeObserver = LavaAppBridge.shared.observe { [weak self] _ in
+            Task { @MainActor [weak self] in self?.updateOnboardingChrome() }
+        }
         traitOverrides.preferredContentSizeCategory = LavaAppBridge.shared.preferredContentSize
         customizationSubscription = LavaAppBridge.shared.model.customization.objectWillChange.sink { [weak self] _ in
             Task { @MainActor [weak self] in self?.traitOverrides.preferredContentSizeCategory = LavaAppBridge.shared.preferredContentSize }
@@ -64,6 +102,9 @@ private final class LavaAppViewController: UIViewController {
         feedbackDraftSubscription = LavaAppBridge.shared.$feedbackDraftIsDirty.sink { [weak self] _ in
             Task { @MainActor [weak self] in self?.updateFlowModalState() }
         }
+        foregroundDraftSubscription = LavaAppBridge.shared.$foregroundDraftIsDirty.sink { [weak self] _ in
+            Task { @MainActor [weak self] in self?.updateFlowModalState() }
+        }
         view.backgroundColor = UIColor(LavaStyle.groupedBackground)
         for notification in [UIApplication.didBecomeActiveNotification, UIApplication.protectedDataDidBecomeAvailableNotification] {
             NotificationCenter.default.publisher(for: notification).sink { [weak self] _ in
@@ -75,6 +116,36 @@ private final class LavaAppViewController: UIViewController {
         // dispatch_once initializer while UIKit is resolving the host geometry.
         DispatchQueue.main.async { [weak self] in self?.mountReactRoot() }
     }
+    deinit {
+        if let token = onboardingChromeObserver {
+            Task { @MainActor in LavaAppBridge.shared.removeObserver(token) }
+        }
+    }
+    /// Over-full-screen setup retains the measured Guard underneath. UIKit
+    /// requires this explicit flag before that modal can own its status bar.
+    private func updateOnboardingChrome() {
+        guard LavaAppBridge.shared.onboardingVisit != nil else {
+            onboardingChromeController?.modalPresentationCapturesStatusBarAppearance = false
+            onboardingChromeController?.setNeedsStatusBarAppearanceUpdate()
+            onboardingChromeController = nil
+            return
+        }
+        guard let root = view.window?.rootViewController else { return }
+        func presented(in controller: UIViewController) -> UIViewController? {
+            if let next = controller.presentedViewController { return presented(in: next) ?? next }
+            for child in controller.children.reversed() { if let next = presented(in: child) { return next } }
+            return nil
+        }
+        func containsSetup(_ view: UIView) -> Bool {
+            view.accessibilityIdentifier == "onboarding.surface" || view.subviews.contains(where: containsSetup)
+        }
+        guard let controller = presented(in: root), controller.modalPresentationStyle == .overFullScreen,
+              containsSetup(controller.view), !controller.modalPresentationCapturesStatusBarAppearance else { return }
+        controller.modalPresentationCapturesStatusBarAppearance = true
+        onboardingChromeController = controller
+        controller.setNeedsStatusBarAppearanceUpdate()
+        root.setNeedsStatusBarAppearanceUpdate()
+    }
     private func mountReactRoot() {
         guard factory == nil else { return }
         let bridge = LavaAppBridge.shared
@@ -83,14 +154,31 @@ private final class LavaAppViewController: UIViewController {
         // immediately while the existing security owner authenticates.
         // pinned: RNOnlyAppSourceTests.testAllOffNativeBootstrapWaitsForAnAuthorizedProjectionBeforeCreatingReact
         guard bridge.security.backgroundPrivacyCoverRequired || bridge.canReadPresentation(.appUnlock) else { return }
+        if onboardingPreview || !UserDefaults.standard.bool(forKey: "hasSeenLavaOnboarding") {
+            let visit = bridge.beginOnboarding(mock: onboardingPreview, onDismiss: onboardingPreview ? onPreviewDismiss : nil)
+            onboardingID = visit.id
+        }
         let delegate = LavaAppReactDelegate()
         delegate.dependencyProvider = LavaAppDependencyProvider()
         let factory = RCTReactNativeFactory(delegate: delegate)
         LavaInstallAppComponentProvider()
         self.factoryDelegate = delegate
         self.factory = factory
+        // A temporary QA preview cannot replace the retained main runtime's
+        // factories. Its dismissal must leave subsequent native sheets usable.
+        if !onboardingPreview {
+            LavaAppPlusContent.makeRoot = { [weak factory] context in
+                guard let factory else { return nil }
+                return LavaAppReactSurface(factory: factory, properties: ["fullApp": true, "plusContext": context])
+            }
+            LavaAppForegroundContent.makeRoot = { [weak factory] id in
+                guard let factory else { return nil }
+                return LavaAppReactSurface(factory: factory, properties: ["fullApp": true, "foregroundContext": id])
+            }
+        }
         bootstrapSubscriptions.removeAll()
-        let root = factory.rootViewFactory.view(withModuleName: "LavaUIReview", initialProperties: ["fullApp": true, "onboardingPreview": onboardingPreview, "initialSnapshot": LavaAppBridge.shared.snapshot()])
+        let root = LavaAppReactSurface(factory: factory, properties: ["fullApp": true, "onboardingPreview": onboardingPreview])
+        reactSurface = root
         root.accessibilityIdentifier = "lava.full-app"
         root.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(root)
@@ -134,7 +222,12 @@ private final class LavaAppViewController: UIViewController {
         let controller = LavaAppFlowController(rootView: AnyView(content))
         controller.onDismiss = { [weak self] in
             if bridge.flow?.id == flow.id { bridge.flow = nil }
-            if flow.name == "feedback" { bridge.feedbackDraftIsDirty = false }
+            if flow.name == "feedback" { bridge.retireFeedback(flow.id) }
+            if flow.name == "vpnConfiguration", bridge.wireGuardEditorVisit?.id == flow.id {
+                bridge.wireGuardEditorVisit?.retire(); bridge.wireGuardEditorVisit = nil
+            }
+            if flow.usesReactPresentation { bridge.foregroundDraftIsDirty = false }
+            bridge.closingForegroundIDs.remove(flow.id)
             if self?.presentedFlowID == flow.id { self?.presentedFlowID = nil; self?.presentedFlow = nil }
             flow.onDismiss?()
             bridge.publish()
@@ -154,6 +247,10 @@ private final class LavaAppViewController: UIViewController {
             sheet.detents = [.large()]
         }
         controller.isModalInPresentation = flow.name == "preparation"
+        controller.onDismissAttempt = {
+            guard bridge.flow?.id == flow.id, flow.usesReactPresentation else { return }
+            bridge.foregroundDismissAttempt += 1; bridge.publish()
+        }
         presentedFlow = controller
         presentedFlowID = flow.id
         top.present(controller, animated: true)
@@ -164,6 +261,7 @@ private final class LavaAppViewController: UIViewController {
         let bridge = LavaAppBridge.shared
         guard let presentedFlow, bridge.flow?.id == presentedFlowID else { return }
         var blocksInteractiveDismiss = bridge.flow?.name == "feedback" && bridge.feedbackDraftIsDirty
+        blocksInteractiveDismiss = blocksInteractiveDismiss || bridge.flow?.usesReactPresentation == true && bridge.foregroundDraftIsDirty
         blocksInteractiveDismiss = blocksInteractiveDismiss || bridge.model.isStagingChainedUpstreamForQA
         presentedFlow.isModalInPresentation = blocksInteractiveDismiss
     }
@@ -214,16 +312,60 @@ private final class LavaAppViewController: UIViewController {
 }
 private final class LavaAppFlowController: UIHostingController<AnyView>, UIAdaptivePresentationControllerDelegate {
     var onDismiss: (() -> Void)?
+    var onDismissAttempt: (() -> Void)?
+    private var completedDismissal = false
+    private func completeDismissal() {
+        guard !completedDismissal else { return }
+        completedDismissal = true; onDismiss?()
+    }
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         presentationController?.delegate = self
     }
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
-        if isBeingDismissed || presentingViewController == nil { onDismiss?() }
+        if isBeingDismissed || presentingViewController == nil { completeDismissal() }
     }
-    func presentationControllerDidDismiss(_ presentationController: UIPresentationController) { onDismiss?() }
+    func presentationControllerDidDismiss(_ presentationController: UIPresentationController) { completeDismissal() }
+    func presentationControllerDidAttemptToDismiss(_ presentationController: UIPresentationController) { onDismissAttempt?() }
 }
+/// Each actual React surface participates in one native reveal. A mounted sheet
+/// must commit too; the underlying Guard cannot reveal it prematurely.
+private final class LavaAppReactSurface: UIView {
+    private let presentationID = UUID().uuidString
+    private var retired = false
+    init(factory: RCTReactNativeFactory, properties: [String: Any]) {
+        super.init(frame: .zero)
+        let bridge = LavaAppBridge.shared
+        bridge.mountPresentation(presentationID)
+        var properties = properties
+        properties["presentationID"] = presentationID
+        properties["initialSnapshot"] = bridge.snapshot()
+        // Public locale/type metrics prepare the covered scaffold in its actual
+        // language even when the private snapshot is correctly withheld.
+        properties["initialPresentation"] = bridge.presentationSnapshot()
+        let root = factory.rootViewFactory.view(withModuleName: "LavaUIReview", initialProperties: properties)
+        backgroundColor = UIColor(LavaStyle.groupedBackground)
+        root.backgroundColor = backgroundColor
+        root.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(root)
+        NSLayoutConstraint.activate([
+            root.leadingAnchor.constraint(equalTo: leadingAnchor), root.trailingAnchor.constraint(equalTo: trailingAnchor),
+            root.topAnchor.constraint(equalTo: topAnchor), root.bottomAnchor.constraint(equalTo: bottomAnchor)
+        ])
+    }
+    required init?(coder: NSCoder) { nil }
+    func retire() {
+        guard !retired else { return }
+        retired = true
+        LavaAppBridge.shared.unmountPresentation(presentationID)
+    }
+    deinit {
+        let id = presentationID
+        Task { @MainActor in LavaAppBridge.shared.unmountPresentation(id) }
+    }
+}
+
 private final class LavaAppReactDelegate: RCTDefaultReactNativeFactoryDelegate {
     override func sourceURL(for bridge: RCTBridge) -> URL? { bundleURL() }
     override func bundleURL() -> URL? { Bundle.main.url(forResource: "LavaUIReview", withExtension: "js") }
@@ -236,26 +378,33 @@ private final class LavaAppReactDelegate: RCTDefaultReactNativeFactoryDelegate {
 private final class LavaAppSecurityWindow {
     private var window: UIWindow?
     private weak var previousKeyWindow: UIWindow?
-    private var subscription: AnyCancellable?
+    private var subscriptions = Set<AnyCancellable>()
     private let security = LavaProtectionShortcutRuntime.shared.security
     func attach(to scene: UIWindowScene) {
         guard window == nil else { return }
         let window = UIWindow(windowScene: scene)
+        window.accessibilityIdentifier = "lava-security-window"
         window.windowLevel = .alert + 1
-        window.rootViewController = UIHostingController(rootView: LavaAppSecuritySurface().environmentObject(security))
+        let controller = UIHostingController(rootView: LavaAppSecuritySurface().environmentObject(security).environmentObject(LavaAppBridge.shared))
+        controller.view.backgroundColor = UIColor(LavaStyle.groupedBackground)
+        controller.view.accessibilityViewIsModal = true
+        window.rootViewController = controller
         self.window = window
-        subscription = security.objectWillChange.sink { [weak self] _ in
-            Task { @MainActor [weak self] in self?.update() }
+        for publisher in [security.objectWillChange, LavaAppBridge.shared.objectWillChange] {
+            publisher.sink { [weak self] _ in
+                Task { @MainActor [weak self] in self?.update() }
+            }.store(in: &subscriptions)
         }
         update()
     }
     private func update() {
         guard let window else { return }
-        let visible = security.isAppUnlockBlockingUI || security.isAppUnlockPrivacyMaskVisible || security.passcodeAuthenticationRequest != nil
+        let visible = security.isAppUnlockBlockingUI || security.isAppUnlockPrivacyMaskVisible || security.passcodeAuthenticationRequest != nil || LavaAppBridge.shared.isPresentationRevealPending
         if visible && window.isHidden {
             previousKeyWindow = window.windowScene?.windows.first(where: { $0.isKeyWindow })
             window.makeKeyAndVisible()
         } else if !visible && !window.isHidden {
+            SecurityController.tracePresentation("presentation.revealed")
             window.isHidden = true
             previousKeyWindow?.makeKey()
         }
@@ -263,12 +412,13 @@ private final class LavaAppSecurityWindow {
 }
 private struct LavaAppSecuritySurface: View {
     @EnvironmentObject private var security: SecurityController
+    @EnvironmentObject private var bridge: LavaAppBridge
     var body: some View {
         Group {
-            if security.isAppUnlockPrivacyMaskVisible {
-                SecurityPrivacyMaskOverlay()
-            } else if let request = security.passcodeAuthenticationRequest {
+            if let request = security.passcodeAuthenticationRequest {
                 SecurityPasscodeAuthenticationView(request: request).id(request.id)
+            } else if security.isAppUnlockPrivacyMaskVisible || !security.isAppUnlockBlockingUI && bridge.isPresentationRevealPending {
+                SecurityPrivacyMaskOverlay()
             } else {
                 SecurityLockOverlay { Task { await security.authenticateAppUnlockIfNeeded() } }
             }

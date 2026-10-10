@@ -220,7 +220,7 @@ final class ShareableFiltersSourceTests: XCTestCase {
         // The UI offers Add (paywall at the cap) + Replace (filter picker), no blanket replace.
         XCTAssertTrue(ui.contains("if viewModel.canCreateFilter {"))
         XCTAssertTrue(ui.contains("showingPaywall = true"))
-        XCTAssertTrue(ui.contains("LavaPlusUpgradeSheet()"))
+        XCTAssertTrue(ui.contains("LavaPlusUpgradeSheet(context: \"fullImport\")"))
         XCTAssertTrue(ui.contains("struct ImportChooseReplaceTargetView"))
         XCTAssertFalse(ui.contains("case nameNew("),
                        "The naming stage is gone: imported filters are named by AppViewModel.")

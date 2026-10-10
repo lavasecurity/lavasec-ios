@@ -198,6 +198,8 @@ final class SupabaseIDTokenAuthTests: XCTestCase {
                 error as? SupabaseIDTokenAuthError,
                 .requestFailed(statusCode: 400, message: "Invalid Apple identity token")
             )
+            XCTAssertEqual(error.localizedDescription, LavaCoreStrings.localizedFormat("Supabase Auth returned status %lld.", 400))
+            XCTAssertFalse(error.localizedDescription.contains("Invalid Apple identity token"))
         }
     }
 }

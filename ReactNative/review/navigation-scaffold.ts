@@ -3,6 +3,18 @@ import {AccessibilityInfo,AppState,Platform} from 'react-native';
 import type {NativeStackNavigationOptions} from '@react-navigation/native-stack';
 import type {NativeBottomTabNavigationOptions} from '@react-navigation/bottom-tabs/unstable';
 
+/** Title size does not determine whether scrolling content can extend under the native bar. */
+export function ordinaryPageHeader():NativeStackNavigationOptions {
+  if(Platform.OS!=='ios')return {};
+  return {
+    headerTransparent:true,
+    headerStyle:{backgroundColor:'transparent'},
+    // iOS 26 supplies its own scroll edge effect. Earlier systems use native
+    // navigation chrome material; adding that blur on 26 would double the effect.
+    headerBlurEffect:parseInt(String(Platform.Version),10)<26?'systemChromeMaterial':undefined,
+  };
+}
+
 export function floatingTabMinimizeBehavior():NativeBottomTabNavigationOptions['tabBarMinimizeBehavior'] {
   if(Platform.OS!=='ios')return undefined;
   const major=parseInt(String(Platform.Version),10);

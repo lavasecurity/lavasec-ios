@@ -6,7 +6,7 @@ import Foundation
 /// "which line of my file is wrong" and "this build may not stage at all" are different
 /// problems with different fixes, and a single `invalidConf` would make the second one look
 /// like the first.
-public enum ChainedUpstreamStagingRefusal: Error, Equatable {
+public enum ChainedUpstreamStagingRefusal: Error, LocalizedError, Equatable {
     /// This build addresses the production secret store, so staging is refused.
     ///
     /// THE LOAD-BEARING CASE. See ``ChainedUpstreamStagingRequest``.
@@ -43,6 +43,27 @@ public enum ChainedUpstreamStagingRefusal: Error, Equatable {
     /// The parsed private key was refused at the rotation boundary — malformed, all-zero, or
     /// the peer's own key pasted into the `[Interface]` section.
     case rotationRefused(ChainedUpstreamSecretStoreFailure)
+
+    /// Recovery copy for the shipping editor. Diagnostic payloads remain in the
+    /// typed cases and log identifier; they never become a displayed error dump.
+    public var errorDescription: String? {
+        switch self {
+        case .buildMayNotStage, .buildIdentityIsInconsistent:
+            LavaCoreStrings.localized("This build can't save a WireGuard configuration. Update Lava and try again.")
+        case .unsupportedDirective:
+            LavaCoreStrings.localized("This WireGuard configuration uses a setting Lava doesn't support.")
+        case .missingOrRepeatedKey:
+            LavaCoreStrings.localized("A required WireGuard setting is missing or repeated.")
+        case .directiveInWrongSection:
+            LavaCoreStrings.localized("A WireGuard setting is in the wrong section.")
+        case .malformedValue:
+            LavaCoreStrings.localized("A WireGuard setting has an invalid value.")
+        case .configurationRefused:
+            LavaCoreStrings.localized("This WireGuard configuration isn't valid. Check its addresses, routes, MTU, and public key.")
+        case .rotationRefused(let failure):
+            failure.errorDescription
+        }
+    }
 
     /// A stable log identifier, never user copy.
     public var logValue: String {

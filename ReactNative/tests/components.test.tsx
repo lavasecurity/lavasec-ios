@@ -1,9 +1,12 @@
-import {ActivityIndicator,Pressable,StyleSheet,useColorScheme} from 'react-native';
+import {ActivityIndicator,Animated,Pressable,StyleSheet,useColorScheme,type StyleProp,type ViewStyle} from 'react-native';
 import {act,fireEvent, render, screen, userEvent,within} from '@testing-library/react-native';
 import {LavaActionButton, LavaIconButton, LavaSelectionAccessory, LavaText, LavaToggleRow} from '../src';
 import {LavaComponentGallery} from '../gallery/LavaComponentGallery';
 import {colors, colorForScheme} from '../src/colors.ios';
 import {LavaAppearanceContext} from '../src/appearance';
+import {SafeAreaInsetsContext} from 'react-native-safe-area-context';
+import {foundation} from '../src/foundation';
+import {lavaTokens} from '../src/generated/tokens';
 import Decoration from '../specs/LavaDecorationNativeComponent';
 import NativeSwitch from '../specs/LavaSwitchNativeComponent';
 
@@ -15,6 +18,19 @@ jest.mock('../specs/LavaDecorationNativeComponent',()=>({__esModule:true,default
 }}));
 
 describe('native Lava control contracts', () => {
+  it('owns a toggle gesture before a synchronous owner publication can reenter its native callback',async()=>{
+    let finish!:()=>void;
+    const changed=jest.fn(()=>{
+      fireEvent(screen.getByRole('switch'),'valueChange',true);
+      return new Promise<void>(resolve=>{finish=resolve;});
+    });
+    render(<LavaToggleRow title="Feedback" value={false} optimistic onValueChange={changed}/>);
+    fireEvent(screen.getByRole('switch'),'valueChange',true);
+    expect(changed).toHaveBeenCalledTimes(1);
+    expect(screen.UNSAFE_getByType(NativeSwitch).props.pending).toBe(true);
+    await act(async()=>finish());
+    expect(screen.UNSAFE_getByType(NativeSwitch).props.pending).toBe(false);
+  });
   it('requests a toggle change but displays only the value supplied by its owner', () => {
     const changed = jest.fn();
     const props = {title: 'Protection feedback', value: false, onValueChange: changed};
@@ -38,6 +54,23 @@ describe('native Lava control contracts', () => {
     expect(screen.queryByRole('button')).toBeNull();
   });
 
+  it('blocks pending input without dimming the switch or its label, then resumes the same control',()=>{
+    const changed=jest.fn();
+    const content=(pending:boolean)=><LavaToggleRow title="Feedback" testID="busy-feedback" value pending={pending} onValueChange={changed}/>;
+    render(content(false));
+    const native=screen.UNSAFE_getByType(NativeSwitch);
+    const label=screen.getByText('Feedback');const style=label.props.style;
+    screen.rerender(content(true));
+    expect(screen.UNSAFE_getByType(NativeSwitch)).toBe(native);
+    expect(native.props).toMatchObject({pending:true,disabled:false,value:true,pointerEvents:'none'});
+    expect(screen.getByText('Feedback').props.style).toEqual(style);
+    fireEvent.press(screen.getByTestId('busy-feedback.label'));
+    fireEvent(screen.getByRole('switch',{name:'Feedback'}),'valueChange',false);
+    expect(changed).not.toHaveBeenCalled();
+    screen.rerender(content(false));
+    expect(native.props).toMatchObject({pending:false,disabled:false,value:true,pointerEvents:'auto'});
+    fireEvent.press(screen.getByTestId('busy-feedback.label'));expect(changed).toHaveBeenCalledWith(false);
+  });
   it('does not execute disabled controls from either label or native control', async () => {
     const changed = jest.fn();
     const pressed = jest.fn();
@@ -127,6 +160,56 @@ describe('native Lava control contracts', () => {
     fireEvent.press(screen.getByRole('button', {name: 'Apply'}));
     expect(pressed).toHaveBeenCalledTimes(1);
     expect(screen.getByRole('button')).toHaveProp('accessibilityHint', 'Review changes first');
+  });
+
+  it.each([1100,250])('settles outline transitions into static paint before disabled controls reattach (duration=%s)',duration=>{
+    const motions:Array<{configuration:{toValue:unknown;duration?:number;useNativeDriver:boolean};finish?: (result:{finished:boolean})=>void;stop:jest.Mock}>=[];
+    const timing=jest.spyOn(Animated,'timing').mockImplementation((_value,configuration)=>{
+      const motion={configuration,finish:undefined as ((result:{finished:boolean})=>void)|undefined,stop:jest.fn()};motions.push(motion);
+      return {start:finish=>{motion.finish=finish;},stop:motion.stop,reset:jest.fn()};
+    });
+    try{
+      const pressed=jest.fn();
+      const content=(whiteOutline:boolean,disabled=false)=><LavaActionButton title="Next step" onPress={pressed} whiteOutline={whiteOutline} outlineTransitionDuration={duration} disabled={disabled}/>;
+      render(content(true));
+      const button=screen.getByRole('button',{name:'Next step'});
+      type PaintNode={type:unknown;props:{style?:StyleProp<ViewStyle>}};
+      const paint=()=>button.findAll((node:PaintNode)=>node.type==='View'&&StyleSheet.flatten(node.props.style)?.position==='absolute').map((node:PaintNode)=>StyleSheet.flatten(node.props.style));
+      act(()=>motions.at(-1)!.finish?.({finished:true}));
+      expect(button).toHaveStyle({backgroundColor:'transparent'});
+      expect(paint()).toEqual([expect.objectContaining({borderColor:'white',borderWidth:1.5})]);
+      expect(paint()[0].opacity).toBeUndefined();
+
+      // Welcome -> Meet -> Permissions (disabled) -> mock installation. The
+      // target stays filled while the native paint views are absent.
+      screen.rerender(content(false));const exit=motions.at(-1)!;
+      expect(exit.configuration).toMatchObject({toValue:1,duration,useNativeDriver:true});
+      expect(paint()).toHaveLength(2);
+      screen.rerender(content(false,true));expect(button).toBeDisabled();
+      expect(button).toHaveStyle({backgroundColor:colors.disabledSurface});
+      expect(paint()).toHaveLength(0);fireEvent.press(button);expect(pressed).not.toHaveBeenCalled();
+      // Native Animated cancels when disabling detaches its last paint child.
+      // There is no later successful completion for this animation.
+      act(()=>exit.finish?.({finished:false}));
+      screen.rerender(content(false));
+      expect(screen.getByRole('button',{name:'Next step'})).toBe(button);
+      expect(button).toHaveStyle({backgroundColor:colors.safeControlGreen});
+      expect(screen.getByText('Next step')).toHaveStyle({color:colors.actionForeground});
+      expect(paint()).toHaveLength(0);expect(motions).toHaveLength(2);
+      fireEvent.press(button);expect(pressed).toHaveBeenCalledTimes(1);
+      screen.rerender(content(false,true));screen.rerender(content(false));
+      expect(button).toHaveStyle({backgroundColor:colors.safeControlGreen});expect(paint()).toHaveLength(0);
+
+      // Back to Welcome owns a fresh transition; an earlier completion cannot
+      // retire its live paint or restore the previous filled endpoint.
+      screen.rerender(content(true));const back=motions.at(-1)!;
+      expect(exit.stop).toHaveBeenCalled();expect(back.configuration).toMatchObject({toValue:0,duration,useNativeDriver:true});
+      act(()=>exit.finish?.({finished:false}));expect(paint()).toHaveLength(2);
+      act(()=>back.finish?.({finished:true}));
+      expect(button).toHaveStyle({backgroundColor:'transparent'});
+      expect(paint()).toEqual([expect.objectContaining({borderColor:'white',borderWidth:1.5})]);
+      expect(paint()[0].opacity).toBeUndefined();
+    }finally{timing.mockRestore();}
   });
 
   it('uses the canonical circular import action without changing its callback',()=>{
@@ -227,6 +310,19 @@ describe('native Lava control contracts', () => {
     expect(screen.getByText('Actions received: 1')).toBeOnTheScreen();
     fireEvent(screen.getByRole('switch', {name: 'Protection feedback'}), 'valueChange', true);
     expect(screen.getByRole('switch', {name: 'Protection feedback'})).toHaveProp('value', true);
+  });
+
+  it('keeps gallery content inside safe edges while preserving its full scroll viewport and state on rotation',()=>{
+    const content=(left:number,right:number)=><SafeAreaInsetsContext.Provider value={{top:0,bottom:21,left,right}}><LavaComponentGallery/></SafeAreaInsetsContext.Provider>;
+    render(content(59,44));const scroll=screen.getByTestId('lava-component-gallery'),action=screen.getByRole('button',{name:'primary action'});
+    const style=StyleSheet.flatten(scroll.props.contentContainerStyle);
+    expect(style).toMatchObject({maxWidth:foundation.layout.readingWidth+103,paddingLeft:lavaTokens.spacing.screenHorizontal+59,paddingRight:lavaTokens.spacing.screenHorizontal+44});
+    expect(StyleSheet.flatten(scroll.props.style)).not.toMatchObject({paddingLeft:expect.anything()});
+    expect(scroll.props.contentInsetAdjustmentBehavior).toBe('automatic');
+    fireEvent.press(action);screen.rerender(content(0,0));
+    expect(screen.getByTestId('lava-component-gallery')).toBe(scroll);expect(screen.getByRole('button',{name:'primary action'})).toBe(action);
+    expect(screen.getByText('Actions received: 1')).toBeOnTheScreen();
+    expect(StyleSheet.flatten(scroll.props.contentContainerStyle)).toMatchObject({maxWidth:foundation.layout.readingWidth,paddingHorizontal:lavaTokens.spacing.screenHorizontal});
   });
 
   it('demonstrates shared selection changes, disabled retention and a separately tappable locked choice',async()=>{

@@ -2,6 +2,16 @@ import Foundation
 
 /// Background concealment follows explicit protection choices, independently of read authorization.
 public enum SecurityPrivacyPolicy {
+    /// Permits only the already painted, revealed draft of the same visit to
+    /// remain visible without read authority. This grants no editing or reads.
+    public static func canRetainAcceptedPrivateDraftDisplay(
+        hasAcceptedRevealedDisplay: Bool,
+        ownerIsCurrent: Bool,
+        backgroundCoverRequired: Bool
+    ) -> Bool {
+        hasAcceptedRevealedDisplay && ownerIsCurrent && !backgroundCoverRequired
+    }
+
     /// Keeps an explicitly concealed draft hidden; revealed drafts follow the inactive window policy.
     public static func requiresPrivateDraftCover(
         isRevealed: Bool,

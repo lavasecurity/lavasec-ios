@@ -5,6 +5,7 @@ workspace 'LavaSecRN'
 prepare_react_native_project!
 target 'LavaSec' do
   pod 'RNScreens', :path => '../node_modules/react-native-screens'
+  pod 'RNSVG', :path => '../node_modules/react-native-svg'
   pod 'react-native-safe-area-context', :path => '../node_modules/react-native-safe-area-context'
   use_react_native!(
     :path => '../node_modules/react-native',
@@ -16,5 +17,10 @@ target 'LavaSec' do
   end
   post_install do |installer|
     react_native_post_install(installer, '../node_modules/react-native', :mac_catalyst_enabled => false)
+    # SVG's filter resource bundle declares an obsolete 12.4 minimum; match the
+    # reviewed foreground host's minimum without changing production targets.
+    installer.pods_project.targets.select { |target| target.name.start_with?('RNSVG') }.each do |target|
+      target.build_configurations.each { |config| config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '18.0' }
+    end
   end
 end

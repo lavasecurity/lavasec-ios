@@ -75,3 +75,30 @@ VoiceOver journey. Translation review and device checks remain necessary when
 shipping changes to copy or layout. Dormant DNS preset metadata and unused
 fallback presentation helpers are not rendered release UI; they retain source
 keys until they acquire a display caller.
+
+
+## VPN chaining follow-up
+
+VPN setup, forced-stop recovery, active-configuration rotation warnings, and
+WireGuard file/parser/key-storage failures now have copy in all ten supported
+languages. Shared WireGuard errors resolve in `Bundle.module`; the legacy app
+file reader resolves the same copy in the app catalog. Typed diagnostics stay
+outside displayed recovery text. Server sign-in error prose also remains
+diagnostic data; the displayed authentication failure uses translated copy.
+
+The Swift source gate checks static message and notice keys as well as literal
+lookup sites. Regression tests cover the actual rotation-warning model copy,
+formatted file sizes, package-language lookup, and error payload privacy.
+React Native tests cover regional language tags and composed connection values.
+
+Native DNS projections distinguish localized display labels from provider and
+user identities. Translate app-owned defaults before composing summaries;
+preserve authored names in both visible text and accessibility labels. Do not
+persist a localized display fallback as an authored name. React Native regional
+locales resolve to a supported catalog, preserving explicit Chinese script tags.
+The decorative onboarding mascot exposes no animation-state words to VoiceOver;
+the setup controls and Ready content retain meaningful localized state.
+
+The app catalog contains 1,745 keys and the shared package contains 139 keys.
+The permission and Intents catalogs retain their four and five keys. All 1,893
+keys have nonempty units in all ten supported languages.

@@ -1,16 +1,17 @@
-import {useState,type ComponentRef,type PropsWithChildren} from 'react';
+import {useLayoutEffect,useState,useSyncExternalStore,type ComponentRef,type PropsWithChildren} from 'react';
 import {AccessibilityInfo,Alert,Animated,AppState,PanResponder,Pressable,StyleSheet,Text,View} from 'react-native';
 import {act,fireEvent,render,screen} from '@testing-library/react-native';
 import {SudokuScreen} from '../review/SudokuScreen';
 import {GuardScreen} from '../review/screens';
 import {PrivacyScreen} from '../review/SettingsScreens';
-import {ReviewContext} from '../review/ReviewContext';
+import {LiveRenderBoundary,ReviewContext} from '../review/ReviewContext';
 import {AppearanceStore} from '../review/appearance-store';
 import {initialPreviewDraft} from '../review/preview-model';
 import {initialSession} from '../review/session';
 import {editCell,freshPuzzle,keypadColumnGeometry,newGame,referencePuzzle,type SudokuGame} from '../review/sudoku-model';
-import type {AppStore} from '../app/store';
-import type {AppCommand} from '../app/contract';
+import {AppStore} from '../app/store';
+import type {Spec} from '../specs/NativeLavaApp';
+import type {AppCommand,AppSnapshot} from '../app/contract';
 import {configurePresentation,localized} from '../app/presentation';
 import {foundation} from '../src/foundation';
 import {colors} from '../src/colors.ios';
@@ -18,13 +19,15 @@ import {colors} from '../src/colors.ios';
 const safeControlGreen=(colors.safeControlGreen as unknown as {dynamic:{light:string;dark:string}}).dynamic.light;
 import {REVEAL_EASING,REVEAL_EMOJI,REVEAL_FADE_MS,REVEAL_LINGER_MS} from '../review/sudoku-reveal';
 import * as sudokuModel from '../review/sudoku-model';
-import {SudokuBoard,SudokuKeypad,sudokuMetrics} from '../review/sudoku-scaffold';
+import {SudokuBoard,SudokuKeypad,SudokuRail,sudokuMetrics} from '../review/sudoku-scaffold';
 import {Symbol} from '../review/primitives';
 const mockNavigate=jest.fn(),mockGoBack=jest.fn(),mockSetOptions=jest.fn();
 const tool=(id:string)=>screen.getByTestId(id);
 const pressTool=(id:string)=>fireEvent.press(tool(id));
+// The shared reference board's clue count; assertions follow it rather than a literal.
+const referenceClueCount=referencePuzzle.givens.filter(Boolean).length;
 jest.mock('@react-navigation/native',()=>({usePreventRemove:jest.fn(),useNavigation:()=>({navigate:mockNavigate,goBack:mockGoBack,setOptions:mockSetOptions}),useScrollToTop:jest.fn(),useIsFocused:()=>true}));
-jest.mock('react-native-safe-area-context',()=>({SafeAreaProvider:require('react-native').View,SafeAreaView:require('react-native').View,
+jest.mock('react-native-safe-area-context',()=>({SafeAreaProvider:require('react-native').View,SafeAreaView:require('react-native').View,SafeAreaInsetsContext:require('react').createContext(null),
   useSafeAreaInsets:()=>{const {width,height}=require('react-native').useWindowDimensions();return width>height
     ?{top:0,bottom:21,left:59,right:59}:{top:59,bottom:34,left:0,right:0};},
   useSafeAreaFrame:()=>{const {width,height}=require('react-native').useWindowDimensions();return{x:0,y:0,width,height};}}));
@@ -34,7 +37,7 @@ jest.mock('../specs/LavaChoiceNativeComponent',()=>require('./native-choice-mock
 jest.mock('../specs/LavaTextFieldNativeComponent',()=>({__esModule:true,default:require('react-native').View}));
 jest.mock('../specs/NativeLavaReview',()=>({__esModule:true,default:{close:jest.fn(), getGuardAccents:()=>JSON.stringify({original:{light:'#BF4000',dark:'#FF8855'},aquamarine:{light:'#227B89',dark:'#6FD2DF'}})}}));
 
-function Provider({children,solved=false,initialGame,app}:PropsWithChildren<{solved?:boolean;initialGame?:SudokuGame;app?:AppStore}>){
+function Provider({children,solved=false,initialGame,app,live,followNativeGame=false}:PropsWithChildren<{solved?:boolean;initialGame?:SudokuGame;app?:AppStore;live?:AppSnapshot;followNativeGame?:boolean}>){
   const [session,setSession]=useState(()=>{
     const session=initialSession();
     if(initialGame)session.sudoku=initialGame;
@@ -47,9 +50,217 @@ function Provider({children,solved=false,initialGame,app}:PropsWithChildren<{sol
   });
   const [draft,setDraft]=useState(initialPreviewDraft);
   const [appearance]=useState(()=>new AppearanceStore({getSnapshot:async()=>({preference:'system',revision:0}),setPreference:async preference=>({preference,revision:1}),onSnapshot:()=>({remove(){}})}));
-  return <ReviewContext.Provider value={{app,session,setSession,draft,setDraft,savedDraft:draft,setSavedDraft:setDraft,appearance,look:'original',setLook(){}}}>{children}</ReviewContext.Provider>;
+  return <ReviewContext.Provider value={{app,live,session:followNativeGame?{...session,sudoku:live?.sudoku}:session,setSession,draft,setDraft,savedDraft:draft,setSavedDraft:setDraft,appearance,look:'original',setLook(){}}}>{children}</ReviewContext.Provider>;
 }
 beforeEach(()=>{jest.clearAllMocks();});
+// Production setters must be exercised against actual AppStore epoch changes,
+// rather than the small command-only preview mocks used by drawing tests.
+function authorizedSudoku(game:SudokuGame|undefined,keepProgress=true,followNativeGame=false,publishGeneration=false){
+  const previous=AppState.currentState,originalListener=AppState.addEventListener;
+  Object.defineProperty(AppState,'currentState',{configurable:true,value:'active'});
+  const listeners=new Set<(state:string)=>void>();
+  AppState.addEventListener=((_event:string,callback:(state:string)=>void)=>{
+    listeners.add(callback);return {remove:()=>listeners.delete(callback)};
+  }) as typeof AppState.addEventListener;
+  let current={schema:1,fullApp:true,revision:1,backgroundPrivacyCoverRequired:true,
+    security:{ownerRevision:'sudoku-owner',readRevision:1},
+    session:{...initialSession(),passcode:true,sudoku:game,logs:{...initialSession().logs,'Lava Guard Progress':keepProgress}},
+    draft:{blocked:[],allowed:[]},savedDraft:{blocked:[],allowed:[]}} as unknown as AppSnapshot;
+  let publish!:(value:string)=>void,nextGame:SudokuGame|undefined,generationWait:Promise<void>|undefined;
+  const native={getSnapshot:()=>new Promise<string>(()=>{}),
+    command:jest.fn(async(request:string)=>{let result:SudokuGame|null=null;if(JSON.parse(request).type==='sudoku.new'&&nextGame){result=nextGame;nextGame=undefined;await generationWait;current={...current,revision:current.revision+1,security:{...current.security,readRevision:(current.security.readRevision??0)+1},sudoku:keepProgress?result:undefined};if(publishGeneration)publish(JSON.stringify(current));}return JSON.stringify({snapshot:current,result});}),
+    onSnapshot:(callback:(value:string)=>void)=>{publish=callback;return {remove(){}};}} as unknown as Spec;
+  const app=new AppStore(native,current),disconnect=app.connect();
+  function Harness(){
+    const state=useSyncExternalStore(app.subscribe,app.getSnapshot);
+    const gate=useSyncExternalStore(app.subscribe,app.getPresentationHydration);
+    useLayoutEffect(()=>{if(state.snapshot)app.completePresentationLayout(gate.epoch);},[state.snapshot,gate.epoch]);
+    return <Provider app={app} live={state.snapshot??undefined} initialGame={game} followNativeGame={followNativeGame}><LiveRenderBoundary component={SudokuScreen}/></Provider>;
+  }
+  return {app,Harness,command:native.command as jest.Mock,next:(game:SudokuGame)=>{nextGame=game;},holdGeneration:()=>{let finish!:()=>void;generationWait=new Promise<void>(resolve=>{finish=resolve;});return finish;},
+    emit:(state:'active'|'inactive'|'background')=>act(()=>{
+      Object.defineProperty(AppState,'currentState',{configurable:true,value:state});
+      listeners.forEach(callback=>callback(state));
+    }),
+    restore:(game?:SudokuGame)=>act(()=>{current={...current,revision:current.revision+1,security:{...current.security,readRevision:(current.security.readRevision??0)+1},sudoku:game??current.sudoku};publish(JSON.stringify(current));}),
+    close:()=>{act(()=>disconnect());AppState.addEventListener=originalListener;Object.defineProperty(AppState,'currentState',{configurable:true,value:previous});},
+  };
+}
+const solvedWithoutGivens=()=>{
+  let game=newGame({...referencePuzzle,givens:Array<number>(81).fill(0)});
+  referencePuzzle.solution.forEach((digit,index)=>{game=editCell(game,index,digit);});return game;
+};
+const expectVisibleGame=(game:SudokuGame)=>{
+  expect(screen.getByTestId('sudoku-board')).toHaveProp('accessibilityElementsHidden',false);
+  for(let index=0;index<81;index++){
+    const prefix=`Row ${Math.floor(index/9)+1}, column ${index%9+1}: `;
+    const given=game.puzzle.givens[index],value=given||game.values[index];
+    expect(screen.getByTestId(`sudoku-cell-${index}`)).toHaveProp('accessibilityLabel',`${prefix}${given?`${given}, given`:value||'empty'}`);
+  }
+};
+
+test('real AppStore background erases an accessible solved selector and stable board release clears the new authorized epoch',async()=>{
+  const fixture=authorizedSudoku(solvedWithoutGivens());
+  const responder=jest.spyOn(PanResponder,'create');
+  const callbacks:Array<Parameters<ComponentRef<typeof View>['measure']>[0]>=[];
+  const measure=jest.spyOn(View.prototype,'measure').mockImplementation(callback=>callbacks.push(callback as Parameters<ComponentRef<typeof View>['measure']>[0]));
+  const view=render(<fixture.Harness/>);
+  try{
+    fireEvent(screen.getByTestId('sudoku-screen'),'layout',{nativeEvent:{layout:{x:0,y:0,width:390,height:844}}});
+    fireEvent.press(screen.getByTestId('sudoku-cell-2'));
+    expect(screen.getByTestId('sudoku-cell-2')).toHaveProp('accessibilityState',expect.objectContaining({selected:true}));
+    const staleNotes=screen.UNSAFE_getByType(SudokuRail).props.tools.find((item:{id:string})=>item.id==='sudoku-notes-toggle').onPress;
+    const epoch=fixture.app.getReadEpoch();fixture.emit('background');
+    expect(fixture.app.getSnapshot().snapshot).toBeNull();expect(fixture.app.getReadEpoch()).toBeGreaterThan(epoch);
+    expect(screen.getByTestId('sudoku-cell-2',{includeHiddenElements:true})).toHaveProp('accessibilityState',expect.objectContaining({selected:false}));
+    expect(screen.queryByTestId('sudoku-reveal-tile-2',{includeHiddenElements:true})).toBeNull();
+    fixture.emit('active');await act(async()=>fixture.restore());
+    act(()=>staleNotes());expect(tool('sudoku-notes-toggle')).toHaveProp('accessibilityState',expect.objectContaining({selected:false}));
+    pressTool('sudoku-notes-toggle');expect(tool('sudoku-notes-toggle')).toHaveProp('accessibilityState',expect.objectContaining({selected:true}));
+    const pan=responder.mock.calls[0]![0],gesture={} as Parameters<NonNullable<typeof pan.onPanResponderGrant>>[1];
+    const side=StyleSheet.flatten(screen.getByTestId('sudoku-board').props.style).width as number;
+    const at={nativeEvent:{pageX:101,pageY:201}} as Parameters<NonNullable<typeof pan.onPanResponderGrant>>[0];
+    act(()=>pan.onPanResponderGrant!(at,gesture));act(()=>callbacks.shift()!(0,0,side,side,100,200));
+    expect(screen.getByTestId('sudoku-cell-0')).toHaveProp('accessibilityState',expect.objectContaining({selected:true}));
+    act(()=>pan.onPanResponderRelease!(at,gesture));
+    expect(screen.getByTestId('sudoku-cell-0')).toHaveProp('accessibilityState',expect.objectContaining({selected:false}));
+    expect(responder).toHaveBeenCalledTimes(3);
+  }finally{view.unmount();fixture.close();responder.mockRestore();measure.mockRestore();}
+});
+
+test('unfinished initial Progress-off generation resumes under fresh real AppStore authority after background',async()=>{
+  const fixture=authorizedSudoku(undefined,false),finish=fixture.holdGeneration();
+  const stale=editCell(newGame(),0,6),fresh=newGame(freshPuzzle(referencePuzzle));fixture.next(stale);
+  const view=render(<fixture.Harness/>);
+  try{
+    fireEvent(screen.getByTestId('sudoku-screen'),'layout',{nativeEvent:{layout:{x:0,y:0,width:390,height:844}}});
+    await act(async()=>{});
+    expect(fixture.command.mock.calls.filter(([value])=>JSON.parse(value).type==='sudoku.new')).toHaveLength(1);
+    expect(screen.getByLabelText('Preparing puzzle')).toBeTruthy();
+    fixture.emit('background');fixture.emit('active');await act(async()=>fixture.restore());
+    expect(fixture.app.getSnapshot().snapshot!.sudoku).toBeUndefined();
+    fixture.next(fresh);await act(async()=>finish());
+    expect(fixture.command.mock.calls.filter(([value])=>JSON.parse(value).type==='sudoku.new')).toHaveLength(2);
+    expectVisibleGame(fresh);
+    expect(screen.queryByLabelText('Preparing puzzle')).toBeNull();
+    expect(fixture.app.getSnapshot().snapshot!.sudoku).toBeUndefined();
+  }finally{view.unmount();fixture.close();}
+});
+
+test('unfinished initial saved generation admits the restored native game without another New command',async()=>{
+  const fixture=authorizedSudoku(undefined,true,true),finish=fixture.holdGeneration();
+  const saved=newGame(freshPuzzle(referencePuzzle));fixture.next(saved);
+  const view=render(<fixture.Harness/>);
+  try{
+    fireEvent(screen.getByTestId('sudoku-screen'),'layout',{nativeEvent:{layout:{x:0,y:0,width:390,height:844}}});
+    await act(async()=>{});
+    expect(fixture.command.mock.calls.filter(([value])=>JSON.parse(value).type==='sudoku.new')).toHaveLength(1);
+    expect(screen.getByLabelText('Preparing puzzle')).toBeTruthy();
+    fixture.emit('background');fixture.emit('active');await act(async()=>fixture.restore(saved));
+    expectVisibleGame(saved);
+    expect(screen.queryByLabelText('Preparing puzzle')).toBeNull();
+    expect(fixture.command.mock.calls.filter(([value])=>JSON.parse(value).type==='sudoku.new')).toHaveLength(1);
+    await act(async()=>finish());
+    expectVisibleGame(saved);
+    expect(screen.queryByLabelText('Preparing puzzle')).toBeNull();
+    expect(fixture.command.mock.calls.filter(([value])=>JSON.parse(value).type==='sudoku.new')).toHaveLength(1);
+  }finally{view.unmount();fixture.close();}
+});
+
+test('resume waits for pending initial native generation and admits its independent saved-game publication',async()=>{
+  const fixture=authorizedSudoku(undefined,true,true,true),finish=fixture.holdGeneration();
+  const saved=newGame(freshPuzzle(referencePuzzle)),replacement=newGame(freshPuzzle(saved.puzzle));fixture.next(saved);
+  const view=render(<fixture.Harness/>);
+  try{
+    fireEvent(screen.getByTestId('sudoku-screen'),'layout',{nativeEvent:{layout:{x:0,y:0,width:390,height:844}}});
+    await act(async()=>{});
+    fixture.emit('background');fixture.emit('active');await act(async()=>fixture.restore());
+    expect(fixture.app.getSnapshot().snapshot!.sudoku).toBeUndefined();
+    expect(screen.getByLabelText('Preparing puzzle')).toBeTruthy();
+    // Native's first detached generation publishes after current authorization
+    // returns, before its old bridge command completes. A second queued New
+    // would consume this different puzzle and replace that usable saved game.
+    fixture.next(replacement);await act(async()=>finish());
+    expect(fixture.command.mock.calls.filter(([value])=>JSON.parse(value).type==='sudoku.new')).toHaveLength(1);
+    expect(fixture.app.getSnapshot().snapshot!.sudoku).toEqual(saved);
+    expectVisibleGame(saved);
+    expect(screen.queryByLabelText('Preparing puzzle')).toBeNull();
+  }finally{view.unmount();fixture.close();}
+});
+
+test.each([true,false])('accepted native generation clears selection and notes after a read epoch advances (saved progress %s)',async keepProgress=>{
+  const alert=jest.spyOn(Alert,'alert').mockImplementation(()=>{});
+  const fixture=authorizedSudoku(newGame(),keepProgress);
+  const view=render(<fixture.Harness/>);
+  try{
+    fireEvent(screen.getByTestId('sudoku-screen'),'layout',{nativeEvent:{layout:{x:0,y:0,width:390,height:844}}});
+    fireEvent.press(screen.getByTestId('sudoku-cell-0'));pressTool('sudoku-notes-toggle');
+    const staleReset=screen.UNSAFE_getByType(SudokuRail).props.tools.find((item:{id:string})=>item.id==='sudoku-reset').onPress;
+    const epoch=fixture.app.getReadEpoch();fixture.next(newGame(freshPuzzle(referencePuzzle)));
+    pressTool('sudoku-refresh');await act(async()=>alert.mock.lastCall![2]!.find(button=>button.text==='New puzzle')!.onPress!());
+    expect(fixture.app.getReadEpoch()).toBeGreaterThan(epoch);
+    expect(screen.getByTestId('sudoku-cell-0')).toHaveProp('accessibilityState',expect.objectContaining({selected:false}));
+    expect(tool('sudoku-notes-toggle')).toHaveProp('accessibilityState',expect.objectContaining({selected:false}));
+    expect(screen.queryByLabelText('Preparing puzzle')).toBeNull();
+    expect(fixture.app.getSnapshot().snapshot!.sudoku!==undefined).toBe(keepProgress);
+    alert.mockClear();act(()=>staleReset());expect(alert).not.toHaveBeenCalled();
+  }finally{view.unmount();fixture.close();alert.mockRestore();}
+});
+
+test('an interrupted native generation and an old Reset confirmation cannot clear the restored real AppStore visit',async()=>{
+  const alert=jest.spyOn(Alert,'alert').mockImplementation(()=>{});
+  const fixture=authorizedSudoku(newGame(),false),finish=fixture.holdGeneration();
+  const view=render(<fixture.Harness/>);
+  try{
+    fireEvent(screen.getByTestId('sudoku-screen'),'layout',{nativeEvent:{layout:{x:0,y:0,width:390,height:844}}});
+    fireEvent.press(screen.getByTestId('sudoku-cell-0'));pressTool('sudoku-notes-toggle');
+    pressTool('sudoku-reset');const staleReset=alert.mock.lastCall![2]!.find(button=>button.text==='Reset')!.onPress!;
+    fixture.next(newGame(freshPuzzle(referencePuzzle)));pressTool('sudoku-refresh');
+    await act(async()=>alert.mock.lastCall![2]!.find(button=>button.text==='New puzzle')!.onPress!());
+    fixture.emit('inactive');fixture.emit('active');await act(async()=>fixture.restore());
+    await act(async()=>finish());act(()=>staleReset());
+    expect(screen.getByTestId('sudoku-cell-0')).toHaveProp('accessibilityState',expect.objectContaining({selected:true}));
+    expect(tool('sudoku-notes-toggle')).toHaveProp('accessibilityState',expect.objectContaining({selected:true}));
+    expect(screen.getByTestId('sudoku-cell-0')).toHaveProp('accessibilityLabel','Row 1, column 1: empty');
+    expect(screen.queryByLabelText('Preparing puzzle')).toBeNull();
+  }finally{view.unmount();fixture.close();alert.mockRestore();}
+});
+
+test('a retained two-player rail completes its internal fade after a real AppStore epoch changes',async()=>{
+  const animation=mockRailFade();
+  const fixture=authorizedSudoku(newGame());
+  const dimensions=jest.spyOn(require('react-native'),'useWindowDimensions').mockReturnValue({width:844,height:390,scale:3,fontScale:1});
+  const view=render(<fixture.Harness/>);
+  try{
+    fireEvent(screen.getByTestId('sudoku-screen'),'layout',{nativeEvent:{layout:{x:0,y:0,width:844,height:390}}});
+    pressTool('sudoku-two-player');
+    const board=screen.getByTestId('sudoku-board');
+    expect(screen.getByTestId('sudoku-menu-rail-layer',{includeHiddenElements:true})).toBeTruthy();
+    fixture.emit('inactive');fixture.emit('active');await act(async()=>fixture.restore());
+    act(()=>jest.advanceTimersByTime(240));
+    expect(screen.getByTestId('sudoku-board')).toBe(board);
+    expect(screen.queryByTestId('sudoku-menu-rail-layer',{includeHiddenElements:true})).toBeNull();
+    expect(screen.getByTestId('sudoku-p2-rail-layer')).toBeTruthy();
+  }finally{view.unmount();fixture.close();animation.mockRestore();dimensions.mockRestore();jest.useRealTimers();}
+});
+
+test('real AppStore inactive portrait rotation retires two-player mode before the next landscape visit',async()=>{
+  const fixture=authorizedSudoku(newGame());
+  const dimensions=jest.spyOn(require('react-native'),'useWindowDimensions').mockReturnValue({width:844,height:390,scale:3,fontScale:1});
+  const view=render(<fixture.Harness/>);
+  try{
+    fireEvent(screen.getByTestId('sudoku-screen'),'layout',{nativeEvent:{layout:{x:0,y:0,width:844,height:390}}});
+    pressTool('sudoku-two-player');expect(screen.getByTestId('sudoku-p2-rail-layer')).toBeTruthy();
+    fixture.emit('inactive');dimensions.mockReturnValue({width:390,height:844,scale:3,fontScale:1});
+    view.rerender(<fixture.Harness/>);
+    dimensions.mockReturnValue({width:844,height:390,scale:3,fontScale:1});view.rerender(<fixture.Harness/>);
+    fixture.emit('active');await act(async()=>fixture.restore());
+    expect(screen.queryByTestId('sudoku-p2-rail-layer',{includeHiddenElements:true})).toBeNull();
+    expect(screen.getByTestId('sudoku-menu-rail-layer')).toBeTruthy();
+    expect(tool('sudoku-two-player')).toBeTruthy();
+  }finally{view.unmount();fixture.close();dimensions.mockRestore();}
+});
+
 test('rounded board clipping keeps all four corner cells editable in the same measured square',()=>{
   const puzzle={...referencePuzzle,givens:Array<number>(81).fill(0)};
   render(<Provider initialGame={newGame(puzzle)}><SudokuScreen/></Provider>);
@@ -65,8 +276,8 @@ test('rounded board clipping keeps all four corner cells editable in the same me
   expect(screen.getByTestId('sudoku-board')).toBe(board);
 });
 test.each([
-  ['de','Sudoku-Feld','40 von 81 Zellen ausgefüllt','Zeile 1, Spalte 1: leer','Zeile 1, Spalte 1: Notizen 1 3','Kandidat 1 in der ausgewählten Zelle umschalten'],
-  ['ja','数独ボード','81マス中40マス記入済み','1行、1列：空き','1行、1列：候補 1 3','選択したセルの候補1を切り替え'],
+  ['de','Sudoku-Feld',`${referenceClueCount} von 81 Zellen ausgefüllt`,'Zeile 1, Spalte 1: leer','Zeile 1, Spalte 1: Notizen 1 3','Kandidat 1 in der ausgewählten Zelle umschalten'],
+  ['ja','数独ボード',`81マス中${referenceClueCount}マス記入済み`,'1行、1列：空き','1行、1列：候補 1 3','選択したセルの候補1を切り替え'],
 ])('Sudoku VoiceOver uses native %s labels and integer formats', (locale,board,filled,empty,notes,hint)=>{
   configurePresentation({locale,textScales:null});
   try {
@@ -375,7 +586,7 @@ test('a pending native new game preserves board and cell identity until its numb
   expect(screen.getByTestId('sudoku-board')).toBe(board);
   expect(screen.getByTestId('sudoku-cell-0')).toBe(cell);
   expect(screen.queryByLabelText('Preparing puzzle')).toBeNull();
-  expect(screen.getByLabelText('Sudoku board')).toHaveAccessibilityValue({text:'40 of 81 cells filled'});
+  expect(screen.getByLabelText('Sudoku board')).toHaveAccessibilityValue({text:`${referenceClueCount} of 81 cells filled`});
   alert.mockRestore();
 });
 test('five quick mascot taps open Sudoku, idle pauses reset the sequence, and a hold opens customization',()=>{
@@ -426,8 +637,36 @@ test('reset and new puzzle require confirmation and cancel preserves the board',
   pressTool('sudoku-refresh');
   expect(alert.mock.lastCall![0]).toBe('New puzzle');
   act(()=>alert.mock.lastCall![2]!.find(button=>button.text==='New puzzle')!.onPress!());
-  expect(screen.getByLabelText('Sudoku board')).toHaveAccessibilityValue({text:'40 of 81 cells filled'});
+  expect(screen.getByLabelText('Sudoku board')).toHaveAccessibilityValue({text:`${referenceClueCount} of 81 cells filled`});
   alert.mockRestore();
+});
+test('a three-second hold on New puzzle applies challenge mode with a fresh below-thirty board',async()=>{
+  const announcement=jest.spyOn(AccessibilityInfo,'announceForAccessibility').mockImplementation(()=>{});
+  const alert=jest.spyOn(Alert,'alert').mockImplementation(()=>{});
+  const next=newGame({...referencePuzzle,givens:Array<number>(81).fill(0)});
+  const command=jest.fn((c:AppCommand)=>c.type==='sudoku.new'?Promise.resolve(next):Promise.resolve());
+  try {
+    render(<Provider initialGame={newGame()} app={{command} as unknown as AppStore}><SudokuScreen/></Provider>);
+    // The normal press still opens the confirmation; only the held gesture is hidden.
+    expect(command).not.toHaveBeenCalled();
+    fireEvent(tool('sudoku-refresh'),'longPress');
+    expect(alert).not.toHaveBeenCalled();
+    expect(command).toHaveBeenCalledWith({type:'sudoku.new',challenge:true});
+    expect(await screen.findByText('Challenge mode applied to this board',{includeHiddenElements:true})).toBeOnTheScreen();
+    expect(announcement).toHaveBeenCalledWith(localized('Challenge mode applied to this board'));
+  } finally {alert.mockRestore();announcement.mockRestore();}
+});
+test('a rejected challenge generation never claims the board was changed',async()=>{
+  const announcement=jest.spyOn(AccessibilityInfo,'announceForAccessibility').mockImplementation(()=>{});
+  const alert=jest.spyOn(Alert,'alert').mockImplementation(()=>{});
+  const command=jest.fn((c:AppCommand)=>c.type==='sudoku.new'?Promise.reject(new Error('Read access changed.')):Promise.resolve());
+  try {
+    render(<Provider initialGame={newGame()} app={{command} as unknown as AppStore}><SudokuScreen/></Provider>);
+    fireEvent(tool('sudoku-refresh'),'longPress');
+    await act(async()=>{});
+    expect(announcement).not.toHaveBeenCalledWith(localized('Challenge mode applied to this board'));
+    expect(screen.queryByText('Challenge mode applied to this board',{includeHiddenElements:true})).toBeNull();
+  } finally {alert.mockRestore();announcement.mockRestore();}
 });
 function ResumeHarness(){
   const [playing,setPlaying]=useState(true);

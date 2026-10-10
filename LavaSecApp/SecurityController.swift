@@ -30,8 +30,7 @@ struct SecurityPasscodeAuthenticationRequest: Identifiable {
     let id = UUID()
     let reason: String
     let surface: SecurityProtectedSurface?
-    /// Nil belongs to the distinct foreground App Unlock session.
-    let authenticationRevision: UInt64?
+    let authenticationRevision: SecurityLockSession.Ticket
 }
 
 struct SecurityPasscodeCredential: Codable, Equatable {
@@ -141,12 +140,11 @@ final class SecurityController: ObservableObject {
     private let keychainStore: SecurityPasscodeKeychainStore
     private let securityGateProjectionURL: URL?
     private var didFailGatePublication = false
-    private var isAppUnlockSessionAuthenticated = false
-    private var authenticatedSurfacesForCurrentTurn = Set<SecurityProtectedSurface>()
-    private var isCredentialAuthenticatedForCurrentTurn = false
+    private var lockSession = SecurityLockSession()
     private var passcodeContinuations = [UUID: [CheckedContinuation<Bool, Never>]]()
-    private var isAuthenticatingAppUnlock = false
-    private var isBiometricAuthenticationInProgress = false
+    private var appUnlockTask: (ticket: SecurityLockSession.Ticket, task: Task<Bool, Never>)?
+    private var biometricContexts = [UUID: (context: LAContext, ticket: SecurityLockSession.Ticket)]()
+    @Published private(set) var isBiometricAuthenticationInProgress = false
     private var biometricAuthenticationWaiterCount = 0
     @Published private var protectedDataPrivacyBoundaryActive = false
 
@@ -207,7 +205,7 @@ final class SecurityController: ObservableObject {
     }
 
     var shouldShowBiometricToggle: Bool {
-        biometricKind != .unavailable
+        biometricKind != .unavailable || isBiometricEnabled
     }
 
     var canEnableBiometrics: Bool {
@@ -236,10 +234,12 @@ final class SecurityController: ObservableObject {
 
     func protectedDataWillBecomeUnavailable() {
         protectedDataPrivacyBoundaryActive = true
+        lockForBackgroundIfNeeded()
     }
 
     func protectedDataDidBecomeAvailable() {
         protectedDataPrivacyBoundaryActive = false
+        if UIApplication.shared.applicationState == .active { sceneDidBecomeActive() }
     }
 
     private var faceIDUsageDescriptionIsPresent: Bool {
@@ -278,11 +278,11 @@ final class SecurityController: ObservableObject {
                 guard saveProtectedSurfaces() else { return }
             }
             if surface == .appUnlock {
-                isAppUnlockSessionAuthenticated = false
+                lockSession.setAppUnlockEnabled(false)
                 isAppUnlockBlockingUI = false
                 isAppUnlockPrivacyMaskVisible = false
             }
-            resetViewAuthenticationTurn()
+            resetViewAuthenticationTurn(preservingCredentials: true)
             return
         }
 
@@ -294,13 +294,13 @@ final class SecurityController: ObservableObject {
 
         guard saveProtectedSurfaces() else { return }
         if surface == .appUnlock {
-            isAppUnlockSessionAuthenticated = isProtected
+            lockSession.setAppUnlockEnabled(isProtected)
             isAppUnlockBlockingUI = false
             if !isProtected {
                 isAppUnlockPrivacyMaskVisible = false
             }
         }
-        resetViewAuthenticationTurn()
+        resetViewAuthenticationTurn(preservingCredentials: true)
     }
 
     func setPasscode(_ code: String) throws {
@@ -317,6 +317,7 @@ final class SecurityController: ObservableObject {
         }
         let published = refreshAuthenticationAvailability()
         guard !isAuthenticationUnavailable else { throw SecurityPasscodeKeychainStoreError.credentialUnavailable }
+        if published { lockSession.authorize(nil, ticket: lockSession.ticket()) }
         statusMessage = published ? nil : "Passcode saved. Reopen Lava to finish updating security settings.".lavaLocalized
     }
 
@@ -328,7 +329,7 @@ final class SecurityController: ObservableObject {
             return
         }
         isPasscodeEnabled = false
-        isAppUnlockSessionAuthenticated = false
+        lockSession.setAppUnlockEnabled(false)
         resetViewAuthenticationTurn()
         isAppUnlockBlockingUI = false
         isAppUnlockPrivacyMaskVisible = false
@@ -353,7 +354,7 @@ final class SecurityController: ObservableObject {
                 return
             }
 
-            let revision = viewAuthenticationRevision
+            let revision = lockSession.ticket()
             let accepted = await evaluateBiometrics(
                 reason: "Enable %@ for Lava".lavaLocalizedFormat(biometricToggleTitle.lavaLocalized), authenticationRevision: revision)
             guard isCurrentAuthenticationRevision(revision), !Task.isCancelled else { return }
@@ -367,7 +368,7 @@ final class SecurityController: ObservableObject {
         // The passcode still protects selected surfaces when biometric unlock is off.
         // Only confirmed passcode removal clears those choices.
         // pinned: SecuritySettingsSourceTests.testDisablingBiometricsKeepsPasscodeProtectedSurfacesAndAppLock
-        if isBiometricEnabled != isEnabled { resetViewAuthenticationTurn() }
+        if isBiometricEnabled != isEnabled { resetViewAuthenticationTurn(preservingCredentials: true) }
         isBiometricEnabled = isEnabled
         defaults.set(isEnabled, forKey: biometricEnabledDefaultsKeyName)
         statusMessage = nil
@@ -379,18 +380,25 @@ final class SecurityController: ObservableObject {
         guard !isAuthenticationUnavailable, !didFailGatePublication,
               !isAppUnlockBlockingUI, !isAppUnlockPrivacyMaskVisible else { return false }
         guard isPasscodeEnabled, protectedSurfaces.contains(surface) else { return true }
-        return surface == .appUnlock ? isAppUnlockSessionAuthenticated
-            : authenticatedSurfacesForCurrentTurn.contains(surface)
+        return surface == .appUnlock ? lockSession.appUnlocked
+            : lockSession.surfaces.contains(surface)
     }
 
     func requireAuthentication(for surface: SecurityProtectedSurface, reason: String) async -> Bool {
         guard !isAuthenticationUnavailable else { return false }
+        if isAppUnlockBlockingUI {
+            // Readers can join the existing unlock, but cannot start another
+            // automatic prompt after the user has cancelled it.
+            guard appUnlockTask != nil else { return false }
+            await authenticateAppUnlockIfNeeded()
+            guard !isAppUnlockBlockingUI else { return false }
+        }
         guard isPasscodeEnabled, protectedSurfaces.contains(surface) else {
             return true
         }
 
-        if surface == .appUnlock && isAppUnlockSessionAuthenticated { return true }
-        if authenticatedSurfacesForCurrentTurn.contains(surface) {
+        if surface == .appUnlock && lockSession.appUnlocked { return true }
+        if lockSession.surfaces.contains(surface) {
             return true
         }
 
@@ -408,11 +416,18 @@ final class SecurityController: ObservableObject {
 
     func requireCredentialAuthentication(reason: String) async -> Bool {
         guard !isAuthenticationUnavailable else { return false }
+        if isAppUnlockBlockingUI {
+            // Readers can join the existing unlock, but cannot start another
+            // automatic prompt after the user has cancelled it.
+            guard appUnlockTask != nil else { return false }
+            await authenticateAppUnlockIfNeeded()
+            guard !isAppUnlockBlockingUI else { return false }
+        }
         guard isPasscodeEnabled else {
             return true
         }
 
-        if isCredentialAuthenticatedForCurrentTurn {
+        if lockSession.credentialAuthorized {
             return true
         }
 
@@ -425,32 +440,17 @@ final class SecurityController: ObservableObject {
             return true
         }
 
-        return await requestPasscode(surface: nil, reason: reason,
-            authenticationRevision: viewAuthenticationRevision)
+        let revision = lockSession.ticket()
+        let accepted = await requestPasscode(surface: nil, reason: reason, authenticationRevision: revision)
+        return accepted && lockSession.authorize(nil, ticket: revision)
     }
 
-    func requireBiometricAuthentication(reason: String) async -> Bool {
+    /// Disabling a credential method needs fresh evidence, with the same passcode
+    /// fallback as unlocking. A temporary biometric lockout cannot trap the choice on.
+    func requireFreshCredentialAuthentication(reason: String) async -> Bool {
         guard !isAuthenticationUnavailable else { return false }
-        guard isPasscodeEnabled, isBiometricEnabled else {
-            return true
-        }
-
-        refreshBiometricKind()
-        guard canEnableBiometrics else {
-            statusMessage = "%@ is not available.".lavaLocalizedFormat(biometricToggleTitle.lavaLocalized)
-            return false
-        }
-
-        let revision = viewAuthenticationRevision
-        let didAuthenticate = await evaluateBiometrics(reason: reason, authenticationRevision: revision)
-        guard isCurrentAuthenticationRevision(revision), !Task.isCancelled else { return false }
-        if !didAuthenticate {
-            statusMessage = "%@ authentication failed".lavaLocalizedFormat(biometricToggleTitle.lavaLocalized)
-        } else {
-            statusMessage = nil
-        }
-
-        return didAuthenticate
+        guard isPasscodeEnabled else { return true }
+        return await authenticate(surface: nil, reason: reason)
     }
 
     func verifyPasscode(_ code: String) -> Bool {
@@ -463,11 +463,17 @@ final class SecurityController: ObservableObject {
 
     func completePasscodeAuthentication(requestID: UUID, code: String) -> Bool {
         guard let request = passcodeAuthenticationRequest, request.id == requestID,
-              isCurrentAuthenticationRevision(request.authenticationRevision), verifyPasscode(code) else {
+              isCurrentAuthenticationRevision(request.authenticationRevision), verifyPasscode(code),
+              lockSession.authorize(request.surface, ticket: request.authenticationRevision) else {
             return false
         }
 
-        markAuthenticated(surface: request.surface)
+        // Publish the accepted app grant and dismiss its prompt in one main-actor
+        // transaction; do not flash the locked state while awaiters resume.
+        if request.surface == .appUnlock {
+            isAppUnlockBlockingUI = false
+            isAppUnlockPrivacyMaskVisible = false
+        }
         statusMessage = nil
         passcodeAuthenticationRequest = nil
         let continuations = passcodeContinuations.removeValue(forKey: requestID) ?? []
@@ -487,78 +493,81 @@ final class SecurityController: ObservableObject {
     }
 
     func resetForegroundSession() {
-        isAppUnlockSessionAuthenticated = false
-        resetViewAuthenticationTurn()
+        lockSession.reset()
+        retireAuthentication()
     }
 
-    func resetViewAuthenticationTurn() {
-        // Clear caches before publishing. Combine's will-change delivery must never let a
-        // synchronous observer reuse the revoked grant while closing a retained page's gate.
-        authenticatedSurfacesForCurrentTurn = []
-        isCredentialAuthenticatedForCurrentTurn = false
-        viewAuthenticationRevision += 1
-        if let request = passcodeAuthenticationRequest, request.authenticationRevision != nil {
+    func resetViewAuthenticationTurn(preservingCredentials: Bool = false) {
+        lockSession.endViewTurn(preservingCredentials: preservingCredentials)
+        retireAuthentication()
+    }
+
+    private func retireAuthentication() {
+        // Revoke synchronously before Combine publishes the revision to readers.
+        viewAuthenticationRevision = lockSession.viewRevision
+        for item in biometricContexts.values where !isCurrentAuthenticationRevision(item.ticket) { item.context.invalidate() }
+        if let request = passcodeAuthenticationRequest,
+           !isCurrentAuthenticationRevision(request.authenticationRevision) {
             cancelPasscodeAuthentication(requestID: request.id)
         }
     }
 
     func lockForBackgroundIfNeeded() {
-        resetForegroundSession()
-        if isPasscodeEnabled, protectedSurfaces.contains(.appUnlock) {
+        lockSession.suspend()
+        retireAuthentication()
+        if isPasscodeEnabled, protectedSurfaces.contains(.appUnlock) || lockSession.hasSuspendedVisit {
             isAppUnlockBlockingUI = true
             isAppUnlockPrivacyMaskVisible = true
         }
     }
 
     func showAppUnlockPrivacyMaskIfNeeded() {
-        guard !isBiometricAuthenticationInProgress else {
-            return
-        }
-
-        guard isPasscodeEnabled, protectedSurfaces.contains(.appUnlock) else {
-            isAppUnlockPrivacyMaskVisible = false
-            return
-        }
-
-        isAppUnlockPrivacyMaskVisible = true
+        guard !isBiometricAuthenticationInProgress else { return }
+        isAppUnlockPrivacyMaskVisible = isPasscodeEnabled && protectedSurfaces.contains(.appUnlock)
     }
 
-    func hideAppUnlockPrivacyMask() {
+    /// Activation caused by Face ID is not a new unlock request. One automatic
+    /// attempt belongs to the real foreground session; a cancelled gate offers Retry.
+    func sceneDidBecomeActive() {
+        guard UIApplication.shared.applicationState == .active, protectedDataIsAvailableForPresentation else { return }
+        lockSession.enterForeground()
         isAppUnlockPrivacyMaskVisible = false
+        Task { await authenticateAppUnlockIfNeeded(automatically: true) }
     }
 
-    func authenticateAppUnlockIfNeeded() async {
+    func authenticateAppUnlockIfNeeded(automatically: Bool = false) async {
+        guard protectedDataIsAvailableForPresentation, lockSession.isForeground else { return }
+        if automatically, !lockSession.claimAutomaticUnlock() { return }
         refreshAuthenticationAvailability()
-        if isAuthenticationUnavailable {
-            isAppUnlockBlockingUI = protectedSurfaces.contains(.appUnlock)
+        if isAuthenticationUnavailable || didFailGatePublication {
+            isAppUnlockBlockingUI = true
             return
         }
-        guard isPasscodeEnabled, protectedSurfaces.contains(.appUnlock) else {
+        guard isPasscodeEnabled, protectedSurfaces.contains(.appUnlock) || lockSession.hasSuspendedVisit else {
             isAppUnlockBlockingUI = false
             isAppUnlockPrivacyMaskVisible = false
             return
         }
-
-        guard !isAppUnlockSessionAuthenticated else {
+        if lockSession.appUnlocked {
             isAppUnlockBlockingUI = false
             isAppUnlockPrivacyMaskVisible = false
             return
         }
-
-        guard !isAuthenticatingAppUnlock else {
-            return
-        }
-
-        isAuthenticatingAppUnlock = true
-        defer {
-            isAuthenticatingAppUnlock = false
-        }
-
+        let ticket = lockSession.ticket(appUnlock: true)
         isAppUnlockBlockingUI = true
-        if await authenticate(surface: .appUnlock, reason: "Unlock Lava") {
-            isAppUnlockBlockingUI = false
-            isAppUnlockPrivacyMaskVisible = false
+        isAppUnlockPrivacyMaskVisible = false
+        let task: Task<Bool, Never>
+        if let current = appUnlockTask, current.ticket == ticket { task = current.task }
+        else {
+            task = Task { await self.authenticate(surface: .appUnlock, reason: "Unlock Lava") }
+            appUnlockTask = (ticket, task)
         }
+        let accepted = await task.value
+        if appUnlockTask?.ticket == ticket { appUnlockTask = nil }
+        guard isCurrentAuthenticationRevision(ticket), accepted else { return }
+        Self.tracePresentation("appUnlock.unblocked")
+        isAppUnlockBlockingUI = false
+        isAppUnlockPrivacyMaskVisible = false
     }
 
     func refreshBiometricKind() {
@@ -576,37 +585,43 @@ final class SecurityController: ObservableObject {
             biometricKind = .unavailable
         }
 
-        guard canEvaluate else {
-            isBiometricEnabled = false
-            defaults.set(false, forKey: biometricEnabledDefaultsKeyName)
-            return
-        }
+        // Temporary lockout/unavailability selects passcode fallback. It must
+        // never rewrite the user's biometric preference.
     }
+
+    /// Instruments can capture these fixed stages on a QA-configured device.
+    /// No reason strings, settings, identities, query arguments or results are logged.
+    nonisolated static func tracePresentation(_ stage: StaticString) {
+        DNSEventLogSignpost.event(stage)
+        #if DEBUG && targetEnvironment(simulator)
+        guard ProcessInfo.processInfo.environment["LAVA_UI_TEST_TRACE_PRESENTATION"] == "1" else { return }
+        NSLog("LAVA_PRESENTATION %.3f %@", Date().timeIntervalSince1970 * 1000, String(describing: stage))
+        #endif
+    }
+
+    private let authenticationCoalescer = BiometricAuthenticationCoalescer()
 
     private func authenticate(surface: SecurityProtectedSurface?, reason: String) async -> Bool {
-        let revision: UInt64? = surface == .appUnlock ? nil : viewAuthenticationRevision
-        refreshBiometricKind()
-        guard faceIDUsageDescriptionIsPresent else {
-            isBiometricEnabled = false
-            defaults.set(false, forKey: biometricEnabledDefaultsKeyName)
+        let revision = lockSession.ticket(appUnlock: surface == .appUnlock)
+        let accepted = await authenticationCoalescer.authenticate(scope: revision.token,
+            isCurrent: { [weak self] in self?.isCurrentAuthenticationRevision(revision) == true }) { [self] in
+            refreshBiometricKind()
+            if isBiometricEnabled && faceIDUsageDescriptionIsPresent {
+                let accepted = await evaluateBiometrics(reason: reason, authenticationRevision: revision)
+                guard isCurrentAuthenticationRevision(revision), !Task.isCancelled else { return false }
+                if accepted { return true }
+            }
+            guard isCurrentAuthenticationRevision(revision), !Task.isCancelled else { return false }
             return await requestPasscode(surface: surface, reason: reason, authenticationRevision: revision)
         }
-
-        if isBiometricEnabled {
-            let accepted = await evaluateBiometrics(reason: reason, authenticationRevision: revision)
-            guard isCurrentAuthenticationRevision(revision), !Task.isCancelled else { return false }
-            if accepted {
-                markAuthenticated(surface: surface)
-                statusMessage = nil
-                return true
-            }
-        }
-        guard isCurrentAuthenticationRevision(revision), !Task.isCancelled else { return false }
-        return await requestPasscode(surface: surface, reason: reason, authenticationRevision: revision)
+        guard accepted, isCurrentAuthenticationRevision(revision), !Task.isCancelled else { return false }
+        guard lockSession.authorize(surface, ticket: revision) else { return false }
+        statusMessage = nil
+        return true
     }
 
-    private func isCurrentAuthenticationRevision(_ revision: UInt64?) -> Bool {
-        revision == nil || revision == viewAuthenticationRevision
+    private func isCurrentAuthenticationRevision(_ revision: SecurityLockSession.Ticket) -> Bool {
+        UIApplication.shared.applicationState != .background && protectedDataIsAvailableForPresentation && lockSession.contains(revision)
     }
 
     /// Coalesces concurrent biometric attempts so a simultaneous Guard-row + toggle tap on the
@@ -624,7 +639,7 @@ final class SecurityController: ObservableObject {
     // P2-4). Founder-accepted disposition, PR #355 — hence the reviewed mobsfscan
     // suppression below.
     // pinned: SecuritySettingsSourceTests.testBiometricGateStaysANonCryptographicUIBoundary
-    private func evaluateBiometrics(reason: String, authenticationRevision: UInt64?) async -> Bool {
+    private func evaluateBiometrics(reason: String, authenticationRevision: SecurityLockSession.Ticket) async -> Bool {
         let context = LAContext()
         var error: NSError?
         guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) else {
@@ -644,10 +659,14 @@ final class SecurityController: ObservableObject {
         // would otherwise raise two Face ID prompts. Mirrors `requestPasscode`'s continuation coalescing
         // (fan-out A; Codex/OCR review on lavasec-ios#69).
         // pinned: SecuritySettingsSourceTests.testBiometricEvaluationCoalescesConcurrentPrompts
-        return await biometricCoalescer.authenticate(scope: authenticationRevision,
+        return await biometricCoalescer.authenticate(scope: authenticationRevision.token,
             isCurrent: { [weak self] in self?.isCurrentAuthenticationRevision(authenticationRevision) == true }) {
-            await withCheckedContinuation { continuation in
+            let id = UUID()
+            self.biometricContexts[id] = (context, authenticationRevision)
+            defer { self.biometricContexts.removeValue(forKey: id) }
+            return await withCheckedContinuation { continuation in
                 context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason.lavaLocalized) { success, _ in // mobsf-ignore: ios_biometric_bool
+                    Self.tracePresentation(success ? "biometric.accepted" : "biometric.rejected")
                     continuation.resume(returning: success)
                 }
             }
@@ -655,7 +674,7 @@ final class SecurityController: ObservableObject {
     }
 
     private func requestPasscode(
-        surface: SecurityProtectedSurface?, reason: String, authenticationRevision: UInt64?
+        surface: SecurityProtectedSurface?, reason: String, authenticationRevision: SecurityLockSession.Ticket
     ) async -> Bool {
         // An App Unlock prompt and a view-turn prompt have different revocation owners.
         // Wait for the other owner to finish, then request our own evidence; never replace its
@@ -680,19 +699,6 @@ final class SecurityController: ObservableObject {
             passcodeAuthenticationRequest = request
         }
         return accepted && isCurrentAuthenticationRevision(authenticationRevision) && !Task.isCancelled
-    }
-
-    private func markAuthenticated(surface: SecurityProtectedSurface?) {
-        if let surface {
-            if surface == .appUnlock {
-                isAppUnlockSessionAuthenticated = true
-                return
-            }
-
-            authenticatedSurfacesForCurrentTurn.insert(surface)
-        } else {
-            isCredentialAuthenticatedForCurrentTurn = true
-        }
     }
 
     private func saveProtectedSurfaces() -> Bool {

@@ -103,10 +103,10 @@ struct BackupRestoreView: View {
                 Text("Current → Backup".lavaLocalized).font(.caption).foregroundStyle(.secondary)
                 reviewRow("Protection on this device", before: state(plan.previousConfiguration.protectionEnabled),
                           after: state(plan.configuration.protectionEnabled))
-                reviewRow("Primary DNS", before: plan.previousConfiguration.resolverPreset.displayName.lavaLocalized,
-                          after: plan.configuration.resolverPreset.displayName.lavaLocalized)
-                reviewRow("Fallback DNS", before: plan.previousConfiguration.fallbackResolverPreset.displayName.lavaLocalized,
-                          after: plan.configuration.fallbackResolverPreset.displayName.lavaLocalized)
+                reviewRow("Primary DNS", before: LavaStrings.resolverName(plan.previousConfiguration.resolverPreset, customName: plan.previousConfiguration.customResolverName),
+                          after: LavaStrings.resolverName(plan.configuration.resolverPreset, customName: plan.configuration.customResolverName))
+                reviewRow("Fallback DNS", before: LavaStrings.resolverName(plan.previousConfiguration.fallbackResolverPreset, customName: plan.previousConfiguration.fallbackCustomResolverName),
+                          after: LavaStrings.resolverName(plan.configuration.fallbackResolverPreset, customName: plan.configuration.fallbackCustomResolverName))
                 reviewRow("Fallback to Device DNS", before: state(plan.previousConfiguration.fallbackToDeviceDNS),
                           after: state(plan.configuration.fallbackToDeviceDNS))
                 reviewRow("Fallback to alternative DNS", before: state(plan.previousConfiguration.usesEncryptedDeviceDNSFallback),

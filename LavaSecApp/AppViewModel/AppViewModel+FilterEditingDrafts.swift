@@ -233,9 +233,15 @@ extension AppViewModel {
             }
         } catch let actionError as DomainHistoryDomainActionError {
             ProtectionHapticFeedback.play(.selectionRejected)
+            let limitReached: Bool
+            switch actionError {
+            case .blockedDomainLimitReached, .allowedDomainLimitReached: limitReached = true
+            default: limitReached = false
+            }
             return .rejected(
                 title: Self.domainHistoryDomainActionRejectionTitle(for: actionError),
-                message: actionError.localizedDescription
+                message: actionError.localizedDescription,
+                limitReached: limitReached
             )
         } catch {
             ProtectionHapticFeedback.play(.selectionRejected)
@@ -249,5 +255,34 @@ extension AppViewModel {
 
     func undoAllowedDomainDraftChange(_ domain: String) {
         filterDrafts.undoAllowedDomainDraftChange(domain)
+    }
+}
+
+// Only native typed capacity failures offer an upgrade. Safety, read and
+// authentication failures retain their normal recovery paths.
+extension AppViewModel {
+    var filterDraftUpgradeReason: String? {
+        guard !configuration.hasLavaSecurityPlus else { return nil }
+        switch filterDrafts.review.validationIssue {
+        case .ruleBudget: return "rules"
+        case .blockedDomainLimit: return "blockedDomains"
+        case .allowedExceptionLimit: return "allowedDomains"
+        case nil: return nil
+        }
+    }
+}
+
+extension AppViewModel {
+    var filterPreparationUpgradeReason: String? {
+        guard !configuration.hasLavaSecurityPlus else { return nil }
+        // A switch owns its recovery; a preserved edit draft belongs to another action.
+        if let id = pendingSwitchFilterID {
+            return library.filter(id: id) != nil && isFilterFrozen(id) ? "frozenFilter" : nil
+        }
+        return filterDraftUpgradeReason
+    }
+    var filterPreparationCanResumeAfterUpgrade: Bool {
+        guard configuration.hasLavaSecurityPlus, let id = pendingSwitchFilterID else { return false }
+        return library.filter(id: id) != nil && !isFilterFrozen(id)
     }
 }

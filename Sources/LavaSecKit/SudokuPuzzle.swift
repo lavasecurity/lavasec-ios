@@ -140,12 +140,15 @@ public struct SudokuPuzzle: Codable, Equatable, Sendable {
 
     /// A deterministic generator. The same `seed` always produces the same puzzle, so tests and the
     /// fixed demo seed reproduce an exact board; a resumed game restores the stored arrays instead
-    /// of replaying a seed. Digging guarantees a unique solution: a cell is only removed when the
-    /// resulting puzzle still solves to exactly one board.
-    public static func generate(seed: UInt64) -> SudokuPuzzle {
+    /// of replaying a seed. The clue count is sampled per seed from the `SudokuGeneration`
+    /// distribution — or forced to the hidden challenge target when `challenge` is `true` — and
+    /// digging guarantees a unique solution: a cell is only removed when the resulting puzzle still
+    /// solves to exactly one board.
+    public static func generate(seed: UInt64, challenge: Bool = false) -> SudokuPuzzle {
         var rng = SplitMix64(seed: seed)
         let solution = generateFullSolution(using: &rng)
-        let givens = digHoles(from: solution, targetGivens: SudokuGeneration.targetGivenCount, using: &rng)
+        let target = challenge ? SudokuGeneration.challengeGivenCount : SudokuGeneration.targetGivenCount(using: &rng)
+        let givens = digHoles(from: solution, targetGivens: target, using: &rng)
         return SudokuPuzzle(givens: givens, solution: solution)
     }
 
@@ -159,12 +162,33 @@ public struct SudokuPuzzle: Codable, Equatable, Sendable {
 
 // MARK: - Generation
 
-/// Constants shaping the one supported difficulty band. Kept off the public `SudokuPuzzle` type so the
-/// difficulty vocabulary stays engine-internal — callers ask for *a* puzzle, not a difficulty level.
+/// Difficulty band and distribution for the greedy dig. Kept off the public `SudokuPuzzle` type so
+/// the difficulty vocabulary stays engine-internal — callers ask for *a* puzzle, not a level.
 private enum SudokuGeneration {
-    /// The target number of clue cells to leave after digging. ~40 lands in the comfortable-medium
-    /// range the product owner locked; never below the 17-clue theoretical minimum for a unique Sudoku.
-    static let targetGivenCount = 40
+    /// The lowest clue count the greedy dig aims for. 28 is the practical floor for random digging —
+    /// below it the dig plateaus and returns a higher count anyway — and far above the 17-clue
+    /// theoretical minimum for a unique Sudoku.
+    static let minTargetGivenCount = 28
+    /// The highest clue count the dig aims for (~the comfortable-medium end the product locked).
+    static let maxTargetGivenCount = 40
+    /// The clue count the hidden challenge mode digs to. Below 30 is the challenge contract; 28 is
+    /// the most aggressive target the greedy dig can reliably reach (it is also the band floor), so
+    /// a challenge board is the hardest uniquely-solvable board this generator produces.
+    static let challengeGivenCount = 28
+
+    /// Draws a per-seed target clue count from a TRIANGULAR distribution over
+    /// `[minTargetGivenCount, maxTargetGivenCount]` with the mode at the midpoint: mostly medium
+    /// puzzles, with the easier and harder ends progressively rarer. Sampling as the average of two
+    /// uniform draws is the standard sum-of-two-uniforms triangular (mode at the midpoint, tapering
+    /// linearly to each end). Deterministic from `rng`, so the same seed still reproduces an exact
+    /// board; the Android port reproduces the draws and the rounded arithmetic exactly.
+    static func targetGivenCount(using rng: inout SplitMix64) -> Int {
+        let lower = Double(minTargetGivenCount)
+        let upper = Double(maxTargetGivenCount)
+        let first = rng.nextUnitInterval()
+        let second = rng.nextUnitInterval()
+        return Int((lower + (upper - lower) * (first + second) / 2).rounded())
+    }
 }
 
 /// A small deterministic PRNG so `generate(seed:)` is reproducible across launches and platforms.
@@ -185,6 +209,13 @@ private struct SplitMix64: RandomNumberGenerator {
         z = (z ^ (z &>> 30)) &* 0xBF58476D1CE4E5B9
         z = (z ^ (z &>> 27)) &* 0x94D049BB133111EB
         return z ^ (z &>> 31)
+    }
+
+    /// A uniform `Double` in `[0, 1)` drawn from the top 53 bits of one `next()`, matching the
+    /// precision `Double.random(in:using:)` uses. Consumed only when sampling the difficulty target;
+    /// the Android port reproduces the same value.
+    mutating func nextUnitInterval() -> Double {
+        Double(next() >> 11) * (1.0 / 9_007_199_254_740_992.0)
     }
 }
 

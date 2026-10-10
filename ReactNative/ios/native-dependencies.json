@@ -11,6 +11,8 @@
     "RCTSwiftUI": "PBXAggregateTarget",
     "RCTSwiftUIWrapper": "PBXAggregateTarget",
     "RCTTypeSafety": "PBXAggregateTarget",
+    "RNSVG": "com.apple.product-type.library.static",
+    "RNSVG-RNSVGFilters": "com.apple.product-type.bundle",
     "RNScreens": "com.apple.product-type.library.static",
     "React": "PBXAggregateTarget",
     "React-Core": "PBXAggregateTarget",
@@ -174,7 +176,7 @@
   ],
   "scriptFiles": {
     "ios/Pods/Target Support Files/Pods-LavaSecUIReview/Pods-LavaSecUIReview-frameworks.sh": "40308bb2b77bf938bdf64028a6ad0c03c1ad47684c505075ef3aeed053010d53",
-    "ios/Pods/Target Support Files/Pods-LavaSecUIReview/Pods-LavaSecUIReview-resources.sh": "165af2a10aad042990eac57c0df2f27f6b74267b27bb91997c07ccce5177497b",
+    "ios/Pods/Target Support Files/Pods-LavaSecUIReview/Pods-LavaSecUIReview-resources.sh": "31b10a58506535786089b7960ecbd933fc98ffdcd75efb8acb00f6f3c9c58ac7",
     "ios/Pods/Target Support Files/React-Core-prebuilt/React-Core-prebuilt-xcframeworks.sh": "8a4e676e593a80e9200074eb2fab1fd286be154a238adeaa083aee67705dbae6",
     "ios/Pods/Target Support Files/ReactNativeDependencies/ReactNativeDependencies-xcframeworks.sh": "b2b1ba2bfd94de043ef1884abfadf9674419f84c647abc6afc4fd9293f5fbac4",
     "ios/Pods/Target Support Files/hermes-engine/hermes-engine-xcframeworks.sh": "e736a5641e823b1882a2030a6e7211bc0eebbc5d85338ea715db707091df6f4b",

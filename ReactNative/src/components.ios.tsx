@@ -1,7 +1,8 @@
 import {useHeldActionScrollLock} from './interaction-lock';
 import {localized} from '../app/presentation';
 import {Text} from '../app/presentation';
-import {ActivityIndicator, Pressable, StyleSheet, View, type ColorValue} from 'react-native';
+import {ActivityIndicator,Animated,Easing, Pressable, StyleSheet, View, type ColorValue} from 'react-native';
+import {useLayoutEffect,useRef,useState} from 'react';
 import type {LavaActionButtonProps, LavaCardProps, LavaTextProps, LavaIconButtonProps, LavaIconAction, LavaSelectionAccessoryProps} from './contracts';
 import Decoration from '../specs/LavaDecorationNativeComponent';
 import {colors, colorForScheme} from './colors.ios';
@@ -54,10 +55,26 @@ export function LavaCard({children, background, role = 'card', testID, borderCol
   </LavaSurface>;
 }
 
-export function LavaActionButton({title, role = 'primary', tone='affirmative', onPress, disabled = false, accessibilityHint, subtitle, icon, busy=false, onLongPress, accessibilityActions, onAccessibilityAction, testID,stablePill=false}: LavaActionButtonProps) {
+export function LavaActionButton({title, role = 'primary', tone='affirmative', onPress, disabled = false, accessibilityHint, subtitle, icon, busy=false, onLongPress, accessibilityActions, onAccessibilityAction, testID,stablePill=false,whiteOutline=false,outlineTransitionDuration=0,labelRole='actionLabel'}: LavaActionButtonProps) {
   const hold=useHeldActionScrollLock(!!onLongPress&&!disabled);
+  const fill=useRef(new Animated.Value(whiteOutline?0:1)).current;
+  const [outlineAnimating,setOutlineAnimating]=useState(false);
+  useLayoutEffect(()=>{
+    let current=true;const target=whiteOutline?0:1;
+    if(!outlineTransitionDuration){fill.setValue(target);setOutlineAnimating(false);return;}
+    setOutlineAnimating(true);
+    const animation=Animated.timing(fill,{toValue:target,duration:outlineTransitionDuration,easing:Easing.bezier(.42,0,.58,1),useNativeDriver:true});
+    animation.start(()=>{
+      if(!current)return;
+      // Completed or detached paint is static. Disabling removes the native
+      // layers and can cancel their animation; re-enabling must not reconnect
+      // opacity nodes whose JS value predates the current target.
+      fill.setValue(target);setOutlineAnimating(false);
+    });
+    return()=>{current=false;animation.stop();};
+  },[whiteOutline,outlineTransitionDuration,fill]);
   const scale=useTextScale('headline');
-  const foreground: ColorValue = disabled ? colors.secondaryText : role === 'primary' ? colors.actionForeground
+  const foreground: ColorValue = disabled ? colors.secondaryText : whiteOutline?'white':role === 'primary' ? colors.actionForeground
     : role === 'panel' ? colors.panelActionGreen : colors.primaryText;
   return <Pressable
     testID={testID}
@@ -72,18 +89,21 @@ export function LavaActionButton({title, role = 'primary', tone='affirmative', o
     onLongPress={onLongPress}
     {...hold}
     style={({pressed}) => [styles.button, stablePill&&{minHeight:Math.ceil(44*scale)+foundation.row.verticalInset*2,borderRadius:foundation.radius.circle,overflow:'hidden'}, {
-      backgroundColor: disabled ? colors.disabledSurface : role === 'primary' ? (tone==='quiet'?colors.quietControl:tone==='recovery'?colors.lavaOrangeSelectedFill:colors.safeControlGreen)
+      backgroundColor: disabled ? colors.disabledSurface : outlineAnimating||whiteOutline?'transparent':role === 'primary' ? (tone==='quiet'?colors.quietControl:tone==='recovery'?colors.lavaOrangeSelectedFill:colors.safeControlGreen)
         : role === 'panel' ? (pressed ? colors.panelActionPressedFill : colors.panelActionFill)
           : pressed ? colors.pressedSurface : colors.cardBackground,
     }]}
   >{({pressed}) => <>
+    {outlineAnimating&&!disabled&&<Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill,{borderRadius:foundation.radius.control,borderCurve:'continuous',backgroundColor:colors.safeControlGreen,opacity:fill}]}/>}
+    {outlineAnimating&&!disabled&&<Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill,{borderRadius:foundation.radius.control,borderCurve:'continuous',overflow:'hidden',borderColor:'white',borderWidth:1.5,opacity:fill.interpolate({inputRange:[0,1],outputRange:[1,0]})}]}/>}
+    {!outlineAnimating&&whiteOutline&&!disabled&&<View pointerEvents="none" style={[StyleSheet.absoluteFill,{borderRadius:foundation.radius.control,borderCurve:'continuous',overflow:'hidden',borderColor:'white',borderWidth:1.5}]}/>}
     {pressed && <View pointerEvents="none" style={[styles.pressOverlay, {
       backgroundColor: colors.pressedSurface, opacity: 0.15,
     }]} />}
-    <View style={styles.actionContent}>
-      {(busy||icon)&&<View style={styles.actionAccessory}>{busy?<ActivityIndicator color={foreground} accessible={false}/>:icon?<Decoration symbol={actionSymbols[icon]} tone={disabled?'secondary':role==='primary'?'white':'green'} fontPointSize={foundation.control.glyph} accessible={false} style={styles.actionAccessory}/>:null}</View>}
-      <Text accessible={false} allowFontScaling dynamicTypeRamp="headline"
-        style={[styles.actionLabel, {color: foreground, textAlign: 'center'}]}>{title}</Text>
+    <View style={[styles.actionContent,labelRole==='rowTitle'&&{gap:7}]}>
+      {(busy||icon)&&<View style={[styles.actionAccessory,labelRole==='rowTitle'&&{width:16,height:16}]}>{busy?<ActivityIndicator color={foreground} accessible={false}/>:icon?<Decoration symbol={actionSymbols[icon]} tone={disabled?'secondary':role==='primary'?'white':'green'} fontPointSize={labelRole==='rowTitle'?13:foundation.control.glyph} fontWeight={labelRole==='rowTitle'?'semibold':'regular'} accessible={false} style={[styles.actionAccessory,labelRole==='rowTitle'&&{width:16,height:16}]}/>:null}</View>}
+      <Text accessible={false} allowFontScaling dynamicTypeRamp={lavaTokens.typography[labelRole].dynamicTypeRamp}
+        style={[styles.actionLabel,{fontSize:lavaTokens.typography[labelRole].fontSize,fontWeight:lavaTokens.typography[labelRole].fontWeight,color: foreground, textAlign: 'center'}]}>{title}</Text>
     </View>
     {subtitle&&<Text accessible={false} allowFontScaling dynamicTypeRamp="footnote" style={{fontSize:foundation.type.caption.fontSize,color:foreground,textAlign:'center'}}>{subtitle}</Text>}
   </>}</Pressable>;
@@ -99,11 +119,11 @@ const iconPointSizes: Partial<Record<LavaIconAction,number>> = {
   add:lavaTokens.toolbar.plusIconPointSize,confirm:lavaTokens.toolbar.checkmarkIconPointSize,
   delete:lavaTokens.toolbar.wideIconPointSize,
 };
-export function LavaIconButton({title, icon, onPress, role='neutral', surface='filled', shape='circle', selected=false, prominent=false, disabled=false, item, testID}: LavaIconButtonProps) {
+export function LavaIconButton({title, icon, onPress, role='neutral', surface='filled', shape='circle', selected=false, prominent=false, disabled=false, item, onLongPress, longPressDelayMs, testID}: LavaIconButtonProps) {
   const colorScheme = useLavaColorScheme();
   const filled=(selected||prominent)&&!disabled;
   return <Pressable testID={testID} accessibilityRole="button" accessibilityLabel={localized(title)}
-    accessibilityValue={item?{text:item}:undefined} accessibilityState={{disabled,selected}} disabled={disabled} onPress={event=>{event?.stopPropagation();onPress();}}
+    accessibilityValue={item?{text:item}:undefined} accessibilityState={{disabled,selected}} disabled={disabled} onLongPress={disabled?undefined:onLongPress} delayLongPress={longPressDelayMs} onPress={event=>{event?.stopPropagation();onPress();}}
     style={({pressed})=>({width:foundation.control.target,height:foundation.control.target,borderRadius:shape==='rounded'?foundation.radius.control:foundation.radius.circle,alignItems:'center',justifyContent:'center',
       backgroundColor:surface==='plain'?'transparent':colorForScheme(filled?'safeControlGreen':pressed?'pressedSurface':'cardBackground',colorScheme),opacity:surface==='plain'&&pressed?0.55:1})}>
     <Decoration symbol={actionSymbols[icon]} colorScheme={colorScheme} tone={disabled?'tertiary':filled?(surface==='plain'?'green':'white'):role==='destructive'?'error':role==='accent'?'green':'primary'} fontPointSize={iconPointSizes[icon]??lavaTokens.toolbar.framedIconPointSize} fontWeight="semibold"

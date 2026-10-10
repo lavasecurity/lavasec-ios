@@ -5,7 +5,8 @@ import UIKit
 /// may take a view off-window without ending its route or SwiftUI state.
 @MainActor
 enum LavaNativeContainment {
-    static func update(_ child: UIViewController, in container: UIView, configure: (UIView) -> Void) {
+    static func update(_ child: UIViewController, in container: UIView,
+                       tracksContentScrollView: Bool = false, configure: (UIView) -> Void) {
         var responder = container.next
         var parent: UIViewController?
         while let current = responder {
@@ -39,12 +40,36 @@ enum LavaNativeContainment {
             child.view.frame = container.bounds
             configure(child.view)
         }
+        if tracksContentScrollView, let parent {
+            // SwiftUI's scroll view sits below its hosting view rather than as
+            // the RN screen's direct child. Give UIKit the content scroll view
+            // explicitly so the shared navigation bar can track its top edge.
+            child.view.layoutIfNeeded()
+            if let scrollView = firstScrollView(in: child.view), parent.contentScrollView(for: .top) !== scrollView {
+                parent.setContentScrollView(scrollView, for: .top)
+            }
+        }
     }
 
     static func remove(_ child: UIViewController) {
+        if let parent = child.parent, let view = child.viewIfLoaded,
+           let scrollView = parent.contentScrollView(for: .top), scrollView.isDescendant(of: view) {
+            parent.setContentScrollView(nil, for: .top)
+        }
         if child.parent != nil { child.willMove(toParent: nil) }
         child.viewIfLoaded?.removeFromSuperview()
         if child.parent != nil { child.removeFromParent() }
+    }
+
+    private static func firstScrollView(in view: UIView) -> UIScrollView? {
+        // These hosted pages expose an outer vertical ScrollView. Search outer
+        // content before nested editors, and never register a text input as it.
+        guard !(view is UITextView) else { return nil }
+        if let scrollView = view as? UIScrollView { return scrollView }
+        for subview in view.subviews {
+            if let scrollView = firstScrollView(in: subview) { return scrollView }
+        }
+        return nil
     }
 }
 

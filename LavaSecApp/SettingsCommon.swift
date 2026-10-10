@@ -147,6 +147,7 @@ struct LavaSettingsIntroduction: View {
                     .padding(LavaSpacing.lg)
             }
             if let action {
+                LavaCondensedDivider(leadingInset: 16)
                 Button(action: action.action) {
                     LavaNavigationCardLabel(badge: nil, badgeSize: LavaNavigationRowMetrics.glyphPointSize, rowSpacing: LavaSpacing.md,
                         title: action.title, summary: .none, accessory: actionAccessory)

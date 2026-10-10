@@ -251,7 +251,7 @@ struct ImportFiltersFlow: View {
                 Text((applyError ?? "").lavaLocalized)
             }
             .sheet(isPresented: $showingPaywall) {
-                LavaPlusUpgradeSheet()
+                LavaPlusUpgradeSheet(context: "fullImport")
             }
             .lavaConfirmationAlert { host in
                 host.alert(
@@ -295,6 +295,9 @@ struct ImportFiltersFlow: View {
             .lavaTier(.calm)
         }
         .interactiveDismissDisabled(stage.transitionID == "applying" || stage.transitionID == "completed")
+        .onChange(of: viewModel.configuration.hasLavaSecurityPlus) { _, enabled in
+            if enabled { showingPaywall = false }
+        }
         .onChange(of: completion.filterName, initial: true) { _, filterName in
             // A confirmed commit may finish after privacy teardown has already
             // recreated this view. Observe its owner instead of retaining drafts.
@@ -344,10 +347,12 @@ struct ImportFiltersFlow: View {
                         showingPaywall = true
                     }
                 },
-                onReplace: { go(to: .chooseReplace(config)) }
+                onReplace: { go(to: .chooseReplace(config)) },
+                onUpgrade: { showingPaywall = true }
             )
         case .chooseReplace(let config):
             ImportChooseReplaceTargetView(
+                onUpgrade: { showingPaywall = true },
                 onBack: { go(to: .confirm(config)) },
                 onReplace: { filter in
                     go(to: .reviewReplacement(original: config, applied: viewModel.importPlan(for: config).applied, target: filter))
@@ -1140,6 +1145,8 @@ private struct ImportPreviewView: View {
     /// Replace one of the user's existing filters with the imported setup.
     let onReplace: () -> Void
 
+    var onUpgrade: (() -> Void)? = nil
+
     private struct ContentItem: Identifiable {
         let id: String
         let title: String
@@ -1218,6 +1225,24 @@ private struct ImportPreviewView: View {
                         Text("Allowed exceptions include subdomains and can let blocked sites through. Review every entry.".lavaLocalized)
                             .lavaSupportingText()
                     }
+                    if !viewModel.configuration.hasLavaSecurityPlus,
+                       plan.dropped.contains(where: { [.requiresUpgrade, .exceedsLimit, .exceedsRuleBudget].contains($0.kind) }),
+                       let onUpgrade {
+                        Button(action: onUpgrade) {
+                            LavaOverviewBannerRow(systemImage: "plus.circle.fill", title: "Use Lava Plus for full import".lavaLocalized,
+                                tint: LavaStyle.safeGreen, background: LavaStyle.softGreen, allowsTitleWrapping: true)
+                        }
+                        .buttonStyle(.plain)
+                        ForEach(Array(plan.dropped.enumerated()), id: \.offset) { _, entry in
+                            if [.requiresUpgrade, .exceedsLimit, .exceedsRuleBudget].contains(entry.kind) {
+                                Button(action: onUpgrade) {
+                                    LavaFilterContentRow(title: droppedEntryTitle(entry), metadata: "Not imported on this device".lavaLocalized,
+                                        verbatimTitle: true)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
                     if plan.hasUnsupportedEntries {
                         unsupportedSection(for: plan)
                     }
@@ -1272,6 +1297,11 @@ private struct ImportPreviewView: View {
         let id: String
         let title: String
         let metadata: String
+    }
+
+    private func droppedEntryTitle(_ entry: ShareableFilterImportPlan.DroppedEntry) -> String {
+        guard entry.kind == .exceedsRuleBudget else { return entry.label }
+        return viewModel.blocklistName(for: entry.label)
     }
 
     private func localCount(_ id: String, custom: CustomBlocklistSource? = nil) -> String {
@@ -1411,6 +1441,7 @@ private struct ImportReplacementReviewView: View {
 /// the tunnel; any other filter is replaced library-only. A frozen (lapsed-Plus) filter is
 /// read-only and can't be a replace target.
 private struct ImportChooseReplaceTargetView: View {
+    var onUpgrade: (() -> Void)? = nil
     @EnvironmentObject private var viewModel: AppViewModel
     let onBack: () -> Void
     let onReplace: (Filter) -> Void
@@ -1433,7 +1464,7 @@ private struct ImportChooseReplaceTargetView: View {
                                 summary: summary(for: filter),
                                 isReplaceable: !viewModel.isFilterFrozen(filter.id)
                             ) {
-                                onReplace(filter)
+                                if viewModel.isFilterFrozen(filter.id) { onUpgrade?() } else { onReplace(filter) }
                             }
 
                             if filter.id != filters.last?.id {
@@ -1461,8 +1492,8 @@ private struct ImportChooseReplaceTargetView: View {
     }
 }
 
-/// One row in the import replace-target picker: name + summary, greyed and non-tappable when the
-/// filter is frozen (read-only).
+/// One row in the import replace-target picker: name + summary. Frozen rows keep
+/// their lock styling and remain tappable to open the contextual Lava Plus view.
 private struct ImportReplaceTargetRow: View {
     let name: String
     let summary: String
@@ -1470,7 +1501,7 @@ private struct ImportReplaceTargetRow: View {
     let action: () -> Void
 
     var body: some View {
-        LavaNavigationCardButton(isEnabled: isReplaceable, action: action) {
+        LavaNavigationCardButton(action: action) {
             LavaNavigationCardLabel(
                 badge: .systemImage("line.3.horizontal.decrease.circle", tint: isReplaceable ? LavaStyle.safeGreen : LavaStyle.secondaryText),
                 badgeSize: LavaToolbarMetrics.iconFrameSize,

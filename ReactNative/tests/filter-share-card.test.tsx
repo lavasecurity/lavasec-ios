@@ -10,6 +10,7 @@ afterEach(()=>{jest.useRealTimers();jest.restoreAllMocks();});
 
 test('the full QR has integral modules and four-module clearance even as localized rows consume height',()=>{
   expect(shareCardQrSide(37,882)).toBe(855);
+  expect(shareCardQrSide(37,1080)).toBe(945);
   expect(shareCardQrSide(37,730)).toBe(720);
   expect(shareCardQrSide(177,554)).toBe(0);
   expect(shareCardQrSide(37,NaN)).toBe(0);
@@ -23,6 +24,8 @@ test.each([1,1.5,2,3])('exports the same physical canvas at device density%s and
   expect(StyleSheet.flatten(surface.props.style)).toEqual(expect.objectContaining({width:1080/density,height:1350/density,backgroundColor:'#FFFFFF'}));
   expect(surface.props.payload).toBe(content.payload);
   expect(surface.props.ready).toBe(false);
+  expect(screen.getByTestId('share-card-heading',hidden)).toHaveStyle({paddingTop:48/density});
+  expect(screen.getByTestId('share-card-qr-field',hidden)).toHaveStyle({marginHorizontal:-99/density});
   expect(screen.getByText(localized('Shared by another person. Not reviewed by Lava Security.'),hidden)).toBeTruthy();
   expect(screen.getByText('1 custom list · 1 allowed site',hidden)).toBeTruthy();
   expect(screen.getByText('New? Install, finish setup, then scan again.',hidden).props.allowFontScaling).toBe(false);

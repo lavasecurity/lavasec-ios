@@ -1,3 +1,5 @@
+import {usePlusEntry} from './plus-entry';
+import {LavaPlusPage} from './SettingsScreens';
 import {Alert, localized, localizedFormat, localizedNumber} from '../app/presentation';
 import {useFilterRoute} from './filter-route';
 import {FilterShareCard,type ShareCardContent} from './FilterShareCard';
@@ -6,8 +8,9 @@ import {StoryStack,FilterOverview,FilterIdentity,FilterEmoji,CatalogSheet,Budget
 import {activeFilterSummary} from './connection-model';
 import {useAppAction} from '../app/actions';
 import {useAppQuery} from '../app/queries';
-import {mayRetainPresentationFrame} from '../app/read-cache';
+import {mayInteractWithPresentation,mayRetainPresentationFrame} from '../app/read-cache';
 import {usePresentationAuthority,usePresentationReadiness} from '../app/use-presentation-readiness';
+import {useRouteViewState} from '../app/use-route-view-state';
 import {useEffect, useMemo, useRef, useState} from 'react';
 import { AppState, Share, View, type ScrollViewInstance} from 'react-native';
 import {useIsFocused,useRoute, type RouteProp} from '@react-navigation/native';
@@ -45,6 +48,7 @@ export function FiltersScreen() {
 }
 
 export function LibraryScreen() {
+  const upgrade=usePlusEntry();
   const nav=useReviewNavigation();const {session,setSession,setDraft,app,live}=useReview(); const run=useAppAction();
   const [previewEditing,setEditing]=useState(false);const [previewStaged,setStaged]=useState<string[]>([]);
   const editing=live?.libraryEditing?.active??previewEditing; const staged=live?.libraryEditing?.deletions??previewStaged; const hasChanges=live?.libraryEditing?.hasChanges??staged.length>0;
@@ -60,7 +64,7 @@ export function LibraryScreen() {
     if(hasChanges){confirm();return;}
     if(filters.length>=live.limits.maxFilters){
       if(live.plus.enabled)Alert.alert('Maximum filters reached',localizedFormat('You can host up to %d filters. Delete one to add another.',live.limits.maxFilters),[{text:'OK',style:'cancel'}],{verbatimMessage:true});
-      else nav.navigate('Upgrade');
+      else upgrade('filters',async()=>{const id=await app.command<string|false>({type:'library.form',form:'create'});if(typeof id==='string'){finishEditing();return {name:'Filter',params:{id}};}});
       return;
     }
     void perform(async()=>{const id=await app.command<string|false>({type:'library.form',form:'create'});if(typeof id==='string'){finishEditing();nav.navigate('Filter',{id});}});
@@ -76,10 +80,10 @@ export function LibraryScreen() {
   };
   const choose=(filter:typeof filters[number])=>{
     if(!app){setSession({...session,filter:filter.name,blocklists:[...filter.lists],savedBlocklists:[...filter.lists],editing:false});setDraft(initialPreviewDraft());nav.navigate('Filter');return;}
-    if(editing){void perform(()=>app.command({type:'library.form',form:'rename',id:filter.id}));return;}
+    if(editing){if(filter.frozen){upgrade('frozenFilter',async()=>{await app.command({type:'library.form',form:'rename',id:filter.id});});return;}void perform(()=>app.command({type:'library.form',form:'rename',id:filter.id}));return;}
     if(filter.id===live?.session.activeFilterID){open(filter.id);return;}
-    void NativeReview.chooseFilterAction(filter.name,!filter.frozen,'shareable' in filter&&!!filter.shareable).then(action=>{
-      if(action==='switch')void perform(()=>app.command({type:'filter.switch',id:filter.id}));
+    void NativeReview.chooseFilterAction(filter.name,true,'shareable' in filter&&!!filter.shareable).then(action=>{
+      if(action==='switch'){if(filter.frozen)upgrade('frozenFilter');else void perform(()=>app.command({type:'filter.switch',id:filter.id}));}
       else if(action==='view')open(filter.id);
       else if(action==='share')share(filter);
     }).catch(error=>Alert.alert('Lava',error.message));
@@ -87,20 +91,21 @@ export function LibraryScreen() {
   return <Screen><SettingsIntro summary="Choose a filter to use, view or edit." />
     <Group footer={editing&&<View style={{padding:16}}><AddAction title="Add a filter" onPress={create}/></View>}>{filters.map(filter=>{
       const active=live?live.session.activeFilterID===filter.id:session.activeFilter===filter.name;
-      const deleting=staged.includes(filter.id);const disabled=busy||editing&&(filter.frozen||deleting);
+      const deleting=staged.includes(filter.id);const disabled=busy||editing&&deleting;
       return <ListRow testID={`filter.library.${filter.id}`} separateTrailing verbatimTitle key={filter.id} title={filter.name} metadata={filter.empty?'Blocks nothing':localizedFormat('%@ rules',filter.count)}
         leading={<FilterEmoji emoji={'emoji' in filter?filter.emoji:undefined}/>} pending={deleting} disabled={disabled} onPress={()=>choose(filter)}
-        trailing={<AccessorySlot>{editing&&!active&&!filter.frozen&&filters.length>1
-          ? <LavaIconButton title={deleting?'Undo':'Delete'} item={filter.name} icon={deleting?'undo':'remove'} role={deleting?'neutral':'destructive'} disabled={busy} onPress={()=>{if(app)run({type:'library.toggleDeletion',id:filter.id});else setStaged(current=>current.includes(filter.id)?current.filter(id=>id!==filter.id):[...current,filter.id]);}}/>
+        trailing={<AccessorySlot>{editing&&!active&&filters.length>1
+          ? <LavaIconButton title={deleting?'Undo':'Delete'} item={filter.name} icon={deleting?'undo':'remove'} role={deleting?'neutral':'destructive'} disabled={busy} onPress={()=>{if(filter.frozen){upgrade('frozenFilter');return;}if(app)run({type:'library.toggleDeletion',id:filter.id});else setStaged(current=>current.includes(filter.id)?current.filter(id=>id!==filter.id):[...current,filter.id]);}}/>
           : active?<Symbol name="play.circle.fill" size={20}/>:filter.frozen?<Symbol name="lock.fill" size={14} tone="secondary"/>:null}
         </AccessorySlot>}/>;
     })}</Group>
     {editing&&<LavaActionButton role="secondary" title="Restore default filters" disabled={busy||hasChanges} onPress={()=>Alert.alert('Restore default filters?',"This replaces your filters with the three defaults — Core, Balanced, and Extra — with Balanced in effect.",[{text:'Cancel',style:'cancel'},{text:'Restore',style:'destructive',onPress:()=>{if(app)void perform(async()=>{await app.command({type:'filter.restoreDefaults'});finishEditing();});else previewNotice();}}])}/>}
-    {!live?.plus?.enabled&&<QuietFooter note="Manage more than three filters with Lava Plus." title="Upgrade" onPress={()=>nav.navigate('Upgrade')}/>}
+    {!live?.plus?.enabled&&<QuietFooter note="Manage more than three filters with Lava Plus." title="Upgrade" onPress={()=>upgrade('filters')}/>}
   </Screen>;
 }
 
 export function FilterScreen() {
+  const upgrade=usePlusEntry();
   const nav=useReviewNavigation();const {session,setSession,draft,setDraft,savedDraft,app,live}=useReview(); const run=useAppAction();
   const {id,ready}=useFilterRoute(true);
   const saving=useRef(false);const [busy,setBusy]=useState(false);
@@ -116,12 +121,14 @@ export function FilterScreen() {
   const edit=()=>{
     if(editPending.current||!ready||app&&!id||session.editing)return;
     if(!app){setSession({...session,editing:true});return;}
+    if(live?.filters.find(filter=>filter.id===id)?.frozen){upgrade('frozenFilter',async()=>{await app.command({type:'filter.edit',id:id!});});return;}
     editPending.current=true;
     void app.command({type:'filter.edit',id:id!}).catch(error=>{if(error.message!=='Authentication cancelled.')Alert.alert('Lava',error.message);}).finally(()=>{editPending.current=false;});
   };
   const save=()=>{
     if(!app){if(!changed){setSession({...session,editing:false});return;}nav.navigate('Review',{id});return;}
     if(!ready||!id||saving.current)return;
+    if(live?.filterEditing?.upgradeReason){upgrade(live.filterEditing.upgradeReason);return;}
     saving.current=true;setBusy(true);
     void app.command<'review'|'saved'>({type:'filter.save',id}).then(result=>{if(result==='review')nav.navigate('Review',{id});}).catch(error=>{if(error.message!=='Authentication cancelled.')Alert.alert("Couldn't save",error.message);}).finally(()=>{saving.current=false;setBusy(false);});
   };
@@ -137,7 +144,7 @@ export function FilterScreen() {
   const share=()=>{if(!filter||app&&(!('shareable' in filter)||!filter.shareable))return;if(!app)setSession({...session,shareFilter:filter.name});nav.navigate('ShareDetail',{id:id??filter.name});};
   useToolbar({title:'',headerBackVisible:!editing,gestureEnabled:!editing,
     unstable_headerLeftItems:editing?()=>[toolbarButton('Cancel editing','xmark',cancel)]:undefined,
-    unstable_headerRightItems:()=>editing?[toolbarButton('Save','checkmark',save,busy||!!live?.filterEditing?.validation)]:[...(!live||id===live.session.activeFilterID?[toolbarButton('Refresh now','arrow.clockwise',()=>{if(live)run({type:'filter.refresh',id:id!});else previewNotice();},!app||!ready||live?.filterEditing?.refreshing)]:[]),toolbarButton('Share my filter','square.and.arrow.up',share,!ready||!filter||!!app&&(!('shareable' in filter)||!filter.shareable)),...(!live?.filters.find(f=>f.id===id)?.frozen?[toolbarButton('Edit','square.and.pencil',edit,!ready)]:[])],
+    unstable_headerRightItems:()=>editing?[toolbarButton('Save','checkmark',save,busy||!!live?.filterEditing?.validation&&!live?.filterEditing?.upgradeReason)]:[...(!live||id===live.session.activeFilterID?[toolbarButton('Refresh now','arrow.clockwise',()=>{if(live)run({type:'filter.refresh',id:id!});else previewNotice();},!app||!ready||live?.filterEditing?.refreshing)]:[]),toolbarButton('Share my filter','square.and.arrow.up',share,!ready||!filter||!!app&&(!('shareable' in filter)||!filter.shareable)),toolbarButton('Edit','square.and.pencil',edit,!ready)],
   },[session,draft,savedDraft,ready,id,filter,live?.filterEditing,busy],true);
   const remove=(decision:'blocked'|'allowed',domain:string)=>{if(app&&live)run({type:'filter.domain',id:id!,decision,domain,remove:true});else setDraft({...draft,[decision]:draft[decision].filter(d=>d!==domain)});};
   const changeButton=(name:string,undo:boolean,onPress:()=>void)=><LavaIconButton title={undo?'Undo':'Remove'} item={name} testID={`filter.edit.${name}`} icon={undo?'undo':'remove'} role={undo?'neutral':'destructive'} onPress={onPress}/>;
@@ -166,14 +173,20 @@ export function FilterScreen() {
 export function AddDomainScreen() {
   const {id,ready}=useFilterRoute();
   const nav=useReviewNavigation();const route=useRoute<RouteProp<ReviewRoutes,'AddDomain'>>();const decision=route.params.decision;
-  const {draft,setDraft,app,live}=useReview();const [text,setText]=useState('');const [error,setError]=useState<{title:string;message:string}|null>(null);const saving=useRef(false);const [busy,setBusy]=useState(false);
-  useToolbar({title:decision==='blocked'?'Add Blocked Domain':'Add Allowed Exception'},[decision]);
+  const {draft,setDraft,app,live}=useReview();const [text,setText]=useRouteViewState('');const [error,setError]=useState<{title:string;message:string}|null>(null);const saving=useRef(false);const [busy,setBusy]=useState(false);
+  const readEpoch=app?.getReadEpoch?.();const mounted=useRef(true);
+  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;};},[]);
+  const canEdit=()=>mounted.current&&ready&&mayInteractWithPresentation(app)&&app?.getReadEpoch?.()===readEpoch;
   const limit=live?(decision==='blocked'?live.limits.maxBlockedDomains:live.limits.maxAllowedDomains):25;
   const count=draft[decision].length;const atLimit=count>=limit;const freeAtLimit=atLimit&&!live?.plus.enabled;
+  // Temporary revocation cannot replace the native field with another page.
+  // Its UIKit buffer and the route's permitted draft belong to the same visit.
+  const upgradePage=useRef(freeAtLimit);if(ready)upgradePage.current=freeAtLimit;
+  useToolbar({title:upgradePage.current?'Lava Plus':decision==='blocked'?'Add Blocked Domain':'Add Allowed Exception'},[decision,upgradePage.current]);
   const usage=localizedFormat(decision==='blocked'?(freeAtLimit?'%d/%d blocked domains used - Upgrade or remove entries':atLimit?'%d/%d blocked domains used - Remove entries to continue':'%d/%d blocked domains used'):(freeAtLimit?'%d/%d exceptions used - Upgrade or remove entries':atLimit?'%d/%d exceptions used - Remove entries to continue':'%d/%d exceptions used'),count,limit);
   const add=async(raw:string)=>{
-    if(saving.current||!ready)return;
-    if(freeAtLimit){nav.navigate('Upgrade');return;}
+    if(saving.current||!canEdit())return;
+    if(freeAtLimit)return;
     if(atLimit||!raw.trim())return;
     saving.current=true;setBusy(true);setError(null);
     try{
@@ -182,19 +195,21 @@ export function AddDomainScreen() {
       nav.goBack();
     }catch(e){if((e as Error).message!=='Authentication cancelled.')setError({title:'Domain cannot be added',message:(e as Error).message});}finally{saving.current=false;setBusy(false);}
   };
-  if(!ready)return null;
-  return <Sheet>{decision==='allowed'&&<Info warning icon="exclamationmark.triangle.fill" title="Before you allow a site" description="A site you allow here always gets through, even if a blocklist would block it. Only add sites you fully trust." />}<View style={{gap:12}}><LavaCard><InputRow title="Domain"><DomainInput label={decision==='blocked'?'Domain to block':'Domain to allow'} placeholder={decision==='blocked'?"example.com":"trusted.example.com"} onChange={setText} onSubmit={raw=>void add(raw)} /></InputRow></LavaCard>
-    <Copy role="caption" center color={atLimit?colors.lavaOrangeText:colors.secondaryText}>{usage}</Copy>{error&&<Info warning title={error.title} description={error.message}/>}<LavaActionButton title={freeAtLimit?'Upgrade':decision==='blocked'?'Add Domain':'Add Exception'} disabled={busy||!freeAtLimit&&(atLimit||!text.trim())} onPress={()=>void add(text)} />
+  if(upgradePage.current)return <LavaPlusPage reason={decision==='blocked'?'blockedDomains':'allowedDomains'}/>;
+  return <Sheet>{decision==='allowed'&&<Info warning icon="exclamationmark.triangle.fill" title="Before you allow a site" description="A site you allow here always gets through, even if a blocklist would block it. Only add sites you fully trust." />}<View style={{gap:12,...(!ready?{opacity:0}:{})}} pointerEvents={ready?'auto':'none'} accessibilityElementsHidden={!ready} importantForAccessibility={ready?'auto':'no-hide-descendants'}><LavaCard><InputRow title="Domain"><DomainInput editable={canEdit()} label={decision==='blocked'?'Domain to block':'Domain to allow'} placeholder={decision==='blocked'?"example.com":"trusted.example.com"} onChange={value=>{if(canEdit())setText(value);}} onSubmit={raw=>void add(raw)} /></InputRow></LavaCard>
+    <Copy role="caption" center color={atLimit?colors.lavaOrangeText:colors.secondaryText}>{usage}</Copy>{error&&<Info warning title={error.title} description={error.message}/>}<LavaActionButton title={freeAtLimit?'Upgrade':decision==='blocked'?'Add Domain':'Add Exception'} disabled={!canEdit()||busy||!freeAtLimit&&(atLimit||!text.trim())} onPress={()=>void add(text)} />
   </View></Sheet>;
 }
 type CatalogSection = {title:string; isCustom?:boolean; sources:{id:string;name:string;licenseName:string;sourceURL:string;metadata?:string}[]};
 type CatalogResponse = {sections:CatalogSection[];count:number;budget:number;pending:number;exceeded:boolean;summary:string;fraction:number;indeterminate:boolean;atOrOverBudget:boolean};
 export function AddBlocklistScreen() {
+  const upgrade=usePlusEntry();
   const {id,ready}=useFilterRoute();
   const {session,setSession,app,live}=useReview(); const nav=useReviewNavigation(); const run=useAppAction();
-  const [selected,setSelected]=useState(session.blocklists);
+  const [selected,setSelected]=useRouteViewState(session.blocklists);
   const nativeSelection=useRef(session.blocklists);
   useEffect(()=>{
+    if(app&&(!live||!ready))return;
     const previous=nativeSelection.current;nativeSelection.current=session.blocklists;
     // Native custom-list additions select the resulting draft, as in the native
     // picker. Deleting a source only removes that ID from the staged selection.
@@ -203,7 +218,7 @@ export function AddBlocklistScreen() {
       const removed=previous.filter(source=>!session.blocklists.includes(source));
       if(removed.length)setSelected(current=>current.filter(source=>!removed.includes(source)));
     }
-  },[JSON.stringify(session.blocklists)]); const [search,setSearch]=useState(''); const [saving,setSaving]=useState(false);const savingRef=useRef(false);
+  },[app,!!live,ready,JSON.stringify(session.blocklists)]); const [search,setSearch]=useRouteViewState(''); const [saving,setSaving]=useState(false);const savingRef=useRef(false);
   const fixture=useMemo<CatalogSection[]>(()=>{try{return JSON.parse(NativeReview.getBlocklistCatalog());}catch{return [];}},[]);
   // Checkbox totals refresh asynchronously; keep the same filter's rows mounted
   // so selection cannot collapse the sheet or discard its scroll position.
@@ -222,27 +237,30 @@ export function AddBlocklistScreen() {
   const estimate=app?query.value?.count??0:selected.reduce((total,name)=>total+(catalogFixture[name]?.count??0),0);
   const budget=app?query.value?.budget??live?.limits.maxFilterRules??500000:500000;
   const exceeded=app?query.value?.exceeded??false:estimate>budget;
-  const freeOverLimit=exceeded&&!live?.plus.enabled;
+  // Retained catalog rows preserve editing, but only successful current totals
+  // can establish the budget or authorize the footer action after a read fails.
+  const totalsReady=!app||!!query.value&&!query.refreshing&&!query.error;
+  const freeOverLimit=totalsReady&&exceeded&&!live?.plus.enabled;
   const fraction=app?query.value?.fraction??0:Math.min(1,estimate/budget);
   const indeterminate=app?query.value?.indeterminate??true:false;
-  const summary=app?query.value?.summary??localized('Loading blocklists…'):localizedFormat('About %1$@ of %2$@ rules',`${localizedNumber(Math.round(estimate/1000))}K`,'500K');
+  const summary=app?query.error??query.value?.summary??localized('Loading blocklists…'):localizedFormat('About %1$@ of %2$@ rules',`${localizedNumber(Math.round(estimate/1000))}K`,'500K');
   const changed=[...selected].sort().join('|')!==[...session.blocklists].sort().join('|');
   const save=async()=>{
-    if(!ready||savingRef.current||!!app&&query.refreshing)return;
-    if(exceeded){if(freeOverLimit)nav.navigate('Upgrade');return;}
+    if(!ready||savingRef.current||!totalsReady)return;
+    if(exceeded){if(freeOverLimit)upgrade('rules');return;}
     savingRef.current=true;setSaving(true);
     try {if(app&&live)await app.command({type:'filter.lists',id:id!,ids:selected});else setSession({...session,blocklists:selected});nav.goBack();}
     catch(error){Alert.alert('Lava',(error as Error).message);}finally{savingRef.current=false;setSaving(false);}
   };
-  useToolbar({title:'Choose Blocklists',unstable_headerRightItems:()=>[toolbarButton('Bring your own list','plus',()=>{if(!ready)return;if(!app||!live){previewNotice();return;}if(!live.limits.allowsCustomBlocklists){nav.navigate('Upgrade');return;}void app.command<string>({type:'filter.customList',id:id!,ids:selected}).then(id=>nav.navigate('CustomEntry',{id,kind:'blocklist'})).catch(error=>Alert.alert('Lava',error.message));})]},[app,live,selected,ready,id]);
-  if(!ready)return null;
-  return <CatalogSheet sections={sections.map(section=>({title:section.title,items:section.sources}))}
+  useToolbar({title:'Choose Blocklists',unstable_headerRightItems:()=>[toolbarButton('Bring your own list','plus',()=>{if(!ready)return;if(!app||!live){previewNotice();return;}if(!live.limits.allowsCustomBlocklists){upgrade('customBlocklist',async()=>{const token=await app.command<string>({type:'filter.customList',id:id!,ids:selected});return {name:'CustomEntry',params:{id:token,kind:'blocklist'}};});return;}void app.command<string>({type:'filter.customList',id:id!,ids:selected}).then(id=>nav.navigate('CustomEntry',{id,kind:'blocklist'})).catch(error=>Alert.alert('Lava',error.message));})]},[app,live,selected,ready,id]);
+  return <CatalogSheet sections={sections.map(section=>({title:section.title,items:section.sources}))} categoryTitles={catalog.map(section=>section.title)}
     search={search} onSearch={setSearch} searchLabel="Search lists or categories"
-    footer={<View style={{gap:9}}><BudgetBar fraction={fraction} indeterminate={indeterminate} warning={exceeded||query.value?.atOrOverBudget}/><Copy verbatim role="caption" center color={exceeded?colors.lavaOrangeText:colors.secondaryText}>{summary}</Copy><LavaActionButton title={freeOverLimit?'Upgrade':saving?'Saving…':'Save Selection'} disabled={saving||!!app&&(!query.value||query.refreshing)||!freeOverLimit&&(!changed||exceeded)} onPress={()=>void save()} /></View>}
+    footer={<View style={{gap:9}}>{!query.error&&<BudgetBar fraction={fraction} indeterminate={indeterminate||!totalsReady} available={!app||!!query.value} warning={exceeded||query.value?.atOrOverBudget}/>}<Copy verbatim role="caption" center color={query.error||exceeded?colors.lavaOrangeText:colors.secondaryText}>{summary}</Copy><LavaActionButton title={freeOverLimit?'Upgrade':saving?'Saving…':'Save Selection'} disabled={saving||!totalsReady||!freeOverLimit&&(!changed||exceeded)} onPress={()=>void save()} /></View>}
     renderRow={(source,sectionTitle)=><ListRow separateTrailing verbatimTitle key={source.id} title={source.name} subtitle={source.licenseName} metadata={app?source.metadata:catalogFixture[source.name]?localizedFormat('%@ rules',localizedNumber(catalogFixture[source.name]!.count)):"Not downloaded"} metadataPrefix={app?undefined:catalogFixture[source.name]?.bucket} selected={selected.includes(app?source.id:source.name)} trailing={!!app&&!!live&&catalog.find(section=>section.title===sectionTitle)?.isCustom?<AccessorySlot><LavaIconButton title="Delete custom blocklist" icon="delete" role="destructive" item={source.name} onPress={()=>Alert.alert("Delete custom list?",source.name,[{text:"Cancel",style:"cancel"},{text:"Delete",style:"destructive",onPress:()=>{void app.command({type:"filter.deleteCustomList",id:id!,sourceID:source.id}).then(()=>setSelected(current=>current.filter(id=>id!==source.id))).catch(error=>Alert.alert("Lava",error.message));}}],{verbatimMessage:true})}/></AccessorySlot>:undefined} onPress={()=>setSelected(selected.includes(app?source.id:source.name)?selected.filter(id=>id!==(app?source.id:source.name)):[...selected,app?source.id:source.name])} />}
     empty={<Group><ListRow title={query.error??(app&&!query.value?'Loading blocklists…':search?'No blocklists found':'No blocklists available')} /></Group>} />;
 }
 export function ReviewScreen() {
+  const upgrade=usePlusEntry();
   const {id,ready}=useFilterRoute();
   const {draft,savedDraft,session,app,live}=useReview();const nav=useReviewNavigation(); const [validation,setValidation]=useState<{identity:string;review?:string;error?:string}>();const [busy,setBusy]=useState(false);
   const route=useRoute<RouteProp<ReviewRoutes,'Review'>>();const standaloneReview=route.params?.standaloneReview;
@@ -270,8 +288,7 @@ export function ReviewScreen() {
   const rows=[...diff.blockedAdded.map(title=>({title,kind:'Blocked domain added'})),...diff.blockedRemoved.map(title=>({title,kind:'Blocked domain removed'})),...diff.allowedAdded.map(title=>({title,kind:'Allowed domain added'})),...diff.allowedRemoved.map(title=>({title,kind:'Allowed domain removed'}))];
   const lists=[...session.blocklists.filter(x=>!session.savedBlocklists.includes(x)).map(title=>({title,kind:'Added'})),...session.savedBlocklists.filter(x=>!session.blocklists.includes(x)).map(title=>({title,kind:'Removed'}))];
   const count=rows.length+lists.length;
-  if(!ready)return null;
-  return <Sheet footer={<LavaActionButton title="Confirm changes" disabled={!app||!review||busy||live?.filterEditing?.reviewCanConfirm===false} onPress={apply} />}>
+  return <Sheet footer={live?.filterEditing?.upgradeReason?<LavaActionButton title="Upgrade" disabled={!ready} onPress={()=>upgrade(live.filterEditing!.upgradeReason! as import('./plus-intents').PlusReason)}/>:<LavaActionButton title="Confirm changes" disabled={!ready||!app||!review||busy||live?.filterEditing?.reviewCanConfirm===false} onPress={apply} />}>
     {(live?.filterEditing?.validation||error)&&<Info warning title="Review cannot continue" description={live?.filterEditing?.validation||error}/>}
     <Copy color={colors.secondaryText}>{localizedFormat('%@ will be saved locally.',localizedFormat(count===1?'%d change':'%d changes',count))}</Copy>
     {!!diff.allowedAdded.length&&<Info warning icon="exclamationmark.triangle.fill" title="Be extra careful" description="Allowed exceptions let a site through even when a blocklist would catch it." />}

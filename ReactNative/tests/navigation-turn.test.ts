@@ -1,4 +1,4 @@
-import {NavigationTurn, nativeRedirectAction} from '../app/navigation-turn';
+import {NavigationTurn, nativeRedirectAction,nativeRedirectMatches} from '../app/navigation-turn';
 import type {NavigationState} from '@react-navigation/native';
 const state=(tab:string,path:string[])=>({index:0,routes:[{name:tab,key:tab,state:{index:path.length-1,routes:path.map(key=>({name:key,key}))}}]});
 test('Settings selection retains its newly authorized grant and child pushes share it',()=>{
@@ -58,4 +58,12 @@ test('the Explore deep link pushes Explore above Guard with a normal Back destin
   ]} as NavigationState;
   expect(nativeRedirectAction(before,'GuardTab','Explore')).toEqual({type:'NAVIGATE',target:'tabs',payload:{name:'GuardTab',params:{state:{index:1,routes:[{name:'Guard'},{name:'Explore'}]}}}});
   expect(before.routes[1]?.state?.routes.map(route=>route.name)).toEqual(['Settings','Account']);
+});
+
+test.each([['SettingsTab','vpnChaining','VPNChaining'],['SettingsTab','phoneQA','DeviceQA'],['GuardTab','Explore','Explore'],['GuardTab','Guard','Guard']])('native redirect admission matches the committed normalized %s/%s destination', (tab,input,target)=>{
+  const root=tab==='SettingsTab'?'Settings':'Guard';
+  const active={index:0,routes:[{name:tab,state:{index:target===root?0:1,routes:[{name:root},...(target===root?[]:[{name:target}])]}}]};
+  expect(nativeRedirectMatches(active,tab,input)).toBe(true);
+  expect(nativeRedirectMatches(active,tab==='SettingsTab'?'GuardTab':'SettingsTab',input)).toBe(false);
+  expect(nativeRedirectMatches({index:0,routes:[{name:tab,state:{index:2,routes:[{name:root},{name:target},{name:'Different child'}]}}]},tab,input)).toBe(false);
 });

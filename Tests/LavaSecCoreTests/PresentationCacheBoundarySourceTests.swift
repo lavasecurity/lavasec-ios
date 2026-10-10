@@ -3,6 +3,57 @@ import LavaSecAppServices
 
 /// Cross-target wiring; grant, ciphertext and race behavior is executable in service tests.
 final class PresentationCacheBoundarySourceTests: XCTestCase {
+    func testOwnedBiometricPromptPublishesDisplayMetadataSynchronouslyWithoutGrantingReads() throws {
+        let controller = try readSource(.securityController)
+        XCTAssertTrue(controller.contains("@Published private(set) var isBiometricAuthenticationInProgress = false"))
+        let evaluation = try sourceBlock(in: controller, startingAt: "private func evaluateBiometrics(", endingBefore: "private func requestPasscode(")
+        let marksPrompt = try XCTUnwrap(evaluation.range(of: "isBiometricAuthenticationInProgress = true"))
+        let beginsSystemPrompt = try XCTUnwrap(evaluation.range(of: "context.evaluatePolicy("))
+        XCTAssertLessThan(marksPrompt.lowerBound, beginsSystemPrompt.lowerBound)
+        let bridge = try readSource(.reactNativeAppBridge)
+        let prompt = try sourceBlock(in: bridge, startingAt: "security.$isBiometricAuthenticationInProgress.removeDuplicates().sink", endingBefore: "model.account.objectWillChange.sink")
+        XCTAssertTrue(prompt.contains("MainActor.assumeIsolated"))
+        XCTAssertFalse(prompt.contains("Task {"), "The incoming @Published value must precede the system's inactive notification.")
+        let incoming = try XCTUnwrap(prompt.range(of: "self?.presentationAuthenticationInProgress = inProgress"))
+        let publication = try XCTUnwrap(prompt.range(of: "self?.publish()"))
+        XCTAssertLessThan(incoming.lowerBound, publication.lowerBound, "Compose the incoming value rather than @Published's old willSet property value.")
+        let continuity = try sourceBlock(in: bridge, startingAt: "private var authenticationInProgressForPresentation: Bool", endingBefore: "@objc func snapshot()")
+        XCTAssertTrue(continuity.contains("UIApplication.shared.applicationState != .background"))
+        XCTAssertTrue(continuity.contains("security.hasCurrentAuthorization(for: .appUnlock)"))
+        XCTAssertTrue(continuity.contains("security.passcodeAuthenticationRequest == nil"))
+        let snapshot = try sourceBlock(in: bridge, startingAt: "@objc func snapshot()", endingBefore: "@objc func command(")
+        XCTAssertEqual(snapshot.components(separatedBy: "\"authenticationInProgress\": authenticationInProgressForPresentation").count - 1, 2)
+        let queries = try readSource(.reactNativeAppQueries)
+        let authority = try sourceBlock(in: queries, startingAt: "func canReadPresentation(", endingBefore: "var presentationClearRevision:")
+        XCTAssertTrue(authority.contains("UIApplication.shared.applicationState == .active"))
+        XCTAssertTrue(authority.contains("security.hasCurrentAuthorization(for: surface)"))
+        XCTAssertFalse(authority.contains("authenticationInProgress"), "Display metadata must never authorize native reads.")
+    }
+
+    func testHardPrivacyBoundariesRetireAuthenticationDisplayAndPublishOnlyOpaqueOwnership() throws {
+        let bridge = try readSource(.reactNativeAppBridge)
+        let boundary = try sourceBlock(in: bridge, startingAt: "private func publishPrivacyBoundary()", endingBefore: "@objc func observe(")
+        XCTAssertTrue(boundary.contains("\"authenticationInProgress\": false"))
+        XCTAssertTrue(boundary.contains("\"presentationRevoked\": true"))
+        XCTAssertTrue(boundary.contains("\"security\": [\"ownerRevision\": presentationOwnerRevision.revision("))
+        XCTAssertFalse(boundary.contains("snapshot()"))
+        for notification in ["UIApplication.didEnterBackgroundNotification", "UIApplication.protectedDataWillBecomeUnavailableNotification"] {
+            let start = try XCTUnwrap(bridge.range(of: notification))
+            let tail = String(bridge[start.lowerBound...])
+            let end = try XCTUnwrap(tail.range(of: ".store(in: &subscriptions)"))
+            let owner = tail[..<end.lowerBound]
+            XCTAssertTrue(owner.contains("MainActor.assumeIsolated"))
+            XCTAssertTrue(owner.contains("presentationCache.invalidate()"))
+            XCTAssertTrue(owner.contains("publishPrivacyBoundary()"))
+            XCTAssertFalse(owner.contains("Task {"))
+        }
+        let blocked = try sourceBlock(in: bridge, startingAt: "guard canReadPresentation(.appUnlock) else", endingBefore: "let m = model, c = model.customization")
+        XCTAssertTrue(blocked.contains("\"presentationRevoked\": UIApplication.shared.applicationState == .background || !security.hasCurrentAuthorization(for: .appUnlock)"))
+        XCTAssertTrue(blocked.contains("\"security\": [\"ownerRevision\": presentationOwnerRevision.revision("))
+        XCTAssertFalse(blocked.contains("\"session\""))
+        XCTAssertFalse(blocked.contains("\"filters\""))
+    }
+
     func testNativeDisplayScopeUsesOpaqueOwnershipAndDestructiveSourceBoundaries() throws {
         let bridge = try readSource(.reactNativeAppBridge)
         XCTAssertTrue(bridge.contains("presentationOwnerRevision.revision(for: m.account.accountAuthState.connections.all.map { $0.session.userID })"))

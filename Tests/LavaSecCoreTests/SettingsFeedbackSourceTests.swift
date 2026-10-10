@@ -1064,10 +1064,12 @@ final class SettingsFeedbackSourceTests: XCTestCase {
         let tierBlock = try sourceBlock(
             in: source,
             startingAt: "private func resolverTier(",
-            endingBefore: "return rows.map"
+            endingBefore: "return rows.joined"
         )
-        XCTAssertTrue(tierBlock.contains("[preset.settingsBasePreset.displayName]"))
+        XCTAssertTrue(tierBlock.contains("dnsResolverDisplayName(preset.settingsBasePreset, customName: customName)"))
+        XCTAssertTrue(tierBlock.contains("rows.append(preset.transport.displayName.lavaLocalized)"))
         XCTAssertFalse(tierBlock.contains("[preset.displayName]"))
+        XCTAssertFalse(tierBlock.contains("rows.map"), "Provider and authored names must stay intact after composition.")
     }
 
     func testScreenContentUsesNativeRefreshableInsteadOfCustomPullRefresh() throws {

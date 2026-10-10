@@ -9,7 +9,9 @@ export type ConnectionStage = {
   title: string;
   shortTitle: string;
   symbol: string;
+  /** Display-ready copy or a verbatim identity; never look up this value again. */
   value: string;
+  /** Localized before composing; native provider metadata remains verbatim. */
   detail?: string;
   explanation: string;
   setupSummary: string;
@@ -55,9 +57,12 @@ export function connectionStages(live: AppSnapshot | undefined, session: Preview
   const saved=live?.connection;
   const selected=live?.dns?.providers?.find(provider=>provider.selected);
   const primary=saved?.dns.primary;
-  const dnsName=primary?.name ?? (session.deviceDNS ? 'Device DNS' : selected?.name ?? (live ? 'DNS settings' : session.provider));
+  // Native resolver names/details are already localized, and custom provider
+  // identities must stay verbatim. Translate only app-owned fallback labels
+  // before inserting them into a sentence or a composed configuration detail.
+  const dnsName=primary?.name ?? (session.deviceDNS ? localized('Device DNS') : selected?.name ?? (live ? localized('DNS settings') : session.provider));
   const stages: ConnectionStage[]=[
-    {...connectionParts.phone,id:'phone',shortTitle:'Device',value:'This device',
+    {...connectionParts.phone,id:'phone',shortTitle:'Device',value:localized('This device'),
       explanation:'An app asks for a website’s address before connecting.',setupSummary:localized('This device starts the request.')},
     {...connectionParts.filter,id:'filter',shortTitle:'Filter',value:filter.name,detail:filter.count,destination:'Filters',
       explanation:'Lava checks website names against your filter on this device.',
@@ -70,20 +75,20 @@ export function connectionStages(live: AppSnapshot | undefined, session: Preview
   if(saved?.vpn.eligible ?? !!live){
     const enabled=saved?.vpn.enabled;
     const fallback=saved?.vpn.fallbackEnabled;
-    const value=enabled ? 'Enabled' : enabled===false ? 'Disabled' : 'View setup';
-    const detail=fallback===true?'DNS fallback: Enabled':fallback===false?'DNS fallback: Disabled':'DNS fallback: unavailable';
+    const value=localized(enabled ? 'Enabled' : enabled===false ? 'Disabled' : 'View setup');
+    const detail=localized(fallback===true?'DNS fallback: Enabled':fallback===false?'DNS fallback: Disabled':'DNS fallback: unavailable');
     stages.push({...connectionParts.vpn,id:'vpn',shortTitle:enabled===false ? 'VPN off' : 'VPN',
       value,detail,
       muted:enabled!==true,destination:'VPNChaining',
       explanation:enabled ? 'Your VPN carries allowed DNS requests.' : enabled===false ? 'With VPN chaining off, allowed DNS requests go straight to DNS.' : 'VPN chaining can send allowed DNS requests through your own VPN.',
-      setupSummary:`${localized('VPN chaining')}: ${localized(value)} · ${localized(detail)}`});
+      setupSummary:`${localized('VPN chaining')}: ${value} · ${detail}`});
   }
   const fallback=saved?.dns.fallback;
   const fallbackDetail=saved?.dns.usesWireGuard
-    ? saved.vpn.fallbackEnabled===false?'Fallback: disabled':saved.vpn.fallbackEnabled===true
-      ? localizedFormat('Fallback: %@',[primary?.name,fallback?.name].filter(Boolean).join(', ')):'Fallback: unavailable'
+    ? saved.vpn.fallbackEnabled===false?localized('Fallback: disabled'):saved.vpn.fallbackEnabled===true
+      ? localizedFormat('Fallback: %@',[primary?.name,fallback?.name].filter(Boolean).join(', ')):localized('Fallback: unavailable')
     : saved ? fallback ? localizedFormat('Fallback: %@',fallback.name) : undefined
-      : session.fallback ? 'Fallback enabled' : undefined;
+      : session.fallback ? localized('Fallback enabled') : undefined;
   const profileState=live?.dnsPatch?.state;
   const dnsSummary=!live?.dnsPatch?.available
     ? 'Your primary DNS is %@. For more details, check DNS settings.'
@@ -92,7 +97,7 @@ export function connectionStages(live: AppSnapshot | undefined, session: Preview
       : profileState==='checking'||profileState==='error'
         ? 'Your primary DNS is %@. The DNS profile status is unavailable. For more details, check DNS settings.'
         : 'Your primary DNS is %@. The DNS profile is inactive. For more details, check DNS settings.';
-  stages.push({...connectionParts.dns,id:'dns',shortTitle:'DNS',value:saved?.dns.usesWireGuard?'WireGuard Config':dnsName,
+  stages.push({...connectionParts.dns,id:'dns',shortTitle:'DNS',value:saved?.dns.usesWireGuard?localized('WireGuard Config'):dnsName,
     detail:saved?.dns.usesWireGuard?fallbackDetail:[primary?.detail,primary?.transport,fallbackDetail].filter(Boolean).join(' · '),
     destination:'DNS',explanation:'DNS finds a website’s address.',setupSummary:localizedFormat(dnsSummary,dnsName)});
   return stages;

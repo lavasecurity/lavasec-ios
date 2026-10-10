@@ -124,7 +124,7 @@ struct DNSResolverSettingsView: View {
                             // transport-address summary as the value, so VoiceOver announces
                             // the provider identity first instead of a name+address run-on.
                             // Selection itself stays on LavaSelectableRow's .isSelected trait.
-                            .accessibilityLabel(preset.displayName.lavaLocalized)
+                            .accessibilityLabel(preset.displayName)
                             .accessibilityValue(metadata(for: preset).lavaLocalized)
 
                             LavaCondensedDivider(leadingInset: 16)
@@ -1106,7 +1106,7 @@ private struct ResolverPresetRowContent: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(title.lavaLocalized)
+            Text(verbatim: title)
                 .lavaRowTitleText()
                 .lineLimit(2)
                 .minimumScaleFactor(0.82)

@@ -19,7 +19,37 @@ extension AppViewModel {
     /// An event-driven read, shared by native and RN settings. Refresh after
     /// authorization/foreground/profile mutation, not from the five-second poll.
     func refreshDNSSettingsPresentation() {
+        dnsSettingsPresentationRevision &+= 1
+        dnsSettingsPresentationTask?.cancel()
+        dnsSettingsPresentationTask = nil
+        dnsSettingsPresentationNeedsRefresh = false
         dnsSettingsProfileStatus = chainedUpstreamSurfaceStatus
+    }
+
+    /// Navigation/activation refresh metadata without putting Keychain or file locks
+    /// on UIKit's critical path. Writes still use the synchronous validation above.
+    func requestDNSSettingsPresentationRefresh() {
+        guard dnsSettingsPresentationTask == nil else {
+            dnsSettingsPresentationNeedsRefresh = true
+            return
+        }
+        dnsSettingsPresentationNeedsRefresh = false
+        let revision = dnsSettingsPresentationRevision
+        let chaining = configuration.chainedUpstreamEnabled
+        let plus = configuration.hasLavaSecurityPlus
+        dnsSettingsPresentationTask = Task { [weak self] in
+            let status = await Task.detached(priority: .userInitiated) {
+                Self.readChainedUpstreamSurfaceStatus(chainingEnabled: chaining, hasLavaSecurityPlus: plus)
+            }.value
+            guard let self, !Task.isCancelled, self.dnsSettingsPresentationRevision == revision else { return }
+            self.dnsSettingsPresentationTask = nil
+            guard !self.dnsSettingsPresentationNeedsRefresh, self.configuration.chainedUpstreamEnabled == chaining,
+                  self.configuration.hasLavaSecurityPlus == plus else {
+                self.requestDNSSettingsPresentationRefresh()
+                return
+            }
+            self.dnsSettingsProfileStatus = status
+        }
     }
 
     var dnsSettingsPresentation: ChainedDNSSettingsPresentation {

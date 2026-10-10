@@ -1,6 +1,7 @@
 import {act, fireEvent, render, screen} from '@testing-library/react-native';
 import {ScrollView,StyleSheet,Text, TextInput, View,type ViewStyle} from 'react-native';
 import {useState} from 'react';
+import {SafeAreaInsetsContext} from 'react-native-safe-area-context';
 import {PresentationContext} from '../app/presentation';
 import {AccessorySlot,AdaptivePair,Control, DomainInput, Group, ListRow, StableVariants,Toggle} from '../review/scaffold';
 import {DisclosureRow,Row,RowAccessory,RowContent,Screen} from '../review/primitives';
@@ -9,7 +10,7 @@ import {SettingsControl,SettingsDisclosure,SettingsGuardPreview,SettingsIntro,Se
 import {LavaControlContent,LavaRowLabel,LavaToggleRow} from '../src';
 import {foundation} from '../src/foundation';
 
-jest.mock('react-native-safe-area-context',()=>({SafeAreaProvider:require('react-native').View,SafeAreaView:require('react-native').View}));
+jest.mock('react-native-safe-area-context',()=>({SafeAreaProvider:require('react-native').View,SafeAreaView:require('react-native').View,SafeAreaInsetsContext:require('react').createContext(null)}));
 jest.mock('@react-navigation/native',()=>({useNavigation:()=>({}),useIsFocused:()=>true}));
 jest.mock('../specs/LavaTextFieldNativeComponent',()=>({__esModule:true,default:require('react-native').View}));
 jest.mock('../specs/LavaDecorationNativeComponent',()=>({__esModule:true,default:require('react-native').View}));
@@ -31,6 +32,47 @@ test('responsive columns share one page scroll and preserve drafts across rotati
   // JS rerender. This journey checks that the same input keeps its draft.
   expect(screen.getByTestId('column.draft').props.value).toBe('Keep this draft');
   dimensions.mockRestore();
+});
+
+test('page safe edges inset content while retaining the full scroll viewport and editor on rotation',()=>{
+  function Draft(){const [value,setValue]=useState('');return <TextInput testID="safe-page.draft" value={value} onChangeText={setValue}/>;}
+  const content=(insets:{top:number;bottom:number;left:number;right:number},wide=true)=><SafeAreaInsetsContext.Provider value={insets}>
+    <Screen keyboard wide={wide}><Draft/></Screen>
+  </SafeAreaInsetsContext.Provider>;
+  render(content({top:0,bottom:21,left:59,right:44}));
+  const scroll=screen.getByTestId('screen.scroll');
+  const editor=screen.getByTestId('safe-page.draft');
+  const viewport=StyleSheet.flatten(scroll.props.style);
+  expect(viewport.marginLeft).toBeUndefined();
+  expect(viewport.marginRight).toBeUndefined();
+  expect(viewport.paddingLeft).toBeUndefined();
+  expect(viewport.paddingRight).toBeUndefined();
+  expect(scroll.props.contentInsetAdjustmentBehavior).toBe('automatic');
+  expect(scroll.props.automaticallyAdjustKeyboardInsets).toBe(true);
+  expect(scroll.props.contentInset).toBeUndefined();
+  expect(StyleSheet.flatten(scroll.props.style).marginTop).toBeUndefined();
+  expect(StyleSheet.flatten(scroll.props.style).marginBottom).toBeUndefined();
+  expect(StyleSheet.flatten(scroll.props.contentContainerStyle)).toMatchObject({width:'100%',maxWidth:foundation.layout.wideWidth+59+44,
+    paddingLeft:foundation.space.screenHorizontal+59,paddingRight:foundation.space.screenHorizontal+44});
+  expect((screen.toJSON() as {type:string}).type).toBe('RCTScrollView');
+  fireEvent.changeText(editor,'Keep the same native editor');
+  screen.rerender(content({top:0,bottom:21,left:59,right:44},false));
+  expect(StyleSheet.flatten(scroll.props.contentContainerStyle)).toMatchObject({width:'100%',maxWidth:foundation.layout.readingWidth+59+44,
+    paddingLeft:foundation.space.screenHorizontal+59,paddingRight:foundation.space.screenHorizontal+44});
+  screen.rerender(content({top:59,bottom:34,left:0,right:0}));
+  expect(screen.getByTestId('screen.scroll')).toBe(scroll);
+  expect(screen.getByTestId('safe-page.draft')).toBe(editor);
+  expect(editor.props.value).toBe('Keep the same native editor');
+  const portrait=StyleSheet.flatten(scroll.props.style);
+  expect(portrait.marginLeft).toBeUndefined();
+  expect(portrait.marginRight).toBeUndefined();
+  const portraitContent=StyleSheet.flatten(scroll.props.contentContainerStyle);
+  expect(portraitContent.maxWidth).toBe(foundation.layout.wideWidth);
+  expect(portraitContent.paddingHorizontal).toBe(foundation.space.screenHorizontal);
+  expect(portraitContent.paddingLeft).toBeUndefined();
+  expect(portraitContent.paddingRight).toBeUndefined();
+  expect(scroll.props.contentInsetAdjustmentBehavior).toBe('automatic');
+  expect(scroll.props.automaticallyAdjustKeyboardInsets).toBe(true);
 });
 
 test('task rows remain identifiable and tappable without promising a forward page',()=>{

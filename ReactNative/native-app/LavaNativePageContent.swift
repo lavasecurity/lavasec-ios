@@ -69,7 +69,7 @@ final class LavaNativePageContent: UIView {
     }
 
     @ViewBuilder private func nativePage(_ page: String) -> some View {
-        if page == "automation" || page == "vpnChaining" || page == "dnsPatch" || page == "customEntry" || page == "feedback" || page == "phoneQA" {
+        if page == "automation" || page == "vpnChaining" || page == "dnsPatch" || page == "customEntry" || page == "phoneQA" {
             let currentVisit = visit
             LavaSettingsPageContent(activity: activity, page: page,
                 onBack: { [weak self] in
@@ -106,7 +106,8 @@ final class LavaNativePageContent: UIView {
     override func didMoveToWindow() {super.didMoveToWindow(); updateContainment()}
     private func updateContainment() {
         guard let hosted else { return }
-        LavaNativeContainment.update(hosted, in: self) { view in
+        LavaNativeContainment.update(hosted, in: self,
+            tracksContentScrollView: ["automation", "vpnChaining", "dnsPatch", "customEntry"].contains(page)) { view in
             view.backgroundColor = UIColor(LavaStyle.groupedBackground)
             LavaNativeInteractionGate.setOpen(interactionAllowed, on: view)
         }
@@ -156,9 +157,6 @@ private struct LavaSettingsPageContent: View {
         if page == "automation" { AutoSwitchHowToContent() }
         if page == "dnsPatch" { LavaDNSPatchContent(onNavigate: onNavigate) }
         if page == "customEntry" { LavaPushedCustomEntryContent(onBack: onBack, onNavigate: onNavigate) }
-        if page == "feedback" {
-            NavigationStack { BugReportSettingsView(onDismissRequested: onBack, usesPageNavigation: true) }
-        }
         #if DEBUG || LAVA_QA_TOOLS
         if page == "phoneQA" {
             NavigationStack {
@@ -189,6 +187,7 @@ private struct LavaSettingsPageContent: View {
         // native flow host, while page links return through React's protected
         // navigation and exact contextual-return gate.
         pageContent
+            .environment(\.lavaNavigationBarIsOwnedByParent, ["automation", "vpnChaining", "dnsPatch", "customEntry"].contains(page))
             .allowsHitTesting(canInteract)
             .accessibilityHidden(!canInteract)
             .onChange(of: admission, initial: true) { _, value in

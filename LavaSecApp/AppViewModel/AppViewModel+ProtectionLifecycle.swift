@@ -602,7 +602,7 @@ extension AppViewModel {
             // the failure haptic + "couldn't establish" message, not the neutral turned-off pair). The
             // failure message wins over the force-stopped notice — it is the more relevant reason.
             vpnMessage = completionMessage
-                ?? (stoppedViaProfileRemoval ? Self.protectionForceStoppedMessage : nil)
+                ?? (stoppedViaProfileRemoval ? Self.protectionForceStoppedMessage.lavaLocalized : nil)
             vpnMessageIsError = completionMessageIsError
             awaitsProtectionOnHaptic = false
             ProtectionHapticFeedback.play(outcomeHaptic)

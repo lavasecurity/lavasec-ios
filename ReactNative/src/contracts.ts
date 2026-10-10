@@ -24,14 +24,20 @@ export interface LavaCardProps {
 }
 
 export interface LavaToggleRowProps {
-  /** Resolved localized text; the host owns locale/catalog selection. */
+  /** App copy key or resolved text; the host owns locale/catalog selection. */
   title: string;
+  /** A native-projected provider/profile identity must never be translated again. */
+  verbatimTitle?: boolean;
+  /** Standalone feedback controls retain the native headline title. */
+  titleRole?: 'rowTitle' | 'cardTitle';
   summary?: string;
   value: boolean;
   onValueChange: (value: boolean) => void | Promise<unknown>;
   /** Show a requested asynchronous value until it settles; default is controlled. */
   optimistic?: boolean;
   disabled?: boolean;
+  /** Temporarily block input without changing the switch or label appearance. */
+  pending?: boolean;
   accessibilityHint?: string;
   testID?: string;
 }
@@ -41,6 +47,10 @@ export interface LavaActionButtonProps {
   tone?: 'affirmative' | 'quiet' | 'recovery';
   /** A protection control reserves two lines at the current text scale. */
   stablePill?: boolean;
+  whiteOutline?: boolean;
+  /** Duration of the onboarding outline-to-fill material transition. */
+  outlineTransitionDuration?: number;
+  labelRole?: 'actionLabel' | 'rowTitle';
   title: string;
   role?: 'primary' | 'panel' | 'secondary';
   onPress: () => void;
@@ -75,6 +85,10 @@ export interface LavaIconButtonProps {
   busy?: boolean;
   /** Optional item identity, distinct from the localized action name. */
   item?: string;
+  /** Optional long-press gesture (e.g. the hidden Sudoku challenge); never announced. */
+  onLongPress?: () => void;
+  /** Delay before `onLongPress` fires; defaults to the platform long-press threshold. */
+  longPressDelayMs?: number;
   testID?: string;
 }
 
