@@ -1,7 +1,8 @@
+import {useWindowLayout,useWindowStyles,useScaffoldStyles} from '../src/window-layout';
 import {Fragment,useState,useEffect,useLayoutEffect,useRef,type PropsWithChildren,type ReactNode,type ComponentRef} from 'react';
 import {Animated,AppState,Image,Pressable,ScrollView,StyleSheet,View,useWindowDimensions,type AccessibilityActionEvent,type AccessibilityActionInfo,type LayoutRectangle,type GestureResponderEvent,type ScrollViewInstance} from 'react-native';
 import {localized} from '../app/presentation';
-import {useTextScale} from '../app/text-metrics';
+import {useTextScale,useAccessibilityTextScale} from '../app/text-metrics';
 import {colors,colorForScheme} from '../src/colors.ios';
 import {useLavaColorScheme} from '../src/appearance';
 import {foundation} from '../src/foundation';
@@ -28,24 +29,33 @@ const connectionStrokeWidth=1.5;
 // single surface, text hierarchy, connector axis and target slot serve Guard,
 // Settings and Explore while their arrangements differ by available space.
 export function StorySurface({children,tone='neutral',testID,footer}:PropsWithChildren<{tone?:'green'|'neutral';testID?:string;footer?:ReactNode}>){
+  const s=useScaffoldStyles(windowBase_s);
   return <View testID={testID} style={[s.surface,tone==='green'&&s.green]}><StoryInset>{children}</StoryInset>{footer}</View>;
 }
 // A panel paints its surface; only its illustration/text region is inset. A
 // navigation footer remains a sibling and supplies its own canonical row inset.
-export function StoryInset({children}:PropsWithChildren){return <View style={s.inset}>{children}</View>;}
+export function StoryInset({children}:PropsWithChildren){
+  const s=useScaffoldStyles(windowBase_s);return <View style={s.inset}>{children}</View>;}
 // A destination's content keeps its semantic text role; the trailing navigation
 // accessory is the same atom as a utility row, with one fixed accessory axis.
 // Discovery replaces the chevron in that slot without shifting the heading.
 export function StoryNavigationLine({children,testID,attention=false}:PropsWithChildren<{testID?:string;attention?:boolean}>){
+  const s=useScaffoldStyles(windowBase_s);
   return <View style={s.summaryHeading}><View style={s.flex}>{children}</View><RowAccessory intent="page" testID={testID}>{attention?<LavaDiscoveryDot testID={testID?`${testID}.new`:undefined}/>:undefined}</RowAccessory></View>;
 }
-export function StoryStack({children}:PropsWithChildren){return <View style={s.stack}>{children}</View>;}
+export function StoryStack({children}:PropsWithChildren){
+  const s=useScaffoldStyles(windowBase_s);return <View style={s.stack}>{children}</View>;}
 export function StoryColumns({primary,secondary}: {primary:ReactNode;secondary:ReactNode}){
+  const s=useScaffoldStyles(windowBase_s);
+  const {landscape}=useWindowLayout();
   const scale=useTextScale();
   // Native geometry can resize before RN delivers window dimensions after
-  // phone unlock. Keep both lanes mounted and let Yoga wrap on that first pass.
-  const column={flexBasis:(foundation.layout.compactThreshold-space.screenHorizontal)*scale};
-  return <View testID="story.columns" style={[s.stack,s.columns]}>
+  // phone unlock. A definite width with auto basis also clears Yoga’s cached
+  // vertical basis on committed rotation. Keep both lanes mounted; maxWidth
+  // lets a narrow native frame wrap them before JS sees the new dimensions.
+  const column=landscape?{width:(foundation.layout.compactThreshold-space.screenHorizontal)*scale,maxWidth:'100%' as const,flexBasis:'auto' as const}:
+    {width:'auto' as const,flexGrow:0,flexShrink:0,flexBasis:'auto' as const};
+  return <View testID="story.columns" style={[s.stack,s.columns,!landscape&&{flexDirection:'column',flexWrap:'nowrap',alignItems:'stretch'}]}>
     <View testID="story.column.primary" style={[s.stack,s.column,column]}>{primary}</View>
     <View testID="story.column.secondary" style={[s.stack,s.column,column]}>{secondary}</View>
   </View>;
@@ -58,11 +68,13 @@ export function ExplorePlayground({scene,transport,children,footer}:PropsWithChi
   </StoryStack>;
 }
 export function ExploreDescriptions({selected,descriptions}:{selected:number;descriptions:readonly {id:string;title:string;caption:string}[]}){
+  const s=useScaffoldStyles(windowBase_s);
   return <View testID="explore.detail.region"><StableVariants selectedKey={descriptions[selected]?.id??''} variants={descriptions.map((description,index)=>({key:description.id,
     content:<View style={s.stack}><Copy role="section">{description.title}</Copy><Copy testID={selected===index?`explore.demo.caption.${description.id}`:undefined} role="supporting" color={colors.secondaryText}>{description.caption}</Copy></View>,
   }))}/></View>;
 }
 export function DemoTransport({frame,total,playing,onPrevious,onPlay,onNext}:{frame:number;total:number;playing:boolean;onPrevious:()=>void;onPlay:()=>void;onNext:()=>void}) {
+  const s=useScaffoldStyles(windowBase_s);
   return <View testID="explore.transport"><SettingsControl>
     <View style={[s.centeredRow,s.flex,{gap:foundation.row.gap}]}>
       <LavaIconButton testID="explore.transport.play" title={playing?'Pause demo':'Resume demo'} icon={playing?'pause':'play'} onPress={onPlay}/>
@@ -79,7 +91,8 @@ export function ProtectionHero({ready=false,title,description,mascot,children,ac
   title:string;description:string;mascot:ReactNode;
   onAccessibilityAction:(event:AccessibilityActionEvent)=>void;accessibilityActions:readonly AccessibilityActionInfo[];
 }>){
-  const scale=useTextScale();
+  const s=useScaffoldStyles(windowBase_s);
+  const scale=useAccessibilityTextScale();
   const [actionFrame,setActionFrame]=useState<LayoutRectangle>();
   const reveal=useRef(new Animated.Value(ready?1:0)).current;
   useEffect(()=>{const animation=Animated.timing(reveal,{toValue:ready?1:0,duration:450,useNativeDriver:true});animation.start();return()=>animation.stop();},[ready,reveal]);
@@ -102,14 +115,16 @@ export function ProtectionHero({ready=false,title,description,mascot,children,ac
 export function GuardSummaries({today,filter,onActivity,onFilters}:{
   today:{value:string;emphasis?:string;allowed?:number;blocked?:number};filter:{name:string;emoji?:string;count?:string};onActivity:()=>void;onFilters:()=>void;
 }){
-  const {width}=useWindowDimensions();const scale=useTextScale();
+  const s=useScaffoldStyles(windowBase_s);
+  const {width}=useWindowLayout();const scale=useAccessibilityTextScale();
   const stacked=width<foundation.layout.compactThreshold||scale>1.25;
-  return <View style={[s.summaryPair,stacked&&s.summaryStacked]}>
+  return <View testID="guard.summaries" style={[s.summaryPair,stacked&&s.summaryStacked]}>
     <StorySummary stacked={stacked} title="Today" value={today.value} emphasis={today.emphasis} visual={today.allowed!==undefined&&today.blocked!==undefined?<ProportionBar allowed={today.allowed} blocked={today.blocked}/>:undefined} onPress={onActivity} testID="guard.today"/>
     <StorySummary stacked={stacked} title="Now filtering" value={`${filter.emoji??'🌿'} ${filter.name}`} metric={<Copy role="heading" verbatim><FilterEmoji emoji={filter.emoji} context="identity"/>{` ${filter.name}`}</Copy>} verbatim detail={filter.count} onPress={onFilters} testID="guard.filter"/>
   </View>;
 }
 function StorySummary({title,value,emphasis,detail,visual,metric,onPress,testID,verbatim=false,stacked}:{title:string;value:string;emphasis?:string;detail?:string;visual?:ReactNode;metric?:ReactNode;onPress:()=>void;testID:string;verbatim?:boolean;stacked:boolean}){
+  const s=useScaffoldStyles(windowBase_s);
   return <Pressable testID={testID} accessibilityRole="button" accessibilityLabel={[localized(title),verbatim?value:localized(value),detail].filter(Boolean).join(', ')}
     onPress={onPress} style={({pressed})=>[s.summary,!stacked&&s.summaryPart,pressed&&s.dim]}>
     <StoryNavigationLine testID={`${testID}.accessory`}><Copy role="caption" color={colors.secondaryText}>{title}</Copy></StoryNavigationLine>
@@ -129,6 +144,7 @@ export function FilterOverview({name,emoji,rules,counts,onOpen,disabled=false}:{
   emoji?:string;name:string;rules?:string;counts:readonly {label:string;value?:number}[];
   onOpen:()=>void;disabled?:boolean;
 }){
+  const s=useScaffoldStyles(windowBase_s);
   return <Pressable testID="row.Now filtering" accessibilityRole="button" accessibilityLabel={[localized('Now filtering'),name,rules,...counts.map(item=>`${localized(item.label)}, ${item.value??'—'}`)].filter(Boolean).join(', ')}
     accessibilityState={{disabled}} disabled={disabled} onPress={onOpen} style={({pressed})=>[s.surface,s.green,s.tileInset,pressed&&s.dim]}>
     <StoryNavigationLine testID="filters.current.accessory"><Copy role="caption" color={colors.secondaryText}>Now filtering</Copy></StoryNavigationLine>
@@ -140,6 +156,7 @@ export function FilterEmoji({emoji,context='list'}:{emoji?:string;context?:'list
   return <Copy role={context==='identity'?'identityEmoji':'heading'} verbatim>{emoji??'🌿'}</Copy>;
 }
 export function FilterIdentity({name,emoji,rules,status,icon,warning=false,inactive=false,onRename}:{name:string;emoji?:string;rules:string;status:string;icon:string;warning?:boolean;inactive?:boolean;onRename?:()=>void}) {
+  const s=useScaffoldStyles(windowBase_s);
   return <StorySurface><Pressable testID="filter.identity.rename" accessibilityRole={onRename?'button':undefined} accessible={!!onRename} accessibilityLabel={onRename?localized('Rename filter'):undefined} disabled={!onRename} onPress={onRename} style={s.centeredRow}>
     <FilterEmoji emoji={emoji} context="identity"/>
     <View style={s.flex}><Copy testID="filter.identity.name" role="heading" accessibilityRole={onRename?undefined:'header'} verbatim>{name}</Copy></View>
@@ -150,6 +167,7 @@ export function FilterIdentity({name,emoji,rules,status,icon,warning=false,inact
   </StorySurface>;
 }
 export function ExploreInvitation({onPress,attention=false}: {onPress:()=>void;attention?:boolean}){
+  const s=useScaffoldStyles(windowBase_s);
   return <Pressable testID="guard.explore" accessibilityRole="button" accessibilityLabel={localized('Explore')}
     accessibilityHint={attention?`${localized('New')}. ${localized('Learn more about how Lava works')}`:localized('Learn more about how Lava works')} onPress={onPress} style={({pressed})=>[s.surface,s.tileInset,s.invitationInset,pressed&&s.dim]}>
     <StoryNavigationLine testID="guard.explore.accessory" attention={attention}><Copy role="caption" color={colors.secondaryText}>Explore</Copy></StoryNavigationLine>
@@ -160,7 +178,7 @@ export function ExploreInvitation({onPress,attention=false}: {onPress:()=>void;a
   </Pressable>;
 }
 export function ConnectionPanel({stages,onSelect,onExplore}:{stages:readonly ConnectionStage[];onSelect:(stage:ConnectionStage)=>void;onExplore:()=>void}){
-  const {width,height}=useWindowDimensions();const scale=useTextScale();const expanded=width/scale>=foundation.layout.wideThreshold;
+  const {width,height,landscape}=useWindowLayout();const scale=useTextScale();const expanded=landscape&&width/scale>=foundation.layout.wideThreshold;
   const visible=expanded&&width>height?stages:stages.filter(stage=>stage.id!=='phone');
   return <StoryStack><Copy role="section" color={colors.secondaryText}>Your connection</Copy><Group tone="green">
     {visible.map(stage=>{
@@ -176,13 +194,16 @@ export function ConnectionPanel({stages,onSelect,onExplore}:{stages:readonly Con
 export function ConnectionPath({stages,onSelect,onInspect,expanded=false,selected,details=true,selectablePhone=false,attention,discoveryAttention,conceptual=false}: {
   stages:readonly ConnectionStage[];onSelect:(stage:ConnectionStage)=>void;onInspect?:(stage:ConnectionStage)=>void;expanded?:boolean;selected?:ConnectionPart;details?:boolean;selectablePhone?:boolean;attention?:readonly ConnectionPart[];discoveryAttention?:readonly ConnectionPart[];conceptual?:boolean;
 }){
-  const scale=useTextScale();const vertical=expanded||scale>1.3;
+  const s=useWindowStyles(windowBase_s);
+  const scale=useTextScale();const accessibilityScale=useAccessibilityTextScale();const vertical=expanded||accessibilityScale>1.3;
   const lock=usePageInspectionLock();
   const bounds=useRef<Partial<Record<ConnectionPart,LayoutRectangle>>>({});
   const controls=useRef<Partial<Record<ConnectionPart,LayoutRectangle>>>({});
   const path=useRef<ComponentRef<typeof View>>(null);
   const glyphs=useRef<Partial<Record<ConnectionPart,ComponentRef<typeof View>|null>>>({});
   const [centers,setCenters]=useState<Partial<Record<ConnectionPart,GlyphCenter>>>({});
+  const glyphCenter=13*useWindowLayout().scale;
+  const glyphRadius=22*useWindowLayout().scale;
   const active=connectionAttention(stages,attention);const aperture=connectionAperture(centers,active);
   const measureGlyphs=()=>{const parent=path.current;if(!parent)return;
     for(const stage of stages)glyphs.current[stage.id]?.measureLayout(parent,(x,y,width,height)=>{
@@ -254,8 +275,8 @@ export function ConnectionPath({stages,onSelect,onInspect,expanded=false,selecte
       onTouchStart={conceptual?event=>begin(stage,event):undefined} onControlLayout={rect=>{controls.current[stage.id]=rect;}} selected={!attention&&selected===stage.id}
       dimmed={dimmed}
       glyphRef={node=>{glyphs.current[stage.id]=node;}} onGlyphLayout={measureGlyphs}
-      reveal={attention?{enabled:true,x:aperture&&centers[stage.id]?aperture.x-centers[stage.id]!.x+13:13,
-        y:aperture&&centers[stage.id]?aperture.y-centers[stage.id]!.y+13:13,radius:aperture?.radius??22,
+      reveal={attention?{enabled:true,x:aperture&&centers[stage.id]?aperture.x-centers[stage.id]!.x+glyphCenter:glyphCenter,
+        y:aperture&&centers[stage.id]?aperture.y-centers[stage.id]!.y+glyphCenter:glyphCenter,radius:aperture?.radius??glyphRadius,
         visible:focus||(!stage.muted&&!!aperture)}:undefined}/>;
   };
   if(vertical)return <View ref={path} onLayout={measureGlyphs} {...gestures} testID="connection.path.vertical" style={s.pathVertical}>{stages.map((stage,index)=><View onLayout={event=>stageLayout(stage,event.nativeEvent.layout)} collapsable={false} key={stage.id} testID={`connection.stage.${stage.id}`} style={s.pathStep}>
@@ -269,12 +290,14 @@ export function ConnectionScene(props:Omit<Parameters<typeof ConnectionPath>[0],
   return <ConnectionPath {...props} expanded={false} details={false} selectablePhone conceptual/>;
 }
 function ConnectionStep({stage,expanded=false,onPress,onTouchStart,selected,focus=false,dimmed=false,details=true,interactive=true,conceptual=false,onControlLayout,onGlyphLayout,glyphRef,reveal,discoveryAttention=false}:{stage:ConnectionStage;expanded?:boolean;onPress:()=>void;onTouchStart?:(event:GestureResponderEvent)=>void;selected?:boolean;focus?:boolean;dimmed?:boolean;details?:boolean;interactive?:boolean;conceptual?:boolean;onControlLayout?:(layout:LayoutRectangle)=>void;onGlyphLayout?:(layout:LayoutRectangle)=>void;glyphRef?:(node:ComponentRef<typeof View>|null)=>void;reveal?:{enabled:boolean;x:number;y:number;radius:number;visible:boolean};discoveryAttention?:boolean}){
+  const s=useWindowStyles(windowBase_s);
   const selectionColor=colorForScheme('navigationForeground',useLavaColorScheme());
+  const windowScale=useWindowLayout().scale;
   const shortTitle=conceptual&&stage.id==='vpn'?'VPN':stage.shortTitle;
   const subdued=dimmed||(stage.muted&&!focus);
   const content=<><View ref={glyphRef} collapsable={false} testID={`connection.glyph.${stage.id}`} onLayout={onGlyphLayout?event=>onGlyphLayout(event.nativeEvent.layout):undefined} style={s.node}>
     <Decoration symbol={stage.symbol} fontWeight="regular" tone={subdued?'secondary':'green'} revealEnabled={!!reveal} revealVisible={reveal?.visible??true}
-      revealX={reveal?.x??13} revealY={reveal?.y??13} revealRadius={reveal?.radius??22} style={{width:26,height:26}} accessible={false} accessibilityElementsHidden/>
+      revealX={reveal?.x??13*windowScale} revealY={reveal?.y??13*windowScale} revealRadius={reveal?.radius??22*windowScale} style={{width:26*windowScale,height:26*windowScale}} accessible={false} accessibilityElementsHidden/>
     {discoveryAttention&&<View pointerEvents="none" testID={`connection.${stage.id}.discovery-dot`} style={s.nodeDiscovery}><LavaDiscoveryDot/></View>}
     </View>
     {expanded&&!conceptual?<View style={s.nodeDetails}><Copy role="caption" color={colors.secondaryText}>{stage.title}</Copy><Copy verbatim role="section">{stage.value}</Copy>{details&&stage.detail&&<Copy verbatim role="supporting" color={colors.secondaryText}>{stage.detail}</Copy>}</View>:<Copy role="caption" center={!expanded} color={subdued?colors.secondaryText:colors.primaryText}>{shortTitle}</Copy>}
@@ -289,6 +312,7 @@ export function StoryLink({title,onPress,testID,attention=false}:{title:string;o
   return <Row title={title} intent="page" onPress={onPress} testID={testID} attention={attention}/>;
 }
 export function CategoryLinks({titles,onSelect}:{titles:readonly string[];onSelect:(title:string)=>void}){
+  const s=useScaffoldStyles(windowBase_s);
   return <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{minHeight:foundation.control.target}} contentContainerStyle={s.categoryLinks}>{titles.map(title=><Pressable key={title} accessibilityRole="button" accessibilityLabel={localized(title)} onPress={()=>onSelect(title)} style={({pressed})=>[s.category,pressed&&s.dim]}><CatalogControlMaterial/><Copy role="supporting" weight="600">{title}</Copy></Pressable>)}</ScrollView>;
 }
 // Blocklist and DNS catalogs share the same sheet, category navigation, search,
@@ -306,7 +330,7 @@ export function CatalogSheet<T>({sections,categoryTitles=sections.map(section=>s
     // Ordinary selection updates and returning from a child retain their offset.
     scroll.current?.scrollTo({y:0,animated:false});
   },[search]);
-  return <Sheet scrollMode="list" scrollRef={scroll} headerMaterial={false} header={<View testID="catalog.controls" style={{gap:12}}>
+  return <Sheet showsVerticalScrollIndicator scrollMode="list" scrollRef={scroll} headerMaterial={false} header={<View testID="catalog.controls" style={{gap:12}}>
     <CategoryLinks titles={categoryTitles} onSelect={title=>{if(sections.some(section=>section.title===title))scroll.current?.scrollTo({y:positions.current[title]??0,animated:true});}}/>
     <Search surface="catalog" value={search} onChange={onSearch} label={searchLabel}/>
   </View>} footer={footer}>
@@ -318,6 +342,7 @@ export function CatalogSheet<T>({sections,categoryTitles=sections.map(section=>s
 }
 
 export function BudgetBar({fraction,indeterminate,warning,available=true}:{fraction:number;indeterminate:boolean;warning?:boolean;available?:boolean}){
+  const s=useScaffoldStyles(windowBase_s);
   const reduced=useReducedMotionPreference();
   const fill=useRef(new Animated.Value(available&&!indeterminate?Math.max(0,Math.min(1,fraction)):0)).current;
   useEffect(()=>{
@@ -335,6 +360,7 @@ export function BudgetBar({fraction,indeterminate,warning,available=true}:{fract
   </View>;
 }
 export function PrivateQRCode({image,revealed,onReveal,available,loadingMessage}:{image?:string|null;revealed:boolean;onReveal:()=>void;available:boolean;loadingMessage:string}){
+  const s=useScaffoldStyles(windowBase_s);
   const [privacyHeight,setPrivacyHeight]=useState(0);
   return <LavaCard testID="share-qr-card" background={image&&!revealed?<Image source={{uri:image}} blurRadius={24} resizeMode="cover" style={s.qrBackground}/>:undefined}>
     <View testID="share-qr-region" style={[s.qrRegion,{minHeight:Math.max(272,privacyHeight)}]}>
@@ -354,6 +380,7 @@ export function PrivateQRCode({image,revealed,onReveal,available,loadingMessage}
   </LavaCard>;
 }
 export function SetupCodeField({onChange}:{onChange:(code:string)=>void}){
+  const s=useScaffoldStyles(windowBase_s);
   return <NativeTextField inputLabel={localized('Setup code')} placeholder="LF1-…" kind="multiline" resetRevision={0} onChange={event=>onChange(event.nativeEvent.text)} style={s.setupCode}/>;
 }
 
@@ -395,3 +422,5 @@ const s=StyleSheet.create({
   qrCover:{position:'absolute',left:0,right:0,alignItems:'center'},qrPrivacy:{alignSelf:'stretch',alignItems:'center',gap:space.md,paddingVertical:space.md},hidden:{opacity:0},stretch:{alignSelf:'stretch'},
   setupCode:{height:180,backgroundColor:colors.cardBackground,borderRadius:foundation.radius.control},
 });
+
+const windowBase_s=s;

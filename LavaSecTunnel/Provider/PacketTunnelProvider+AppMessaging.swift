@@ -367,9 +367,9 @@ extension PacketTunnelProvider {
                 let now = Date()
                 let chained = self.tunnelLifecycleIsActive && self.currentTunnelDataPathMode().isChainedUpstream
                 let runtime = chained ? self.chainedRuntime?.driver.snapshotStatusEvidence() : nil
-                let stats = runtime?.statistics
+                let stats = self.tunnelStartupDidComplete ? runtime?.statistics : nil
                 let pause = self.protectionPauseStateQueue.sync { self.cachedTemporaryProtectionPauseUntil }
-                let evidence = ProtectionStatusEvidence(sampledAt: now,
+                var evidence = ProtectionStatusEvidence(sampledAt: now,
                     lifecycleIsActive: self.tunnelLifecycleIsActive, health: self.health,
                     pauseUntil: pause, isChained: chained,
                     sessionGeneration: stats?.sessionGeneration, forwardedBytes: stats?.forwardedNonDNSByteCount,
@@ -378,7 +378,9 @@ extension PacketTunnelProvider {
                     providerLifecycleID: chained ? self.latchedChainedLifecycleEvidenceID : nil,
                     verificationEpoch: runtime?.verificationEpoch,
                     forwardingBaseline: runtime?.forwardingBaseline ?? 0,
-                    runtimeCondition: runtime?.runtimeCondition ?? (chained ? .recovering : .normal))
+                    runtimeCondition: runtime?.runtimeCondition ?? (chained ? .recovering : .normal),
+                    statusPublication: self.protectionStatusPublication)
+                evidence.statusPublication = self.sampleProtectionStatusPublication(evidence: evidence)
                 completion.complete(try? JSONEncoder().encode(evidence))
             }
 
@@ -406,7 +408,8 @@ extension PacketTunnelProvider {
                     verificationEpoch: state.verificationEpoch,
                     forwardingBaseline: state.forwardingBaseline,
                     runtimeCondition: state.runtimeCondition,
-                    health: self.health)
+                    health: self.health,
+                    statusPublication: self.sampleProtectionStatusPublication())
                 completion.complete(status.encoded())
             }
 

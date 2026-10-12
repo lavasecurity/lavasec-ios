@@ -509,7 +509,10 @@ final class LavaLiveActivitySourceTests: XCTestCase {
             startingAt: "private func liveActivityProtectionState",
             endingBefore: "func turnOffProtection()"
         )
-        XCTAssertTrue(mappingBlock.contains("if isProtectionTemporarilyPaused {\n            return .paused\n        }"))
+        XCTAssertTrue(mappingBlock.contains("if temporaryProtectionPauseUntil != nil {\n            return .paused\n        }"))
+        for forbidden in ["isProtectionTemporarilyPaused", "canonicalProviderStatus", "providerStatusPresentation", "presentedTemporaryProtectionPauseUntil"] {
+            XCTAssertFalse(mappingBlock.contains(forbidden), "Live Activity pause must remain independent of Guard's observation lease: \(forbidden)")
+        }
         XCTAssertTrue(mappingBlock.contains("return .on"))
         XCTAssertFalse(mappingBlock.contains("return .needsReconnect"))
         XCTAssertFalse(mappingBlock.contains("return .reconnecting"))
@@ -1060,7 +1063,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
             liveActivityProtectionStateBlock.range(of: "guard vpnStatus == .connected else")?.lowerBound
         )
         let pausedIndex = try XCTUnwrap(
-            liveActivityProtectionStateBlock.range(of: "if isProtectionTemporarilyPaused")?.lowerBound
+            liveActivityProtectionStateBlock.range(of: "if temporaryProtectionPauseUntil != nil")?.lowerBound
         )
         XCTAssertLessThan(
             connectedGuardIndex,

@@ -1,3 +1,4 @@
+import {useWindowLayout,useWindowStyles} from '../src/window-layout';
 import {memo,useContext,useMemo,type ComponentRef,type Ref} from 'react';
 import {ActivityIndicator, Animated, Pressable, StyleSheet, View, type GestureResponderHandlers} from 'react-native';
 import {Text, localized, localizedFormat,PresentationContext} from '../app/presentation';
@@ -17,8 +18,8 @@ const SudokuCell=memo(function SudokuCell({index,cell,given,value,notes,active,l
   return <Pressable testID={`sudoku-cell-${index}`} accessibilityRole={given?'text':'button'} accessibilityLabel={label}
     accessibilityState={{selected:active,disabled:loading||locked&&!given}} disabled={loading} onPress={()=>onChoose(index)} style={[s.cell,{width:cell,height:cell}]}>
     {fill&&<View pointerEvents="none" style={[StyleSheet.absoluteFill,{backgroundColor:fill,opacity:active||lockedTrack?0.24:given?0.1:1}]}/>}
-    {value!==0?<Text allowFontScaling={false} style={[s.numeral,{fontSize:cell*0.55,fontWeight:given?'700':'400',color:given?colors.ink:!assist||correct?colors.safeGreen:colors.lavaOrangeText}]}>{value}</Text>
-      :notesMode&&notes.length>0&&<View style={[s.notes,{width:cell,height:cell}]}>{notes.map(digit=><Text key={digit} allowFontScaling={false} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.18}
+    {value!==0?<Text responsive={false} allowFontScaling={false} style={[s.numeral,{fontSize:cell*0.55,fontWeight:given?'700':'400',color:given?colors.ink:!assist||correct?colors.safeGreen:colors.lavaOrangeText}]}>{value}</Text>
+      :notesMode&&notes.length>0&&<View style={[s.notes,{width:cell,height:cell}]}>{notes.map(digit=><Text key={digit} responsive={false} allowFontScaling={false} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.18}
         style={[s.note,{fontSize:cell*0.55}]}>{digit}</Text>)}</View>}
     {(active||lockedTrack)&&<View pointerEvents="none" style={[StyleSheet.absoluteFill,{borderWidth:2.5,borderColor:active?colors.safeGreen:colors.secondaryText,opacity:active?1:0.72}]}/>}
   </Pressable>;
@@ -65,7 +66,7 @@ export const SudokuBoard=memo(function SudokuBoard({game,side,selected,tracking,
           return <Animated.View key={index} testID={`sudoku-reveal-tile-${index}`} style={[s.revealTile,{left:col*cell,top:row*cell,width:cell,height:cell,opacity}]}>
             {given&&<View pointerEvents="none" style={[StyleSheet.absoluteFill,{backgroundColor:colors.secondaryText,opacity:0.1}]}/>}
             <View pointerEvents="none" style={{position:'absolute',left:offset.left,top:offset.top,width:side,height:side,justifyContent:'center'}}>
-              <Text allowFontScaling={false} numberOfLines={1} style={[s.revealGlyph,{fontSize:revealFontSize(side),lineHeight:revealLineHeight(side)}]}>{revealEmoji}</Text>
+              <Text responsive={false} allowFontScaling={false} numberOfLines={1} style={[s.revealGlyph,{fontSize:revealFontSize(side),lineHeight:revealLineHeight(side)}]}>{revealEmoji}</Text>
             </View>
           </Animated.View>;
         })}
@@ -79,6 +80,7 @@ const SudokuDigit=memo(function SudokuDigit({digit,noted,highlighted,canEnter,as
   size?:{width:number;height:number};column?:boolean;inline?:boolean;testIDPrefix?:string;
 }) {
   useContext(PresentationContext);
+  const scaled=useWindowStyles(windowBase_s);const s=column?scaled:windowBase_s;
   return <Pressable testID={`${testIDPrefix}-digit-${digit}`} accessibilityRole="button" accessibilityLabel={String(digit)}
     accessibilityValue={{text:assist?localizedFormat('%lld remaining',remaining):''}} accessibilityState={{disabled:!canEnter,selected:noted}}
     accessibilityHint={localizedFormat(notesMode?'Toggles candidate %lld in the selected cell':'Places %lld in the selected cell',digit)} disabled={!canEnter} onPress={()=>onEnter(digit)}
@@ -97,22 +99,24 @@ export const SudokuKeypad=memo(function SudokuKeypad({game,width,height=0,layout
     for(const value of board)if(value)counts[value]=(counts[value]??0)+1;
     return {board,remaining:counts.map(count=>Math.max(0,9-count))};
   },[game]);
+  const scaled=useWindowStyles(windowBase_s);const windowScale=useWindowLayout().scale;
   const column=layout==='column';
+  const s=column?scaled:windowBase_s;
+  const bubbleHalf=34*(column?windowScale:1);
   const leading=column&&edge==='leading';
   const rowGeometry=useMemo(()=>column?undefined:keypadGeometry(width),[column,width]);
   const columnGeometry=useMemo(()=>column?keypadColumnGeometry(height):undefined,[column,height]);
   const keyCenter=trackedKey===undefined?0:columnGeometry?columnGeometry.keyCenter(trackedKey):rowGeometry!.keyCenter(trackedKey);
-  const bubbleCenter=Math.min(Math.max(keyCenter,34),(column?height:width)-34);
+  const bubbleCenter=Math.min(Math.max(keyCenter,bubbleHalf),(column?height:width)-bubbleHalf);
   const digits=Array.from({length:9},(_,index)=>index+1).map(digit=>{
     const noted=notesMode&&selected!==undefined&&board[selected]===0&&game.notes[selected]!.includes(digit);
-    // A transposed key keeps the portrait key's short side and only stretches
-    // along the column. Stacked assist counts no longer fit at phone heights,
-    // so those keys place the digit and count side by side instead.
+    // Column width follows the rail's window baseline; measured board height
+    // owns the other axis. Stack assist counts only when that key height fits.
     const keyHeight=columnGeometry?.keyHeight??0;
     return <SudokuDigit key={digit} digit={digit} noted={noted} highlighted={trackedKey===digit||noted} canEnter={canEnter}
       assist={assist} remaining={remaining[digit]!} notesMode={notesMode} onEnter={onEnter} testIDPrefix={testIDPrefix}
-      size={columnGeometry&&{width:sudokuMetrics.keyHeight,height:keyHeight}} column={column}
-      inline={column&&keyHeight<foundation.type.heading.fontSize+foundation.type.caption.fontSize+foundation.space.xs}/>;
+      size={columnGeometry&&{width:sudokuMetrics.keyHeight*windowScale,height:keyHeight}} column={column}
+      inline={column&&keyHeight<(foundation.type.heading.fontSize+foundation.type.caption.fontSize+foundation.space.xs)*windowScale}/>;
   });
   const eraseGlyph=<Symbol name="eraser" size={foundation.control.glyphSlot} pointSize={foundation.control.glyph} tone="primary"/>;
   return <View style={column?[s.keypadColumn,{height}]:s.keypad}>
@@ -124,7 +128,7 @@ export const SudokuKeypad=memo(function SudokuKeypad({game,width,height=0,layout
     <View testID={`${testIDPrefix}-keypad-touch`} accessible={false} accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
       pointerEvents={canEnter?'auto':'none'} style={column?[s.touchColumn,leading&&s.columnLeading]:s.touchLayer} {...panHandlers}/>
     {trackedKey!==undefined&&(column
-      ? <View pointerEvents="none" accessibilityElementsHidden style={[s.bubbleColumn,leading&&s.bubbleColumnLeading,{top:bubbleCenter-34}]}>
+      ? <View pointerEvents="none" accessibilityElementsHidden style={[s.bubbleColumn,leading&&s.bubbleColumnLeading,{top:bubbleCenter-bubbleHalf}]}>
         <View style={s.bubbleBodyColumn}><Text allowFontScaling={false} style={s.bubbleText}>{trackedKey}</Text></View>
         <View style={[s.bubbleTailColumn,leading&&s.bubbleTailColumnLeading,{transform:[{translateY:columnGeometry!.keyCenter(trackedKey)-bubbleCenter}]}]}/>
       </View>
@@ -141,6 +145,7 @@ export function SudokuOutcome({outcome}:{outcome?:boolean}) {
   </View>:null;
 }
 export function SudokuFeedback({loading,error,outcome,onRetry,column=false,testID='sudoku-feedback-band'}:{loading:boolean;error?:string;outcome?:boolean;onRetry:()=>void;column?:boolean;testID?:string}) {
+  const s=useWindowStyles(windowBase_s);
   return <View style={column?s.outcomeBandColumn:s.outcomeBand} testID={testID}>
     {loading?<View style={s.loadMessage}>{error?<><Copy role="supporting" center>{error}</Copy><LavaActionButton title="Try again" role="secondary" onPress={onRetry}/></>:<ActivityIndicator accessibilityLabel={localized('Preparing puzzle')}/>}</View>
       :<SudokuOutcome outcome={outcome}/>}
@@ -157,6 +162,7 @@ export function SudokuRail({tools,onClose,landscape=false,availableHeight,onStar
   tools:readonly SudokuTool[];onClose:()=>void;landscape?:boolean;availableHeight?:number;onStartTwoPlayer?:()=>void;
   flash?:{id:string;opacity:Animated.Value};
 }) {
+  const s=useWindowStyles(windowBase_s);
   // Six 44pt targets plus the rail's own padding are the physical floor for the
   // two-player control. Below it the control is omitted rather than shrinking a
   // target under the accessibility minimum; every supported device clears it.
@@ -227,8 +233,8 @@ export const sudokuStyles=StyleSheet.create({
   bubbleBody:{width:68,height:66,borderRadius:foundation.radius.control,borderCurve:'continuous',backgroundColor:colors.cardBackground,alignItems:'center',justifyContent:'center'},
   bubbleText:{fontFamily:'ui-rounded',fontSize:foundation.type.metric.fontSize,fontWeight:'700',color:colors.primaryText},
   bubbleTail:{marginTop:-1,width:0,height:0,borderLeftWidth:9,borderRightWidth:9,borderTopWidth:10,borderLeftColor:'transparent',borderRightColor:'transparent',borderTopColor:colors.cardBackground},
-  // Landscape is the portrait composition transposed: every fixed measurement
-  // keeps its value and only moves to the other axis. The board stays square.
+  // Landscape transposes the phone keypad. Its column chrome follows the rail's
+  // window baseline, while measured key heights keep the board square.
   outcomeBandColumn:{width:sudokuMetrics.feedbackHeight,alignItems:'center',justifyContent:'center'},
   keypadColumn:{width:sudokuMetrics.keypadHeight,paddingLeft:foundation.space.md,alignSelf:'center'},
   column:{position:'absolute',top:0,bottom:0,left:numberOffset,width:sudokuMetrics.keyHeight,flexDirection:'column',borderRadius:foundation.radius.control,borderCurve:'continuous',overflow:'hidden',backgroundColor:colors.cardBackground},
@@ -272,3 +278,5 @@ export const sudokuStyles=StyleSheet.create({
 });
 
 const s=sudokuStyles;
+
+const windowBase_s=s;

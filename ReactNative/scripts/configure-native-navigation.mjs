@@ -1,4 +1,6 @@
 import './native-navigation/discovery-symbol.mjs';
+import {configurePageMargins} from './native-navigation/page-margins.mjs';
+configurePageMargins();
 import {readFileSync,writeFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 import assert from 'node:assert/strict';

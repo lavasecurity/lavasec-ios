@@ -1,3 +1,4 @@
+import {useWindowStyles} from '../src/window-layout';
 import {useEffect,useRef,useState,type PropsWithChildren} from 'react';
 import {Animated,AppState,StyleSheet,View,type LayoutRectangle} from 'react-native';
 import {colors} from '../src/colors.ios';
@@ -21,6 +22,7 @@ export function guardDuration(intent:GuardMaterialIntent,from:Surface,to:Surface
 
 /** Endpoint material follows service truth immediately; only its paint is animated. */
 export function GuardMaterial({intent='rest',active=true,action,children}:{intent?:GuardMaterialIntent;active?:boolean;action?:LayoutRectangle}&PropsWithChildren) {
+  const s=useWindowStyles(windowBase_s);
   const initial=guardSurface(intent);
   const previous=useRef<Surface>(initial);
   const green=useRef(new Animated.Value(initial==='neutral'?0:1)).current;
@@ -88,3 +90,5 @@ export function GuardMaterial({intent='rest',active=true,action,children}:{inten
   </View>;
 }
 const s=StyleSheet.create({panel:{borderRadius:foundation.radius.surface,borderCurve:'continuous',overflow:'hidden',borderWidth:1,borderColor:colors.softGreen},inset:{padding:foundation.space.lg+foundation.space.xs,gap:foundation.space.lg}});
+
+const windowBase_s=s;

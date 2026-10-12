@@ -75824,67 +75824,67 @@
       }
     },
     "Checking VPN": {
-      "comment": "Shared interface copy. Preserve product names and technical abbreviations.",
+      "comment": "VPN verification while awaiting fresh forwarding evidence; does not imply restarting the tunnel.",
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Starting VPN chaining"
+            "value": "Verifying VPN connection"
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "VPN-Verkettung wird gestartet"
+            "value": "VPN-Verbindung wird überprüft"
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Iniciando el encadenamiento VPN"
+            "value": "Verificando la conexión VPN"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Démarrage du chaînage VPN"
+            "value": "Vérification de la connexion VPN"
           }
         },
         "it": {
           "stringUnit": {
             "state": "translated",
-            "value": "Avvio del concatenamento VPN"
+            "value": "Verifica della connessione VPN"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "VPNチェーンを開始中"
+            "value": "VPN接続を確認中"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "VPN 체이닝 시작 중"
+            "value": "VPN 연결 확인 중"
           }
         },
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Iniciando o encadeamento de VPN"
+            "value": "Verificando a conexão VPN"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "正在启动 VPN 串联"
+            "value": "正在验证 VPN 连接"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "正在啟動 VPN 串接"
+            "value": "正在驗證 VPN 連線"
           }
         }
       }
@@ -114917,6 +114917,204 @@
           }
         }
       }
+    },
+    "Protection limits": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Protection limits"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保護の限界"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "防護限制"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "防护限制"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Schutzgrenzen"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Limites de protection"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Límites de protección"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "보호 한계"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Limites da proteção"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Limiti della protezione"
+          }
+        }
+      },
+      "comment": "Legal Notices: limits of domain filtering. Preserve that an accessible site is not verified safe; keep normal precautions even while protection is on. Full terms live at lavasecurity.app/terms/."
+    },
+    "Protection limits & terms": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Protection limits & terms"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保護の限界と利用条件"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "防護限制與條款"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "防护限制与条款"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Schutzgrenzen und Bedingungen"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Limites de protection et conditions"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Límites de protección y condiciones"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "보호 한계 및 약관"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Limites da proteção e termos"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Limiti della protezione e condizioni"
+          }
+        }
+      },
+      "comment": "Legal Notices: limits of domain filtering. Preserve that an accessible site is not verified safe; keep normal precautions even while protection is on. Full terms live at lavasecurity.app/terms/."
+    },
+    "Lava cannot block every harmful site. An accessible site is not verified safe. Keep using normal precautions, even when protection is on.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava cannot block every harmful site. An accessible site is not verified safe. Keep using normal precautions, even when protection is on."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava はすべての有害なサイトをブロックできるわけではありません。アクセスできるサイトの安全性が確認されたという意味ではありません。保護が有効な場合も、通常の注意を払ってください。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava 無法封鎖所有有害網站。能夠開啟的網站不代表已確認安全。即使防護已開啟，也請保持平常的警覺。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava 无法拦截所有有害网站。能够访问的网站不代表已确认安全。即使防护已开启，也请保持平常的警惕。"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava kann nicht jede schädliche Website blockieren. Eine erreichbare Website ist nicht als sicher bestätigt. Bleibe auch bei aktiviertem Schutz wie gewohnt vorsichtig."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava ne peut pas bloquer tous les sites dangereux. Un site accessible n'est pas confirmé comme sûr. Gardez vos précautions habituelles, même lorsque la protection est activée."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava no puede bloquear todos los sitios dañinos. Un sitio accesible no está verificado como seguro. Mantén las precauciones habituales, incluso con la protección activada."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava는 모든 유해 사이트를 차단할 수 없습니다. 접속 가능한 사이트가 안전하다고 확인된 것은 아닙니다. 보호가 켜져 있어도 평소처럼 주의하세요."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O Lava não pode bloquear todos os sites nocivos. Um site acessível não foi verificado como seguro. Mantenha os cuidados habituais, mesmo com a proteção ativada."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava non può bloccare tutti i siti dannosi. Un sito accessibile non è verificato come sicuro. Mantieni le normali precauzioni, anche quando la protezione è attiva."
+          }
+        }
+      },
+      "comment": "Legal Notices: limits of domain filtering. Preserve that an accessible site is not verified safe; keep normal precautions even while protection is on. Full terms live at lavasecurity.app/terms/."
     }
   },
   "version": "1.0"

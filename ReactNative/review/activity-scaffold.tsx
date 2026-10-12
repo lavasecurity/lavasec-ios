@@ -1,3 +1,4 @@
+import {useScaffoldStyles} from '../src/window-layout';
 import {useCallback,useContext,useEffect,useRef,useState} from 'react';
 import {Pressable,StyleSheet,View} from 'react-native';
 import {localized,localizedFormat,localizedNumber,PresentationContext} from '../app/presentation';
@@ -23,6 +24,7 @@ function chartFrame(scale:number){
   return {height,captionHeight,top,drawable:Math.max(height/2,height-captionHeight-top)};
 }
 export function ActivityCharts({buckets,rangeKey,allowed,blocked,loaded,pending=false,uptime,onInspect}:{buckets:readonly ActivityBucket[];rangeKey:string;allowed:number;blocked:number;loaded:boolean;pending?:boolean;uptime:string;onInspect?:(availability:'populated'|'empty')=>void}) {
+  const s=useScaffoldStyles(windowBase_s);
   const feedback=useFeedback();
   const {locale}=useContext(PresentationContext);
   const [page,setPage]=useState(0);const [selected,setSelected]=useState<number|ActivityOutcome>();
@@ -52,6 +54,7 @@ export function ActivityCharts({buckets,rangeKey,allowed,blocked,loaded,pending=
   </View>;
 }
 function TotalChart({allowed,blocked,loaded,pending,uptime,frame,selected,onSelect}:{allowed:number;blocked:number;loaded:boolean;pending:boolean;uptime:string;frame:ReturnType<typeof chartFrame>;selected?:ActivityOutcome;onSelect:(outcome:ActivityOutcome)=>void}){
+  const s=useScaffoldStyles(windowBase_s);
   const lockPage=usePageInspectionLock();const [width,setWidth]=useState(0);
   const pick=(x:number)=>{const outcome=loaded?activityOutcomeAt(x,width,allowed,blocked):undefined;if(outcome)onSelect(outcome);};
   const options:ActivityOutcome[]=[...(loaded&&blocked>0?['blocked' as const]:[]),...(loaded&&allowed>0?['allowed' as const]:[])];
@@ -73,6 +76,7 @@ function TotalChart({allowed,blocked,loaded,pending,uptime,frame,selected,onSele
   </View>;
 }
 function TimeChart({kind,title,pending,frame,buckets,selected,onSelect}:{kind:'counts'|'rate';title:string;pending:boolean;frame:ReturnType<typeof chartFrame>;buckets:readonly ActivityBucket[];selected?:number;onSelect:(index:number)=>void}) {
+  const s=useScaffoldStyles(windowBase_s);
   const lockPage=usePageInspectionLock();const [width,setWidth]=useState(0);
   const selectionColor=colorForScheme('primaryText',useLavaColorScheme());
   const max=Math.max(1,...buckets.filter(bucket=>bucket.available).map(bucket=>bucket.allowed+bucket.blocked));
@@ -81,7 +85,8 @@ function TimeChart({kind,title,pending,frame,buckets,selected,onSelect}:{kind:'c
   const bucket=selected===undefined?undefined:buckets[selected];
   const detail=pending?localized('Loading Activity…'):!bucket?localized('Drag to inspect'):!bucket.available?localized('No data'):
     `${bucket.label}, ${kind==='counts'?`${localizedNumber(bucket.allowed)} ${localized('Allowed')}, ${localizedNumber(bucket.blocked)} ${localized('Blocked')}`:activityRate(bucket)===undefined?localized('No requests'):localizedFormat('%@%% blocked',localizedNumber(activityRate(bucket)!))}`;
-  const yFor=(rate:number)=>frame.top+pointDiameter/2+(frame.drawable-pointDiameter)*(1-rate/100);
+  const pointSize=Number(s.point.width),strokeWidth=Number(s.line.height);
+  const yFor=(rate:number)=>frame.top+pointSize/2+(frame.drawable-pointSize)*(1-rate/100);
   return <View testID={`activity.plot.${kind}`} accessible accessibilityRole="adjustable" accessibilityLabel={localized(title)} accessibilityState={{busy:pending}} accessibilityValue={{text:detail}}
     accessibilityActions={pending?[]:[{name:'increment',label:localized('Next')},{name:'decrement',label:localized('Previous')}]}
     onAccessibilityAction={event=>{if(buckets.length)onSelect(Math.max(0,Math.min(buckets.length-1,(selected??-1)+(event.nativeEvent.actionName==='increment'?1:-1))));}}
@@ -98,11 +103,11 @@ function TimeChart({kind,title,pending,frame,buckets,selected,onSelect}:{kind:'c
         const previous=index>0?activityRate(buckets[index-1]!):undefined;
         if(previous===undefined)return null;
         const dy=y-yFor(previous);
-        return <View key={item.start} testID={`activity.line.${index}`} style={[s.line,{left:x-slot,top:y-dy-lineWidth/2,width:Math.hypot(slot,dy),transformOrigin:'left center',transform:[{rotate:`${Math.atan2(dy,slot)}rad`}]}]}/>;
+        return <View key={item.start} testID={`activity.line.${index}`} style={[s.line,{left:x-slot,top:y-dy-strokeWidth/2,width:Math.hypot(slot,dy),transformOrigin:'left center',transform:[{rotate:`${Math.atan2(dy,slot)}rad`}]}]}/>;
       })}</View>
         <View testID="activity.rate.points" style={StyleSheet.absoluteFill}>{buckets.map((item,index)=>{
           const rate=activityRate(item);if(rate===undefined)return null;
-          return <View key={item.start} testID={`activity.point.${index}`} style={[s.point,{left:slot*(index+0.5)-pointDiameter/2,top:yFor(rate)-pointDiameter/2},selected===index&&[s.selectedPoint,{borderColor:selectionColor,backgroundColor:selectionColor}]]}/>;
+          return <View key={item.start} testID={`activity.point.${index}`} style={[s.point,{left:slot*(index+0.5)-pointSize/2,top:yFor(rate)-pointSize/2},selected===index&&[s.selectedPoint,{borderColor:selectionColor,backgroundColor:selectionColor}]]}/>;
         })}</View>
       </View>}
     <View testID="activity.baseline" pointerEvents="none" style={[s.baseline,{bottom:frame.captionHeight}]}/>
@@ -120,3 +125,5 @@ const s=StyleSheet.create({
   axis:{position:'absolute',left:0,right:0,bottom:0,flexDirection:'row',gap:foundation.space.sm,justifyContent:'space-between'},baseline:{position:'absolute',left:0,right:0,height:StyleSheet.hairlineWidth,backgroundColor:colors.secondaryText},line:{position:'absolute',height:lineWidth,backgroundColor:colors.lavaOrange},
   point:{position:'absolute',width:pointDiameter,height:pointDiameter,borderRadius:foundation.radius.circle,backgroundColor:colors.lavaOrange},selectedPoint:{borderWidth:1,zIndex:1},
 });
+
+const windowBase_s=s;

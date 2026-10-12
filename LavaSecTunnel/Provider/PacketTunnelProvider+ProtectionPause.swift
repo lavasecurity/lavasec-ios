@@ -74,6 +74,7 @@ extension PacketTunnelProvider {
         protectionPauseResumeTimer = nil
         try? protectionPauseStore.clearStoredPause()
         cacheTemporaryProtectionPauseUntil(nil)
+        publishProtectionStatus()
         lastAppliedTemporaryProtectionPauseIsActive = false
         updateLiveActivitiesAfterTemporaryProtectionPauseExpired()
         postPauseEndedNotification()
@@ -301,6 +302,7 @@ extension PacketTunnelProvider {
         }
         lastAppliedTemporaryProtectionPauseIsActive = false
         updateLiveActivitiesAfterTemporaryProtectionPauseExpired()
+        publishProtectionStatus()
     }
 
     private func cacheTemporaryProtectionPauseUntil(_ pauseUntil: Date?, refreshedAt: Date = Date()) {

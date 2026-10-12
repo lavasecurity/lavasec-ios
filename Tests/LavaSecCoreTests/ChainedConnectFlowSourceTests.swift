@@ -30,7 +30,13 @@ final class ChainedConnectFlowSourceTests: XCTestCase {
             startingAt: "private func beginChainedForegroundEntryPrefetch()",
             endingBefore: "private func consumeChainedForegroundEntryPrefetch()")
         XCTAssertTrue(begin.contains("queryChainedHandshakeObservation(reloadMissingManager: false)"))
-        XCTAssertTrue(begin.contains("chainedForegroundEntryPrefetch.stage("))
+        XCTAssertTrue(begin.contains("chainedForegroundEntryPrefetch.stageProviderReply("))
+        XCTAssertTrue(begin.contains("session.connectedDate == connectedAt"))
+        XCTAssertTrue(begin.contains("chainedForegroundEntryPrefetch.isPending(now:"))
+        XCTAssertTrue(begin.contains("retainingCandidate: retain"))
+        let owner = try sourceBlock(in: source, startingAt: "func startObservingChainedApplicationLifecycle()",
+            endingBefore: "private func logChainedEstablishmentGate(")
+        XCTAssertTrue(owner.contains("startChainedForegroundEntryPrefetch(restarting: true)"))
         XCTAssertTrue(begin.contains("!Task.isCancelled"))
         XCTAssertTrue(begin.contains("!self.chainedObservationActive"))
         XCTAssertFalse(begin.contains("reduceChainedConnectLifecycleState("))
@@ -40,6 +46,10 @@ final class ChainedConnectFlowSourceTests: XCTestCase {
         let consume = try XCTUnwrap(activate.range(of: "consumeChainedForegroundEntryPrefetch()"))
         let admit = try XCTUnwrap(activate.range(of: ".observed(connection: connection, observation: candidate.observation, now: candidate.receivedAt)"))
         let fallback = try XCTUnwrap(activate.range(of: ".observationResumed(now:"))
+        let canonical = try XCTUnwrap(activate.range(of: "admitProviderStatusReply(reply)"))
+        let file = try XCTUnwrap(activate.range(of: "refreshProviderStatusPublication(revalidateIdentity: true)"))
+        XCTAssertLessThan(consume.lowerBound, canonical.lowerBound)
+        XCTAssertLessThan(canonical.lowerBound, file.lowerBound)
         XCTAssertLessThan(consume.lowerBound, admit.lowerBound)
         XCTAssertLessThan(admit.lowerBound, fallback.lowerBound)
         XCTAssertTrue(activate[admit.upperBound..<fallback.lowerBound].contains("} else {"),
@@ -50,11 +60,13 @@ final class ChainedConnectFlowSourceTests: XCTestCase {
             endingBefore: "private func cancelChainedForegroundEntryPrefetch()")
         for guardText in ["UIApplication.shared.applicationState == .active", "session.status == .connected",
                           "tunnelManager?.connection === session", "identity == chainedLifecycleMutationIdentity",
+                          "session.connectedDate == chainedForegroundEntryConnectedAt",
                           "identity.protectionIntentRevision == userProtectionIntent.revision",
                           "identity.externalRestartGeneration == restartGeneration",
                           "identity: chainedConnectLifecycleState.foregroundEntryIdentity"] {
             XCTAssertTrue(consumeOwner.contains(guardText), guardText)
         }
+        XCTAssertTrue(consumeOwner.contains("publication.isValid(clock: clock"))
         let query = try sourceBlock(in: source,
             startingAt: "func queryChainedHandshakeObservation(reloadMissingManager:",
             endingBefore: "var catalogCacheURL:")
@@ -335,13 +347,18 @@ final class ChainedConnectFlowSourceTests: XCTestCase {
 
     func testEstablishingAndUnconfirmedProjectionsDriveEveryProtectionSurface() throws {
         let source = try readAppViewModelSource()
-        XCTAssertTrue(source.contains("var chainedConnectEstablishing: Bool { chainedProjection.claim == .establishing }"))
-        XCTAssertTrue(source.contains("var chainedForwardingUnconfirmed: Bool { chainedProjection.claim == .unconfirmed }"))
+        XCTAssertTrue(source.contains("protectionActionPresentation.observe(lifecycle: vpnStatus.protectionLifecycleStatus)"))
+        XCTAssertTrue(source.contains("canonicalProviderStatus.map { $0 == .establishing }"))
+        XCTAssertTrue(source.contains("canonicalProviderStatus.map { $0 == .vpnUnconfirmed }"))
 
         let projection = try sourceBlock(in: source, startingAt: "var protectionStatus: ProtectionStatus {",
             endingBefore: "var protectionButtonTitle: String {")
         XCTAssertTrue(projection.contains("ProtectionStatus.resolve("))
+        XCTAssertTrue(projection.contains("if let status = canonicalProviderStatus"))
         XCTAssertTrue(projection.contains("chainedEstablishing: chainedConnectEstablishing"))
+        XCTAssertTrue(projection.contains("awaitingInitialRuntime: chainedProjection.awaitingInitialRuntime"))
+        XCTAssertTrue(projection.contains("chainedProjection.claim == .unconfirmed && !chainedProjection.hasRuntimeObservation"))
+        XCTAssertTrue(projection.contains("protectionActionPresentation.status(whileObserving: status)"))
         XCTAssertTrue(projection.contains("forwardingUnconfirmed: chainedForwardingUnconfirmed"))
         XCTAssertTrue(projection.contains("guardStatusPresentation.title"))
         XCTAssertTrue(projection.contains("switch protectionStatus {"))

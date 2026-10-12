@@ -266,6 +266,40 @@ private enum LavaSheetScaffoldMetrics {
     static let footerBottomPadding: CGFloat = 24
 }
 
+/// Natural content measurements let a presentation owner fit short utility
+/// sheets without changing their navigation, scrolling or stage components.
+struct LavaSheetContentSize: Equatable {
+    var body: CGFloat = 0
+    var header: CGFloat = 0
+    var footer: CGFloat = 0
+    var height: CGFloat { body + header + footer }
+}
+
+struct LavaSheetContentSizeKey: PreferenceKey {
+    static let defaultValue = LavaSheetContentSize()
+    static func reduce(value: inout LavaSheetContentSize, nextValue: () -> LavaSheetContentSize) {
+        let next = nextValue()
+        value.body = max(value.body, next.body)
+        value.header = max(value.header, next.header)
+        value.footer = max(value.footer, next.footer)
+    }
+}
+
+private struct LavaSheetContentMeasurement: ViewModifier {
+    let part: WritableKeyPath<LavaSheetContentSize, CGFloat>
+    @State private var height: CGFloat = 0
+    func body(content: Content) -> some View {
+        content
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
+            .preference(key: LavaSheetContentSizeKey.self, value: measurement)
+    }
+    private var measurement: LavaSheetContentSize {
+        var size = LavaSheetContentSize()
+        size[keyPath: part] = height
+        return size
+    }
+}
+
 struct LavaSheetScaffold<Header: View, Content: View, Footer: View>: View {
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @State private var scrollViewport: LavaSheetScrollViewport?
@@ -417,6 +451,7 @@ struct LavaSheetScaffold<Header: View, Content: View, Footer: View>: View {
                 .padding(.horizontal, LavaSpacing.screenHorizontal)
                 .padding(.top, LavaSpacing.screenTop)
                 .padding(.bottom, 24)
+                .modifier(LavaSheetContentMeasurement(part: \.body))
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
     }
@@ -443,6 +478,7 @@ struct LavaSheetScaffold<Header: View, Content: View, Footer: View>: View {
             .padding(.horizontal, LavaSpacing.screenHorizontal)
             .padding(.top, LavaSheetScaffoldMetrics.scrollTopPadding)
             .padding(.bottom, scrollsFooter ? 0 : LavaSheetScaffoldMetrics.scrollBottomPadding)
+            .modifier(LavaSheetContentMeasurement(part: \.body))
     }
 
     private var contentStack: some View {
@@ -477,6 +513,7 @@ struct LavaSheetScaffold<Header: View, Content: View, Footer: View>: View {
                     .fill(.bar)
                     .ignoresSafeArea(edges: .top)
             }
+            .modifier(LavaSheetContentMeasurement(part: \.header))
     }
 
     private var footerBar: some View {
@@ -486,6 +523,7 @@ struct LavaSheetScaffold<Header: View, Content: View, Footer: View>: View {
             .padding(.bottom, LavaSheetScaffoldMetrics.footerBottomPadding)
             .frame(maxWidth: .infinity, alignment: .topLeading)
             .background(LavaStyle.groupedBackground)
+            .modifier(LavaSheetContentMeasurement(part: \.footer))
     }
 
     private var sheetBackgroundStyle: Color {

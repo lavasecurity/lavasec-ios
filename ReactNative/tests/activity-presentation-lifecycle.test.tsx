@@ -20,7 +20,7 @@ jest.mock('../specs/NativeLavaReview',()=>({__esModule:true,default:{
   getActivityDates:()=>mockGetDates(),getActivityDatePreset:(preset:string)=>mockGetPreset(preset),
   pickActivityDates:(start:number,end:number)=>mockPickDates(start,end),
 }}));
-jest.mock('@react-navigation/native',()=>({useIsFocused:()=>true}));
+jest.mock('@react-navigation/native',()=>({useNavigation:()=>({}),useIsFocused:()=>true}));
 jest.mock('../review/navigation',()=>({useReviewNavigation:()=>({navigate:jest.fn()})}));
 jest.mock('../src',()=>({LavaChoice:require('react-native').View}));
 jest.mock('../review/primitives',()=>({Screen:require('react-native').View,Copy:require('react-native').Text,Row:require('react-native').View}));

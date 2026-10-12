@@ -77,7 +77,7 @@ const families=[
 // Evaluate the actual column JSX once, then freeze its props while Yoga resizes
 // the native parent. This catches the first frame before a Dimensions event can
 // reach JS; an ordinary rerender-at-each-width test cannot exercise that gap.
-function storyPresentation(scale){
+function storyPresentation(scale,landscape=true){
   const file=oldStory??path.join(baseline??path.join(root,'review'),'story-scaffold.tsx');
   const source=sourceFile(file);let component,styles;
   walk(source,node=>{
@@ -96,13 +96,17 @@ function storyPresentation(scale){
     assert(expression,`Missing StoryColumns style: ${name}`);
     return [name,evaluate(expression.getText(source),context)];
   }));
-  const jsx={exports:{},foundation,space:foundation.space,s,View:'View',
+  const jsx={exports:{},foundation,space:foundation.space,s,windowBase_s:s,View:'View',
+    useWindowStyles:styles=>styles,useScaffoldStyles:styles=>styles,useWindowLayout:()=>({landscape}),
     useTextScale:()=>scale,useWindowDimensions:()=>({width:852,height:393,scale:3,fontScale:scale}),
     React:{createElement:(type,props,...children)=>({type,props,children})}};
   vm.runInNewContext(ts.transpileModule(component.getText(source),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React}}).outputText,jsx);
   const frame=jsx.exports.StoryColumns({primary:'primary',secondary:'secondary'});
   const flatten=style=>Object.assign({},...(Array.isArray(style)?style.flat(Infinity):[style]).filter(Boolean));
   const nativeStyle=style=>Object.entries(flatten(style)).map(([name,value])=>{
+    if(name==='width'&&value==='auto')return 'YGNodeStyleSetWidthAuto(node);';
+    if(['width','maxWidth'].includes(name)&&typeof value==='string'&&value.endsWith('%'))return `${name==='width'?'YGNodeStyleSetWidthPercent':'YGNodeStyleSetMaxWidthPercent'}(node,${parseFloat(value)});`;
+    if(name==='flexBasis'&&value==='auto')return 'YGNodeStyleSetFlexBasisAuto(node);';
     if(setters[name])return `${setters[name]}(node,${value});`;
     if(name==='flexDirection')return `YGNodeStyleSetFlexDirection(node,${{row:'YGFlexDirectionRow',column:'YGFlexDirectionColumn'}[value]});`;
     if(name==='flexWrap')return `YGNodeStyleSetFlexWrap(node,${{wrap:'YGWrapWrap',nowrap:'YGWrapNoWrap'}[value]});`;
@@ -112,7 +116,8 @@ function storyPresentation(scale){
   }).join('\n');
   return [frame,...frame.children].map(view=>nativeStyle(view.props.style));
 }
-const resumeStyles=[1,2].map(storyPresentation);
+const resumeStyles=[1,2].map(scale=>storyPresentation(scale));
+const portraitStyles=storyPresentation(1,false);
 const yoga=path.join(root,'node_modules/react-native/ReactCommon/yoga');
 function cppFiles(directory){return readdirSync(directory,{withFileTypes:true}).flatMap(entry=>entry.isDirectory()?cppFiles(path.join(directory,entry.name)):entry.name.endsWith('.cpp')?[path.join(directory,entry.name)]:[]);}
 const directory=mkdtempSync(path.join(tmpdir(),'lava-story-yoga-'));
@@ -144,6 +149,7 @@ void clearColumn(YGNodeRef node){
 }
 ${families.map((family,index)=>`void wideColumn${index}(YGNodeRef node){clearColumn(node);${family.style}}\nvoid stackedColumn${index}(YGNodeRef node){clearColumn(node);${family.stackedStyle}}`).join('\n')}
 ${resumeStyles.map((styles,index)=>styles.map((style,part)=>`void resumeStyle${index}_${part}(YGNodeRef node){${style}}`).join('\n')).join('\n')}
+${portraitStyles.map((style,part)=>`void portraitStyle${part}(YGNodeRef node){${style}}`).join('\n')}
 YGSize measuredContent(YGNodeConstRef node,float width,YGMeasureMode mode,float,YGMeasureMode){
   return {mode==YGMeasureModeUndefined?240:width,*static_cast<float*>(YGNodeGetContext(node))};
 }
@@ -216,7 +222,37 @@ void resumeScenario(int scale,void(*rootStyle)(YGNodeRef),void(*primaryStyle)(YG
   }
   YGNodeFreeRecursive(root);
 }
+void committedRotationScenario(){
+  auto root=YGNodeNew(),primary=YGNodeNew(),secondary=YGNodeNew();
+  auto a=YGNodeNew(),b=YGNodeNew();YGNodeInsertChild(root,primary,0);YGNodeInsertChild(root,secondary,1);
+  YGNodeInsertChild(primary,a,0);YGNodeInsertChild(secondary,b,0);
+  float ah=405,bh=900;YGNodeSetContext(a,&ah);YGNodeSetContext(b,&bh);
+  YGNodeSetMeasureFunc(a,measuredContent);YGNodeSetMeasureFunc(b,measuredContent);
+  portraitStyle0(root);portraitStyle1(primary);portraitStyle2(secondary);YGNodeStyleSetWidth(root,357);calculate(root);
+  fabricProps(root,[](auto node){resumeStyle0_0(node);YGNodeStyleSetWidth(node,714);});
+  fabricProps(primary,[](auto node){clearColumn(node);resumeStyle0_1(node);});
+  fabricProps(secondary,[](auto node){clearColumn(node);resumeStyle0_2(node);});calculate(root);
+  std::printf("Committed phone rotation: lanes %.0f/%.0f, secondary x/y %.0f/%.0f\\n",YGNodeLayoutGetWidth(primary),YGNodeLayoutGetWidth(secondary),YGNodeLayoutGetLeft(secondary),YGNodeLayoutGetTop(secondary));
+  require(near(YGNodeLayoutGetWidth(primary),341)&&near(YGNodeLayoutGetWidth(secondary),341)&&near(YGNodeLayoutGetTop(secondary),0),"Committed rotation must reset portrait lane geometry.");
+  YGNodeFreeRecursive(root);
+}
+void portraitScenario(){
+  auto root=YGNodeNew(),primary=YGNodeNew(),secondary=YGNodeNew();
+  YGNodeInsertChild(root,primary,0);YGNodeInsertChild(root,secondary,1);
+  portraitStyle0(root);portraitStyle1(primary);portraitStyle2(secondary);
+  YGNodeStyleSetHeight(primary,216);YGNodeStyleSetHeight(secondary,929);
+  // Native scroll measurement can supply finite available height. Portrait
+  // must overflow vertically for scrolling instead of wrapping into columns.
+  for(float width:{830.f,420.f,357.f}){
+    YGNodeStyleSetWidth(root,width);YGNodeStyleSetHeight(root,600);calculate(root);
+    require(near(YGNodeLayoutGetWidth(primary),width)&&near(YGNodeLayoutGetWidth(secondary),width),"Portrait lanes must fill the content width.");
+    require(near(YGNodeLayoutGetLeft(secondary),0)&&near(YGNodeLayoutGetTop(secondary),232),"Portrait overflow must stay in one vertical column.");
+  }
+  YGNodeFreeRecursive(root);
+}
 int main(){
+  portraitScenario();
+  committedRotationScenario();
   ${families.flatMap((family,index)=>[family.heights,[family.heights[0]*(family.hero?3:2),family.heights[1]]].map(heights=>`scenario("${family.name}",wideColumn${index},stackedColumn${index},${family.gap},${heights[0]},${heights[1]},${!!family.reverse},${!!family.hero});`)).join('\n')}
   ${resumeStyles.map((_,index)=>`resumeScenario(${index?2:1},resumeStyle${index}_0,resumeStyle${index}_1,resumeStyle${index}_2);`).join('\n')}
   return failures?1:0;

@@ -1949,7 +1949,13 @@ test('a failed domain search explains the failure while keeping the last accepte
 test('legal notice disclosure keeps full attribution available and search can be cleared without losing notices',async()=>{
   mockLegalNotices.mockReturnValue(JSON.stringify({disclaimer:'Attribution',sections:[{title:'DNS Resolvers',notices:[{id:'example',displayName:'Example Resolver',noticeText:'Complete example attribution text.',plannedUse:'Resolver service',sourceURL:'https://example.test/source',licenseTextURL:'https://example.test/license'},{id:'other',displayName:'Other Resolver',noticeText:'Other full attribution.',plannedUse:'Resolver service'}]}]}));
   const command=jest.fn().mockResolvedValue(null);
+  const openURL=jest.spyOn(Linking,'openURL').mockResolvedValue();
   render(<Provider app={{command} as unknown as AppStore}><LegalScreen/></Provider>);
+  fireEvent.press(screen.getByRole('button',{name:'Protection limits & terms'}));
+  expect(openURL).toHaveBeenLastCalledWith('https://lavasecurity.app/terms/');
+  fireEvent.press(screen.getByRole('button',{name:'Terms of Use'}));
+  expect(openURL).toHaveBeenLastCalledWith('https://www.apple.com/legal/internet-services/itunes/dev/stdeula/');
+  openURL.mockRestore();
   expect(screen.queryByText('Complete example attribution text.')).toBeNull();
   expect(screen.getByRole('button',{name:'Example Resolver'})).toHaveProp('accessibilityState',{expanded:false});
   expect(screen.getByTestId('row.Example Resolver.accessory').findAllByProps({symbol:'chevron.right'}).length).toBeGreaterThan(0);

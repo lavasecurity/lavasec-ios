@@ -52,7 +52,7 @@ test('pinned header updates retain the draft and the direct scroll hierarchy',()
   fireEvent.changeText(screen.getByTestId('sheet.editor'),'my unsaved setup');
   screen.rerender(<Contents heading="Review" pinned/>);
   expect(screen.getByTestId('sheet.editor').props.value).toBe('my unsaved setup');
-  expect(screen.UNSAFE_getByType(Sheet).children.map((child:{type:unknown}|string)=>typeof child==='string'?child:child.type)).toEqual([ScrollView]);
+  expect((screen.toJSON() as {type:string}).type).toBe('RCTScrollView');
   expect(screen.UNSAFE_getByType(ScrollView).props.stickyHeaderIndices).toEqual([0]);
   expect(screen.getByTestId('sheet.pinned-header').props.collapsable).toBe(false);
 });
@@ -201,7 +201,7 @@ test('a separately presented native sheet keeps its direct ScrollView covered an
     expect(screen.queryByText('Loading filter')).toBeNull();
     expect(screen.UNSAFE_getByType(ScrollView).props).toMatchObject({pointerEvents:'none',accessibilityElementsHidden:true,importantForAccessibility:'no-hide-descendants'});
     expect(screen.getByTestId('sheet.pinned-header',{includeHiddenElements:true}).props.pointerEvents).toBe('none');
-    expect(screen.UNSAFE_getByType(Sheet).children.map((child:{type:unknown}|string)=>typeof child==='string'?child:child.type)).toEqual([ScrollView]);
+    expect(screen.UNSAFE_getByType(ScrollView).parent!.parent!.type).toBe(Sheet);
     const footer=mockNavigation.setOptions.mock.calls.at(-1)![0].unstable_sheetFooter();const nativeFooter=render(footer);
     expect(nativeFooter.getByTestId('sheet.native-footer',{includeHiddenElements:true}).props).toMatchObject({pointerEvents:'none',accessibilityElementsHidden:true});
     expect(nativeFooter.getByTestId('sheet.native-footer',{includeHiddenElements:true}).props.children.props.style).toContainEqual({opacity:0});

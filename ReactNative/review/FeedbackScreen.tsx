@@ -1,3 +1,4 @@
+import {useWindowStyles} from '../src/window-layout';
 import {Alert} from '../app/presentation';
 import {useState} from 'react';
 import {View} from 'react-native';
@@ -5,11 +6,12 @@ import {LavaActionButton, LavaCard} from '../src';
 import {colors} from '../src/colors.ios';
 import {Copy, Section} from './primitives';
 import {Group, Info, ListRow, QuietFooter, Sheet, Toggle, toolbarButton, useToolbar} from './scaffold';
-import {DetailField, DetailReviewValue, DetailSteps, detailStyles as s} from './detail-scaffold';
+import {DetailField, DetailReviewValue, DetailSteps, detailStyles as base_s} from './detail-scaffold';
 import {previewNotice, useReviewNavigation} from './navigation';
 
 const topics=["I can't visit a website","VPN or filter doesn't work","A Lava feature doesn't work",'Translation is not quite right','I have a suggestion','Something else'];
 export function FeedbackScreen() {
+  const s=useWindowStyles(base_s);
   const nav=useReviewNavigation();const [step,setStep]=useState(0);const [furthest,setFurthest]=useState(0);const [topic,setTopic]=useState('');const [details,setDetails]=useState('');const [email,setEmail]=useState('');const [site,setSite]=useState('');const [diagnostics,setDiagnostics]=useState(false);
   const next=()=>{const value=Math.min(step+1,2);setStep(value);setFurthest(Math.max(value,furthest));};
   const close=()=>{if(topic||details||email||site||diagnostics)Alert.alert('Discard feedback?','Your feedback draft will be removed.',[{text:'Cancel',style:'cancel'},{text:'Discard',style:'destructive',onPress:()=>nav.goBack()}]);else nav.goBack();};

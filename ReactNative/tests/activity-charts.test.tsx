@@ -8,7 +8,7 @@ import {ActivityCharts} from '../review/activity-scaffold';
 import {activityRate,type ActivityBucket} from '../review/activity-model';
 jest.mock('react-native-safe-area-context',()=>({SafeAreaProvider:require('react-native').View,SafeAreaInsetsContext:require('react').createContext(null)}));
 jest.mock('../app/text-metrics',()=>({useTextScale:()=>1}));
-jest.mock('@react-navigation/native',()=>({useIsFocused:()=>true}));
+jest.mock('@react-navigation/native',()=>({useNavigation:()=>({}),useIsFocused:()=>true}));
 jest.mock('react-native/Libraries/Utilities/useColorScheme',()=>({__esModule:true,default:jest.fn(()=> 'light')}));
 jest.mock('../specs/LavaDecorationNativeComponent',()=>({__esModule:true,default:require('react-native').View}));
 const buckets:ActivityBucket[]=[

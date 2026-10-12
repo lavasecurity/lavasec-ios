@@ -3,6 +3,24 @@ import {createHash} from 'node:crypto';
 import {readFileSync} from 'node:fs';
 import test from 'node:test';
 import {restoreSimplePushAnimator} from '../scripts/native-navigation/simple-push-patch.mjs';
+import {pageMarginFiles,patchPageMargins} from '../scripts/native-navigation/page-margins.mjs';
+
+for(const file of pageMarginFiles){
+  test(`page-margin bridge verifies the complete pinned owner and is idempotent: ${file.path}`,()=>{
+    const installed=readFileSync(new URL(`../${file.path}`,import.meta.url),'utf8');
+    let pristine=installed;
+    if(sha256(installed)===file.after){
+      for(const [before,after] of [...file.replacements].reverse())pristine=pristine.replace(after,before);
+    }
+    assert.equal(sha256(pristine),file.before);
+    const patched=patchPageMargins(pristine,file);
+    assert.equal(sha256(patched),file.after);
+    assert.equal(patchPageMargins(patched,file),patched);
+    assert.throws(()=>patchPageMargins(pristine+'\n// unreviewed dependency change\n',file),/changed or is partially patched/);
+    const [before,after]=file.replacements[0];
+    assert.throws(()=>patchPageMargins(pristine.replace(before,after)+'\n',file),/changed or is partially patched/);
+  });
+}
 
 const original = readFileSync(new URL('./fixtures/native-navigation/RNSScreenStackAnimator-4.27.0.mm', import.meta.url), 'utf8');
 const sha256 = source => createHash('sha256').update(source).digest('hex');

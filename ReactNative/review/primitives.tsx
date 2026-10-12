@@ -1,3 +1,4 @@
+import {useWindowLayout,useScaffoldStyles,pageContentWidth,pageHeaderInset,pageTopPadding} from '../src/window-layout';
 import {mayInteractWithPresentation} from '../app/read-cache';
 import {usePresentationNativeLayout} from '../app/use-presentation-readiness';
 import {useOptionalReview,useRouteBodyConcealed} from './ReviewContext';
@@ -5,9 +6,10 @@ import {LavaDiscoveryDot} from '../src/LavaDiscoveryDot';
 import {GuardianDrawing} from '../src/GuardianDrawing';
 import {Alert, localized} from '../app/presentation';
 import {Text} from '../app/presentation';
-import {createContext,useCallback,useContext,useEffect,useRef, useState,useSyncExternalStore, type PropsWithChildren, type ReactNode} from 'react';
+import {createContext,useCallback,useContext,useEffect,useLayoutEffect,useRef, useState,useSyncExternalStore, type PropsWithChildren, type ReactNode} from 'react';
 import {AppState, Dimensions, Pressable, RefreshControl, ScrollView, StyleSheet, View, type ScrollViewInstance, type ColorValue, type TextProps, type TextStyle} from 'react-native';
-import {useIsFocused} from '@react-navigation/native';
+import {useIsFocused,useNavigation,type ParamListBase} from '@react-navigation/native';
+import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {SafeAreaInsetsContext} from 'react-native-safe-area-context';
 import Decoration from '../specs/LavaDecorationNativeComponent';
 import {colors} from '../src/colors.ios';
@@ -24,12 +26,14 @@ export function Copy({children, role='supporting', size, weight, color = colors.
   return <Text verbatim={verbatim} testID={testID} accessibilityRole={accessibilityRole} numberOfLines={numberOfLines} allowFontScaling dynamicTypeRamp={size===undefined?token.dynamicTypeRamp:fontSize===13?'footnote':fontSize===15?'subheadline':'body'} style={{textDecorationLine:strike?'line-through':undefined,fontSize, fontWeight: weight??token.fontWeight, color, lineHeight:lineHeight===undefined?undefined:Math.max(lineHeight,fontSize*1.25), fontFamily: mono ? "Menlo" : undefined, textAlign: center ? 'center' : 'left'}}>{children}</Text>;
 }
 
-export function Symbol({name, size = foundation.control.glyph, tone = 'green', pointSize = 0, weight = 'regular'}: {name: string; size?: number; tone?: string; pointSize?: number; weight?: 'regular' | 'semibold' | 'bold'}) {
-  return <Decoration symbol={name} tone={tone} fontPointSize={pointSize} fontWeight={weight} style={{width: size, height: size}} accessible={false} accessibilityElementsHidden />;
+export function Symbol({name, size = foundation.control.glyph, tone = 'green', pointSize = 0, weight = 'regular',responsive=true}: {name: string; size?: number; tone?: string; pointSize?: number; weight?: 'regular' | 'semibold' | 'bold';responsive?:boolean}) {
+  const layout=useWindowLayout();const scale=responsive?layout.scale:1;
+  return <Decoration symbol={name} tone={tone} fontPointSize={pointSize*scale} fontWeight={weight} style={{width: size*scale, height: size*scale}} accessible={false} accessibilityElementsHidden />;
 }
 
 export type GuardianGesture = 'start' | 'end' | 'tap' | 'reveal';
 export function Guardian({size = lavaTokens.guard.mascotSize, mood = 'sleeping', look = 'original', testID, gesturesEnabled=false, onGesture}: {size?: number; mood?: string; look?: string;testID?:string;gesturesEnabled?:boolean;onGesture?:(gesture:GuardianGesture)=>void}) {
+  size*=useWindowLayout().scale;
   const concealed=useRouteBodyConcealed();
   if(mood==='locked')return <Decoration mood="locked" look={look} style={{width:size,height:size}} accessible={false} accessibilityElementsHidden/>;
   const drawing=<View style={{width:size,height:size}} accessible={false}><GuardianDrawing size={size} mood={mood} look={look} active={!concealed}/><Decoration symbol="guardian.gestures" testID={testID?`${testID}.gesture`:undefined} mood={mood} look={look} guardianGestures={gesturesEnabled} onGuardianGesture={event=>{
@@ -51,6 +55,7 @@ export function usePageInspectionLock(){
   return useScrollInteractionLock();
 }
 export function MetricValue({value}:{value:string}) {
+  const styles=useScaffoldStyles(windowBase_styles);
   return <Text verbatim allowFontScaling dynamicTypeRamp="largeTitle" style={styles.metric}>{value}</Text>;
 }
 
@@ -64,13 +69,24 @@ export function usePageScrollObservation(observe:(sample?:PageScrollSample)=>voi
 // Only pages with their own text inputs participate in keyboard avoidance. RN
 // listens to window-wide keyboard frames, including keyboards in native sheets;
 // a read-only page must never retain extra scroll space from those notifications.
-export function Screen({children, onEndReached,onRefresh, keyboard = false, wide=false}: PropsWithChildren<{wide?:boolean;keyboard?: boolean;onEndReached?:()=>void;onRefresh?:()=>Promise<unknown>}>) {
+export function Screen({children, onEndReached,onRefresh, keyboard = false, wide=false,showsVerticalScrollIndicator=false}: PropsWithChildren<{wide?:boolean|'compact';keyboard?: boolean;showsVerticalScrollIndicator?:boolean;onEndReached?:()=>void;onRefresh?:()=>Promise<unknown>}>) {
+  const styles=useScaffoldStyles(windowBase_styles);
+  const layout=useWindowLayout();
+  const contentWidth=pageContentWidth(layout,wide);
+  const navigation=useNavigation<NativeStackNavigationProp<ParamListBase>>();
+  const headerInset=pageHeaderInset(layout,contentWidth);
+  const alignedHeader=useRef(false);
+  useLayoutEffect(()=>{
+    if(headerInset<0&&!alignedHeader.current)return;
+    alignedHeader.current=headerInset>=0;
+    navigation?.setOptions?.({lavaHeaderContentInset:headerInset});
+  },[navigation,headerInset]);
   const nativeLayout=usePresentationNativeLayout();
   const review=useOptionalReview();const concealed=useRouteBodyConcealed();
   const insets=useContext(SafeAreaInsetsContext);
   const horizontalContentInsets=insets&&(insets.left!==0||insets.right!==0)?{
-    maxWidth:(wide?foundation.layout.wideWidth:foundation.layout.readingWidth)+insets.left+insets.right,
-    paddingLeft:lavaTokens.spacing.screenHorizontal+insets.left,paddingRight:lavaTokens.spacing.screenHorizontal+insets.right,
+    maxWidth:contentWidth+insets.left+insets.right,
+    paddingLeft:layout.gutter+insets.left,paddingRight:layout.gutter+insets.right,
   }:undefined;
   const canInteract=()=>!concealed&&mayInteractWithPresentation(review?.app);
   const interactive=useSyncExternalStore(review?.app?.subscribe??(()=>()=>{}),canInteract);
@@ -114,13 +130,14 @@ export function Screen({children, onEndReached,onRefresh, keyboard = false, wide
       onTouchStart={()=>{if(canInteract())inspectionResets.current.forEach(reset=>reset());}} scrollEventThrottle={100} onScroll={event=>{const {contentOffset,contentSize,layoutMeasurement}=event.nativeEvent;
         if(observationActive.current&&observingScrollGesture.current)observers.current.forEach(observer=>observer({offset:contentOffset.y,windowHeight:Dimensions.get('window').height}));
         if(canInteract()&&onEndReached&&contentOffset.y+layoutMeasurement.height>=contentSize.height-140)onEndReached();}}
-      contentInsetAdjustmentBehavior="automatic"
-      automaticallyAdjustKeyboardInsets={keyboard && focused} keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled" contentContainerStyle={[styles.content,wide&&{maxWidth:foundation.layout.wideWidth},horizontalContentInsets]}>
+      contentInsetAdjustmentBehavior="automatic" showsVerticalScrollIndicator={showsVerticalScrollIndicator} showsHorizontalScrollIndicator={false}
+      automaticallyAdjustKeyboardInsets={keyboard && focused} keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled" contentContainerStyle={[styles.content,{maxWidth:contentWidth,paddingHorizontal:layout.gutter,paddingTop:pageTopPadding(layout),paddingBottom:foundation.space.screenBottom*layout.scale},horizontalContentInsets]}>
     <PageScrollObservationContext.Provider value={registerObserver}><ScrollInteractionContext.Provider value={lockPage}><PageInspectionResetContext.Provider value={registerReset}>{children}</PageInspectionResetContext.Provider></ScrollInteractionContext.Provider></PageScrollObservationContext.Provider>
   </ScrollView>;
 }
 
 export function Section({title, children, footer}: PropsWithChildren<{title: string; footer?: string}>) {
+  const styles=useScaffoldStyles(windowBase_styles);
   return <View style={styles.section}>
     <Copy role="section" accessibilityRole="header" color={colors.secondaryText}>{title}</Copy>
     {children}
@@ -140,14 +157,17 @@ type RowContentProps = {
 // can reuse the actual row anatomy without nesting a second button. A missing
 // leading glyph consumes no space; every destination keeps the accessory axis.
 export function RowAccessory({intent,testID,children,expanded=false,attention=false,attentionTestID}: PropsWithChildren<{intent:RowIntent;testID?:string;expanded?:boolean;attention?:boolean;attentionTestID?:string}>) {
+  const styles=useScaffoldStyles(windowBase_styles);
   const symbol=intent==='external'?'arrow.up.right':intent==='disclosure'&&expanded?'chevron.down':'chevron.right';
+  const windowScale=useWindowLayout().scale;
   const accessoryWidth=attention?foundation.discovery.dotSize+foundation.space.xs+foundation.control.accessoryGlyph:foundation.row.disclosureWidth;
-  return <View testID={testID} style={[styles.accessory,{width:accessoryWidth}]}>
+  return <View testID={testID} style={[styles.accessory,{width:accessoryWidth*windowScale}]}>
     {attention&&<LavaDiscoveryDot testID={attentionTestID}/>}
     {children===undefined?intent !== 'task' && <Symbol name={symbol} size={foundation.control.accessoryGlyph} tone="secondary" />:children}
   </View>;
 }
 export function RowContent({title,summary,icon,intent,testID,verbatimSummary=false,leading,trailing,expanded,attention}:RowContentProps) {
+  const styles=useScaffoldStyles(windowBase_styles);
   const glyph=leading??(icon?<Symbol name={icon} size={foundation.control.glyphSlot} pointSize={foundation.control.glyph} tone="primary" weight="regular" />:null);
   return <View style={styles.row}>
     {glyph&&<View testID={`${testID ?? `row.${title}`}.glyph`} style={styles.badge}>{glyph}</View>}
@@ -178,6 +198,7 @@ export function Choice<T extends string>({options, value, onChange, label, disab
 }
 
 export function Metric({value, label}: {value: string; label: string}) {
+  const styles=useScaffoldStyles(windowBase_styles);
   return <View style={{alignItems: 'center', gap: 2, minHeight: 74}}>
     <Text allowFontScaling={false} style={styles.metric}>{value}</Text>
     <Text allowFontScaling dynamicTypeRamp="subheadline" style={{fontSize: 15, fontWeight: '600', minHeight: 20, color: colors.secondaryText, textAlign: 'center'}}>{label}</Text>
@@ -194,3 +215,5 @@ export const styles = StyleSheet.create({
   accessory: {alignItems:'center',justifyContent:'center',flexDirection:'row',gap:foundation.space.xs},
   metric: {minHeight: 52, fontSize: 42, fontFamily: 'ui-rounded', fontWeight: '700', fontVariant: ['tabular-nums'], color: colors.ink},
 });
+
+const windowBase_styles=styles;

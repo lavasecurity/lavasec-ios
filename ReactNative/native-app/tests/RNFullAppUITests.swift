@@ -217,6 +217,390 @@ final class RNSecurityBiometricUITests: XCTestCase {
     }
 }
 
+/// Full-app render evidence for the accepted phone composition on tablet windows.
+@MainActor
+final class RNWindowLayoutUITests: XCTestCase {
+    func testGuardTopSpacingAcrossRotation() throws {
+        continueAfterFailure = false
+        let app = launch()
+        defer { XCUIDevice.shared.orientation = .portrait }
+        assertPortraitGuard(app)
+        capture(app, "roomy-portrait-guard")
+        assertGuardTopSpacing(app)
+        XCUIDevice.shared.orientation = .landscapeLeft
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in app.frame.width > app.frame.height }, object: nil)], timeout: 10), .completed)
+        capture(app, "roomy-landscape-guard")
+        assertLandscapeColumns(app)
+        assertGuardTopSpacing(app)
+        XCUIDevice.shared.orientation = .portrait
+        capture(app, "roomy-return-guard")
+        assertPortraitGuard(app)
+        assertGuardTopSpacing(app)
+    }
+
+    private func assertGuardTopSpacing(_ app: XCUIApplication) {
+        // Full-screen iPad fixture: the home-indicator safe area is 20 points.
+        // Compact phone windows keep their established scroll clearances.
+        guard min(app.frame.width, app.frame.height) > 480 else { return }
+        let columns = app.otherElements["story.columns"].firstMatch
+        let header = app.navigationBars["Guard"]
+        let top = columns.frame.minY - header.frame.maxY
+        let bottom = app.frame.maxY - 20 - columns.frame.maxY
+        XCTAssertGreaterThanOrEqual(top, 15, app.debugDescription)
+        XCTAssertLessThanOrEqual(top, 25, app.debugDescription)
+        if min(app.frame.width, app.frame.height) >= 960 {
+            XCTAssertEqual(top, 24, accuracy: 1, app.debugDescription)
+        }
+        XCTAssertGreaterThan(bottom, top, app.debugDescription)
+    }
+
+    func testPagesAcrossRotation() throws {
+        continueAfterFailure = false
+        let app = launch()
+        capturePages(app, prefix: "portrait")
+        XCUIDevice.shared.orientation = .landscapeLeft
+        capturePages(app, prefix: "landscape")
+        XCUIDevice.shared.orientation = .portrait
+        assertPortraitGuard(app)
+        capture(app, "portrait-return-guard")
+    }
+
+    func testAccessibilityGuardAndExplore() throws {
+        continueAfterFailure = false
+        let app = launch(category: "UICTContentSizeCategoryAccessibilityXXXL")
+        assertPortraitGuard(app, paired: false)
+        capture(app, "accessibility-guard")
+        tap(app, app.buttons["guard.explore"])
+        XCTAssertTrue(app.buttons["connection.dns"].waitForExistence(timeout: 15))
+        capture(app, "accessibility-explore")
+    }
+
+    func testOnboardingAcrossRotation() throws {
+        continueAfterFailure = false
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        app.launchArguments = ["-AppleLanguages", "(en)", "-AppleLocale", "en_US",
+                               "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryL"]
+        app.launchEnvironment["LAVA_UI_TEST_REPLAY_ONBOARDING"] = "1"
+        app.launchEnvironment["LAVA_UI_TEST_RESET_SECURITY"] = "1"
+        app.launchEnvironment["LAVA_UI_TEST_PLAN"] = "free"
+        app.launch()
+        XCTAssertTrue(app.buttons["onboarding.primary"].waitForExistence(timeout: 40))
+        capture(app, "onboarding-portrait-welcome")
+        tap(app, app.buttons["onboarding.primary"])
+        XCTAssertTrue(app.staticTexts["Lava stands guard here"].firstMatch.waitForExistence(timeout: 15))
+        capture(app, "onboarding-portrait-features")
+        XCUIDevice.shared.orientation = .landscapeLeft
+        capture(app, "onboarding-landscape-features")
+        let source = app.otherElements["onboarding.source"].firstMatch
+        let page = app.scrollViews.firstMatch
+        XCTAssertTrue(source.exists && page.exists)
+        XCTAssertGreaterThanOrEqual(page.frame.minX, source.frame.maxX - 1)
+    }
+
+    func testSharedSheetAcrossRotation() throws {
+        continueAfterFailure = false
+        let app = launch()
+        defer { XCUIDevice.shared.orientation = .portrait }
+        tap(app, app.buttons["guard.filter"])
+        tap(app, app.navigationBars["Filters"].buttons["Import"])
+        XCTAssertTrue(app.navigationBars["Import a filter"].waitForExistence(timeout: 15), app.debugDescription)
+        capture(app, "sheet-portrait-import")
+        assertUtilitySheetWidth(app, title: "Import a filter")
+        assertUtilitySheetCentered(app)
+        XCUIDevice.shared.orientation = .landscapeLeft
+        capture(app, "sheet-landscape-import")
+        assertUtilitySheetWidth(app, title: "Import a filter")
+        assertUtilitySheetCentered(app)
+        tap(app, app.buttons["Enter a code"])
+        XCTAssertTrue(app.navigationBars["Enter a code"].waitForExistence(timeout: 15), app.debugDescription)
+        capture(app, "sheet-landscape-code")
+        assertUtilitySheetCentered(app)
+        XCUIDevice.shared.orientation = .portrait
+        capture(app, "sheet-portrait-code")
+        assertUtilitySheetWidth(app, title: "Enter a code")
+        assertUtilitySheetCentered(app)
+        let editor = app.textViews.firstMatch
+        XCTAssertTrue(editor.waitForExistence(timeout: 10))
+        tap(app, editor)
+        app.typeText("LF1-layout-preview")
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
+        capture(app, "sheet-portrait-code-keyboard")
+        if min(app.frame.width, app.frame.height) > 480 {
+            XCTAssertTrue(app.buttons["Continue"].isHittable, "The compact sheet must keep its pinned action above the keyboard.")
+        }
+        XCUIDevice.shared.orientation = .landscapeLeft
+        capture(app, "sheet-landscape-code-keyboard")
+        if min(app.frame.width, app.frame.height) > 480 {
+            XCTAssertTrue(app.buttons["Continue"].isHittable)
+        }
+        XCTAssertTrue((editor.value as? String ?? "").contains("LF1-layout-preview"), "Rotation must retain the native editor's draft.")
+        let back = app.navigationBars["Enter a code"].buttons["Back"]
+        XCTAssertTrue(back.isHittable, "Native Back must remain reachable above the keyboard.")
+        tap(app, back)
+        XCTAssertTrue(app.navigationBars["Import a filter"].waitForExistence(timeout: 10))
+        capture(app, "sheet-landscape-import-after-keyboard")
+        assertUtilitySheetCentered(app)
+        tap(app, app.navigationBars["Import a filter"].buttons["Close"])
+        XCTAssertTrue(app.navigationBars["Filters"].waitForExistence(timeout: 10))
+    }
+
+    func testUtilitySheetAtAccessibilitySize() throws {
+        continueAfterFailure = false
+        let app = launch(category: "UICTContentSizeCategoryAccessibilityXXXL")
+        tap(app, app.buttons["guard.filter"])
+        tap(app, app.navigationBars["Filters"].buttons["Import"])
+        XCTAssertTrue(app.navigationBars["Import a filter"].waitForExistence(timeout: 15))
+        capture(app, "sheet-accessibility-import")
+        assertUtilitySheetWidth(app, title: "Import a filter", contentFits: false)
+        assertUtilitySheetCentered(app)
+        tap(app, app.buttons["Enter a code"])
+        XCTAssertTrue(app.navigationBars["Enter a code"].waitForExistence(timeout: 15))
+        capture(app, "sheet-accessibility-code")
+        let editor = app.textViews.firstMatch
+        let codeScroll = app.scrollViews.containing(.staticText, identifier: "Setup code").firstMatch
+        XCTAssertTrue(codeScroll.exists)
+        // A partially exposed editor can report isHittable while the pinned
+        // footer covers its tap point. Reveal the complete input in the native
+        // scroll surface before attempting to focus it at accessibility sizes.
+        for _ in 0..<6 where editor.frame.maxY > app.buttons["Continue"].frame.minY - 8 {
+            codeScroll.swipeUp()
+        }
+        XCTAssertLessThanOrEqual(editor.frame.maxY, app.buttons["Continue"].frame.minY - 8)
+        capture(app, "sheet-accessibility-code-scrolled")
+        tap(app, editor)
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
+        app.typeText("LF1-large-text")
+        XCTAssertTrue((editor.value as? String ?? "").contains("LF1-large-text"))
+        capture(app, "sheet-accessibility-code-keyboard")
+        XCTAssertTrue(app.buttons["Continue"].isHittable)
+        XCTAssertTrue(app.navigationBars["Enter a code"].buttons["Back"].isHittable)
+    }
+
+    private func assertUtilitySheetWidth(_ app: XCUIApplication, title: String, contentFits: Bool = true) {
+        guard min(app.frame.width, app.frame.height) > 480 else { return }
+        let bar = app.navigationBars[title]
+        XCTAssertLessThanOrEqual(bar.frame.width, 680, "Utility sheets must use a bounded native form width.")
+        XCTAssertLessThan(bar.frame.width, app.frame.width - 100)
+        if title == "Import a filter" && contentFits {
+            let scroll = app.scrollViews.containing(.button, identifier: "Enter a code").firstMatch
+            XCTAssertTrue(scroll.exists)
+            XCTAssertTrue(app.buttons["Enter a code"].isHittable)
+            XCTAssertGreaterThanOrEqual(scroll.frame.maxY - app.buttons["Enter a code"].frame.maxY, 28,
+                                        "Fitting the sheet must preserve its bottom content padding.")
+        }
+    }
+
+    private func assertUtilitySheetCentered(_ app: XCUIApplication) {
+        guard min(app.frame.width, app.frame.height) > 480 else { return }
+        let sheet = app.otherElements["lava.utility-sheet"].firstMatch
+        XCTAssertTrue(sheet.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertEqual(sheet.frame.midX, app.frame.midX, accuracy: 2,
+                       "A utility form sheet must be horizontally centered in its app window.")
+        XCTAssertEqual(sheet.frame.midY, app.frame.midY, accuracy: 20,
+                       "A utility form sheet must be vertically centered when the keyboard is hidden.")
+    }
+
+    // Run this lane last on the task-private iPad: the system remembers its
+    // resized window, so it must not precede full-screen rotation qualification.
+    func testNarrowWindowScaffolds() throws {
+        continueAfterFailure = false
+        let app = launch()
+        guard min(app.frame.width, app.frame.height) > 480 else {
+            throw XCTSkip("Requires the task-private iPad windowing lane.")
+        }
+        let original = app.frame
+        capture(app, "window-before-resize")
+        tap(app, app.buttons["guard.filter"])
+        tap(app, app.navigationBars["Filters"].buttons["Import"])
+        XCTAssertTrue(app.navigationBars["Import a filter"].waitForExistence(timeout: 15))
+        capture(app, "window-roomy-import")
+        assertUtilitySheetCentered(app)
+        let origin = app.coordinate(withNormalizedOffset: .zero)
+        origin.withOffset(CGVector(dx: original.width - 3, dy: original.height - 3))
+            .press(forDuration: 0.2, thenDragTo: origin.withOffset(CGVector(dx: 680, dy: 1050)),
+                   withVelocity: XCUIGestureVelocity(rawValue: 300), thenHoldForDuration: 1)
+        let resized = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            app.frame.width < original.width - 100 && app.frame.height > app.frame.width
+        }, object: nil)
+        let result = XCTWaiter.wait(for: [resized], timeout: 12)
+        capture(app, "window-after-resize")
+        XCTAssertEqual(result, .completed, "The system must resize the actual app window.")
+        XCTAssertLessThanOrEqual(min(app.frame.width, app.frame.height), 480,
+                                 "This lane must exercise the native compact presentation fallback.")
+        XCTAssertGreaterThan(app.navigationBars["Import a filter"].frame.width, app.frame.width * 0.85,
+                             "Resizing must release the fitted utility width in a compact app window.")
+        XCTAssertTrue(app.buttons["Enter a code"].isHittable)
+        tap(app, app.navigationBars["Import a filter"].buttons["Close"])
+        back(app)
+        assertPortraitGuard(app)
+        capture(app, "window-portrait-guard")
+        tap(app, app.buttons["guard.explore"])
+        XCTAssertTrue(app.buttons["connection.dns"].waitForExistence(timeout: 15))
+        capture(app, "window-portrait-explore")
+        back(app)
+        tab(app, "Settings")
+        XCTAssertTrue(app.buttons["row.Customization"].waitForExistence(timeout: 15))
+        capture(app, "window-portrait-settings")
+    }
+
+    private func launch(category: String = "UICTContentSizeCategoryL") -> XCUIApplication {
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        app.launchArguments = ["-hasSeenLavaOnboarding", "YES", "-AppleLanguages", "(en)", "-AppleLocale", "en_US",
+                               "-UIPreferredContentSizeCategoryName", category]
+        app.launchEnvironment["LAVA_UI_TEST_RESET_SECURITY"] = "1"
+        app.launchEnvironment["LAVA_UI_TEST_PLAN"] = "free"
+        app.launch()
+        XCTAssertTrue(app.buttons["guard.filter"].waitForExistence(timeout: 40), app.debugDescription)
+        if UIDevice.current.userInterfaceIdiom == .pad && min(app.frame.width, app.frame.height) <= 480 {
+            // The task-private simulator can remember the preceding resize lane.
+            // Restore through the system's native window controls before full-size
+            // renders; uninstalling the app does not reset its saved window.
+            let system = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+            system.buttons["window-controls:com.lavasec.app"].tap()
+            capture(app, "window-controls-app")
+            capture(system, "window-controls-system")
+            let maximize = system.buttons.matching(NSPredicate(format: "label CONTAINS[c] 'full screen' OR label CONTAINS[c] 'maximize' OR label == 'Zoom'")).firstMatch
+            XCTAssertTrue(maximize.waitForExistence(timeout: 5), system.debugDescription)
+            maximize.tap()
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                min(app.frame.width, app.frame.height) > 480
+            }, object: nil)], timeout: 10), .completed, app.debugDescription)
+        }
+        return app
+    }
+
+    private func capturePages(_ app: XCUIApplication, prefix: String) {
+        if prefix == "portrait" { assertPortraitGuard(app) }
+        capture(app, "\(prefix)-01-guard")
+        if prefix == "landscape" { assertLandscapeColumns(app) }
+        tap(app, app.buttons["guard.today"])
+        XCTAssertTrue(app.navigationBars["Activity"].waitForExistence(timeout: 15))
+        capture(app, "\(prefix)-02-activity")
+        back(app)
+        tap(app, app.buttons["guard.filter"])
+        XCTAssertTrue(app.buttons["row.Now filtering"].waitForExistence(timeout: 15))
+        capture(app, "\(prefix)-03-filters")
+        tap(app, app.buttons["row.Now filtering"])
+        capture(app, "\(prefix)-04-filter-detail")
+        back(app)
+        tap(app, app.buttons["row.Switch or manage filters"])
+        capture(app, "\(prefix)-05-filter-library")
+        back(app)
+        back(app)
+        tap(app, app.buttons["guard.explore"])
+        XCTAssertTrue(app.buttons["connection.dns"].waitForExistence(timeout: 15))
+        capture(app, "\(prefix)-06-explore")
+        back(app)
+        tab(app, "Settings")
+        XCTAssertTrue(app.buttons["row.Customization"].waitForExistence(timeout: 15))
+        capture(app, "\(prefix)-07-settings")
+        if prefix == "landscape" { assertLandscapeColumns(app) }
+        tap(app, app.buttons["row.Get Lava Plus today"])
+        capture(app, "\(prefix)-08-plus")
+        back(app)
+        tap(app, app.buttons["row.Customization"])
+        capture(app, "\(prefix)-09-customization")
+        tab(app, "Guard")
+        XCTAssertTrue(app.buttons["guard.filter"].waitForExistence(timeout: 15))
+    }
+
+    func testNativeLargeTitleAlignment() throws {
+        continueAfterFailure = false
+        let app = launch()
+        guard min(app.frame.width, app.frame.height) > 480 else {
+            throw XCTSkip("Expanded-title alignment is checked in a full tablet window.")
+        }
+        defer { XCUIDevice.shared.orientation = .portrait }
+        XCTAssertTrue(app.buttons["guard.filter"].waitForExistence(timeout: 15))
+        capture(app, "aligned-portrait-guard")
+        let title = app.navigationBars["Guard"].staticTexts["Guard"].firstMatch
+        let panel = app.otherElements["story.column.primary"].firstMatch
+        XCTAssertEqual(title.frame.minX, panel.frame.minX, accuracy: 2, app.debugDescription)
+        XCUIDevice.shared.orientation = .landscapeLeft
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in app.frame.width > app.frame.height }, object: nil)], timeout: 10), .completed)
+        capture(app, "aligned-landscape-guard")
+        XCTAssertEqual(title.frame.minX, panel.frame.minX, accuracy: 2, app.debugDescription)
+        tap(app, app.buttons["guard.today"])
+        capture(app, "aligned-landscape-activity")
+        let activityTitle = app.navigationBars["Activity"].staticTexts["Activity"].firstMatch
+        // UIKit presents Activity's title inline after this landscape push,
+        // despite its large-title eligibility. Check the actual title and Back
+        // positions rather than inferring presentation from that configuration.
+        XCTAssertEqual(activityTitle.frame.midX, app.frame.midX, accuracy: 2, app.debugDescription)
+        XCTAssertLessThan(app.navigationBars["Activity"].buttons["BackButton"].firstMatch.frame.minX, 64, app.debugDescription)
+        back(app)
+        capture(app, "aligned-return-guard")
+        XCTAssertEqual(title.frame.minX, panel.frame.minX, accuracy: 2, app.debugDescription)
+    }
+
+    private func assertPortraitGuard(_ app: XCUIApplication, paired: Bool = true) {
+        let hero = app.otherElements["Protection status"].firstMatch
+        let today = app.buttons["guard.today"], filter = app.buttons["guard.filter"]
+        XCTAssertTrue(hero.waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertGreaterThan(today.frame.minY, hero.frame.maxY)
+        if paired {
+            XCTAssertEqual(today.frame.minY, filter.frame.minY, accuracy: 2)
+            XCTAssertGreaterThan(filter.frame.minX, today.frame.minX)
+        } else {
+            XCTAssertGreaterThan(filter.frame.minY, today.frame.minY)
+        }
+        XCTAssertGreaterThan(app.buttons["guard.explore"].frame.minY, filter.frame.minY)
+    }
+
+    private func assertLandscapeColumns(_ app: XCUIApplication) {
+        let primary = app.otherElements["story.column.primary"].firstMatch
+        let secondary = app.otherElements["story.column.secondary"].firstMatch
+        XCTAssertTrue(primary.exists && secondary.exists)
+        XCTAssertGreaterThan(secondary.frame.minX, primary.frame.maxX)
+        XCTAssertEqual(primary.frame.minY, secondary.frame.minY, accuracy: 2)
+    }
+
+    private func tap(_ app: XCUIApplication, _ element: XCUIElement) {
+        XCTAssertTrue(element.waitForExistence(timeout: 15), app.debugDescription)
+        for _ in 0..<24 where !element.isHittable {
+            let header = app.navigationBars.firstMatch
+            let bar = app.tabBars.firstMatch
+            let top = header.exists ? header.frame.maxY + 8 : app.frame.minY + 8
+            let bottom = bar.exists && bar.frame.minY >= app.frame.midY ? bar.frame.minY - 8 : app.frame.maxY - 8
+            let origin = app.coordinate(withNormalizedOffset: .zero)
+            let middle = (top + bottom) / 2
+            let distance = min(120, (bottom - top) * 0.4) * (element.frame.minY < top ? -1.0 : 1.0)
+            let first = origin.withOffset(CGVector(dx: app.frame.width / 2, dy: middle - app.frame.minY))
+            let last = origin.withOffset(CGVector(dx: app.frame.width / 2, dy: middle - app.frame.minY - distance))
+            first.press(forDuration: 0.05, thenDragTo: last, withVelocity: XCUIGestureVelocity(rawValue: 80), thenHoldForDuration: 0.5)
+        }
+        XCTAssertTrue(element.isHittable, app.debugDescription)
+        element.tap()
+    }
+
+    private func tab(_ app: XCUIApplication, _ label: String) {
+        let collapsed = app.tabBars.buttons.matching(NSPredicate(format: "value CONTAINS %@", "Collapsed")).firstMatch
+        if collapsed.exists && collapsed.isHittable { collapsed.tap() }
+        let native = app.tabBars.buttons[label].firstMatch
+        tap(app, native.exists ? native : app.buttons.matching(NSPredicate(format: "label == %@ AND identifier != %@", label, "BackButton")).firstMatch)
+        if label == "Settings" { tap(app, native.exists ? native : app.buttons.matching(NSPredicate(format: "label == %@ AND identifier != %@", label, "BackButton")).firstMatch) }
+    }
+
+    private func back(_ app: XCUIApplication) {
+        let identified = app.navigationBars.buttons["BackButton"].firstMatch
+        tap(app, identified.exists ? identified : app.navigationBars.buttons["Back"].firstMatch)
+    }
+
+    private func capture(_ app: XCUIApplication, _ name: String) {
+        RunLoop.current.run(until: Date().addingTimeInterval(1))
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = name
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        let hierarchy = XCTAttachment(string: app.debugDescription)
+        hierarchy.name = name + "-hierarchy"
+        hierarchy.lifetime = .keepAlways
+        add(hierarchy)
+    }
+}
+
 @MainActor
 final class RNFullAppUITests: XCTestCase {
     private var restoreSystemTextSizeAfterCase = false

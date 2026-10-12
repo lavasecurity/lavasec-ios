@@ -627,7 +627,9 @@ final class AppViewModel: ObservableObject {
     // every read of it is already compile-gated, so the value is never observed
     // in a public build.
     let isAccountDeveloper = true
-    @Published var vpnStatus: NEVPNStatus = .invalid
+    @Published var vpnStatus: NEVPNStatus = .invalid {
+        didSet { protectionActionPresentation.observe(lifecycle: vpnStatus.protectionLifecycleStatus) }
+    }
     @Published var isVPNConfigurationInstalled = false
     @Published private(set) var isConfiguringVPN = false
     @Published var tunnelHealth = TunnelHealthSnapshot()
@@ -637,14 +639,32 @@ final class AppViewModel: ObservableObject {
     /// Projection of ``chainedConnectLifecycleState`` while the reducer is awaiting live-mode or
     /// forwarding evidence. It is never an independently mutated lifecycle authority.
     @Published var chainedProjection = ChainedConnectLifecyclePolicy.Projection()
-    var chainedConnectEstablishing: Bool { chainedProjection.claim == .establishing }
+    var providerStatusReader = ProtectionStatusPublicationReader()
+    @Published var providerStatusPresentation: ProtectionStatus?
+    var providerStatusOwnsPresentation = false
+    var providerStatusLifecycleID: String?
+    var providerStatusIdentityConnectedAt: Date?
+    var providerStatusIdentityVerifiedAt: ProtectionStatusPublicationClock.Sample?
+    var providerStatusConnectionProof: ProtectionStatusPublicationConnectionProof?
+    var providerStatusIdentityTask: Task<Void, Never>?
+    var providerStatusIdentityGeneration: UInt64 = 0
+    var providerStatusKnownDNSOnlyConnectedAt: Date?
+    var providerStatusIdentityIsUncertain = false
+    var providerStatusExpiryTask: Task<Void, Never>?
+    var chainedConnectEstablishing: Bool {
+        canonicalProviderStatus.map { $0 == .establishing } ?? (chainedProjection.claim == .establishing)
+    }
 
     /// Projection of the reducer's unconfirmed claim. The tunnel stays up and monitored: an idle
     /// split tunnel may legitimately carry no non-DNS traffic until the user creates demand.
-    var chainedForwardingUnconfirmed: Bool { chainedProjection.claim == .unconfirmed }
-    var chainedSetupReady: Bool { chainedProjection.setupReady }
+    var chainedForwardingUnconfirmed: Bool {
+        canonicalProviderStatus.map { $0 == .vpnUnconfirmed } ?? (chainedProjection.claim == .unconfirmed)
+    }
+    var chainedSetupReady: Bool { canonicalProviderStatus.map { $0 == .tunnelReady } ?? chainedProjection.setupReady }
     /// Missing IPC after a prior proof is observation uncertainty, not a new user start.
-    var chainedStatusChecking: Bool { chainedProjection.claim == .checking }
+    var chainedStatusChecking: Bool {
+        canonicalProviderStatus.map { $0 == .unavailable } ?? (chainedProjection.claim == .checking)
+    }
     var chainedSamplingConnection: UInt64?
     var chainedObservationLifetime = ChainedObservationLifetime()
     var chainedObservationActive: Bool { chainedObservationLifetime.isActive }
@@ -661,6 +681,7 @@ final class AppViewModel: ObservableObject {
     var chainedForegroundEntryPrefetch = ChainedForegroundEntryPrefetch()
     var chainedForegroundEntryTask: Task<Void, Never>?
     var chainedForegroundEntrySession: NETunnelProviderSession?
+    var chainedForegroundEntryConnectedAt: Date?
     var chainedForegroundEntryMutationIdentity: ChainedLifecycleMutationIdentity?
 
     /// Reducer-owned notice lane. Lifecycle transitions never write or clear the shared
@@ -863,7 +884,8 @@ final class AppViewModel: ObservableObject {
     lazy var protectionActionOrchestrator = ProtectionActionOrchestrator { [weak self] kind in
         guard let self else { return }
         let currentTitle = self.protectionButtonTitle
-        self.protectionActionPresentation.update(action: kind, currentTitle: currentTitle)
+        self.protectionActionPresentation.update(action: kind, currentTitle: currentTitle,
+            currentStatus: self.protectionStatus)
         self.isConfiguringVPN = kind != nil
     }
     /// Uses the tunnel's narrowly scoped resolver fallback when fail-closed DNS prevents recovery.
@@ -1350,11 +1372,21 @@ final class AppViewModel: ObservableObject {
     }
 
     var protectionStatus: ProtectionStatus {
-        ProtectionStatus.resolve(
+        let status: ProtectionStatus
+        if let status = canonicalProviderStatus {
+            // The separately persisted fallback refusal still outranks a positive operational publication.
+            if chainedStartupFailureNotice != nil, status != .connected(.networkUnavailable) {
+                return .chainingFailed
+            }
+            return status
+        }
+        status = ProtectionStatus.resolve(
             lifecycle: vpnStatus.protectionLifecycleStatus,
             pauseUntil: temporaryProtectionPauseUntil,
             chainedEstablishing: chainedConnectEstablishing,
-            observationUnavailable: chainedStatusChecking,
+            awaitingInitialRuntime: chainedProjection.awaitingInitialRuntime,
+            observationUnavailable: chainedStatusChecking
+                || (chainedProjection.claim == .unconfirmed && !chainedProjection.hasRuntimeObservation),
             forwardingUnconfirmed: chainedForwardingUnconfirmed,
             chainedFailure: chainedStartupFailureNotice != nil,
             setupReady: chainedSetupReady && !guardPanelMessageIsError,
@@ -1363,6 +1395,7 @@ final class AppViewModel: ObservableObject {
             connectivity: chainedProjection.ownsHealth
                 ? chainedProjection.connectivity : protectionConnectivityAssessment.severity
         )
+        return protectionActionPresentation.status(whileObserving: status)
     }
 
     var protectionTitle: String {
@@ -1503,6 +1536,14 @@ final class AppViewModel: ObservableObject {
     }
 
     var protectionConnectivitySeverity: ProtectionConnectivitySeverity? {
+        if let status = canonicalProviderStatus {
+            switch status {
+            case .connected(let severity): return severity
+            case .vpnRecovering: return .recovering
+            case .tunnelReady, .vpnUnconfirmed, .establishing: return .healthy
+            default: return nil
+            }
+        }
         // A chained provider that has taken health ownership is the single live
         // authority for the path surfaces. Falling back to the persisted DNS
         // monitor here would let the hero and the flow diagram disagree during
@@ -1510,8 +1551,18 @@ final class AppViewModel: ObservableObject {
         return chainedProjection.effectiveConnectivity(fallback: protectionConnectivityAssessment.severity)
     }
 
+    /// Guard pause facets and its resume guard share the same admitted operational deadline.
+    /// The stored mirror still belongs to the command/session owner and its expiry timer.
+    var presentedTemporaryProtectionPauseUntil: Date? {
+        if let status = canonicalProviderStatus {
+            if case .paused(let until) = status { return until }
+            return nil
+        }
+        return temporaryProtectionPauseUntil
+    }
+
     var isProtectionTemporarilyPaused: Bool {
-        vpnStatus == .connected && temporaryProtectionPauseUntil != nil
+        vpnStatus == .connected && presentedTemporaryProtectionPauseUntil != nil
     }
 
     var showsTemporaryProtectionPauseControls: Bool {
@@ -1519,11 +1570,11 @@ final class AppViewModel: ObservableObject {
     }
 
     var formattedTemporaryProtectionResumeTime: String {
-        guard let temporaryProtectionPauseUntil else {
+        guard let until = presentedTemporaryProtectionPauseUntil else {
             return Date().formatted(date: .omitted, time: .shortened)
         }
 
-        return temporaryProtectionPauseUntil.formatted(date: .omitted, time: .shortened)
+        return until.formatted(date: .omitted, time: .shortened)
     }
 
     var guardDNSFlowStepStatus: GuardFlowStepStatus {

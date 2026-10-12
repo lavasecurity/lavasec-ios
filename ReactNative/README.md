@@ -179,6 +179,7 @@ data migration is involved.
 
 The September UX decisions are tracked in [infra review #235](https://github.com/lavasecurity/lavasec-infra/pull/235). Use these shared components when adding or changing screens:
 
+- `Screen` and `Sheet` hide scroll indicators by default. Opt into `showsVerticalScrollIndicator` for long readers and lists: legal/license text, domain and network diagnostics, filter library/share/detail/review, and blocklist/DNS catalogs. Utility forms, onboarding, horizontal carousels, and Sudoku keep indicators hidden.
 - `LavaIconButton` takes a semantic action, accessible title, optional item and neutral/destructive/accent role. iOS maps it to a centred native glyph in a 44-point circle. An Android adapter should choose its native glyph and minimum touch target while retaining the circular shape and centred alignment. Do not export SF Symbol names or iOS colours through the shared contract. System-owned navigation buttons keep system chrome.
 - `AccessorySlot` gives inline row actions one trailing column. Its centre is anchored to the existing play indicator; swapping delete, undo, lock or chevron does not move the column. Indicators do not become new actions solely because they share a slot.
 - Use `AdaptivePair` for label/value rows. It stacks under width or text-size pressure without reducing the font. `DomainInput` follows the app's text-scale override and uses the native editor's measured line height.

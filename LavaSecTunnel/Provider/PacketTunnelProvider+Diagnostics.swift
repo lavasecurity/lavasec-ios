@@ -651,10 +651,80 @@ extension PacketTunnelProvider {
         }
 
         lastSignaledConnectivityKey = connectivitySignalKeyValue
+        publishProtectionStatus()
         connectivitySignalNotifier.postNotification(named: TunnelHealthSignal.darwinNotificationName)
     }
 
     func persistHealthIfNeeded(force: Bool = false) {
         healthPersistence.flush(force: force)
+    }
+
+    /// Captures operational inputs together on dnsStateQueue, without probes, flushes or repairs.
+    func currentProtectionStatusEvidence(now: Date = Date()) -> ProtectionStatusEvidence {
+        let chained = tunnelLifecycleIsActive && currentTunnelDataPathMode().isChainedUpstream
+        let runtime = chained ? chainedRuntime?.driver.snapshotStatusEvidence() : nil
+        // Setup owns admission: same-instance start must not import the previous runtime's totals.
+        let stats = tunnelStartupDidComplete ? runtime?.statistics : nil
+        let pause = protectionPauseStateQueue.sync { cachedTemporaryProtectionPauseUntil }
+        return .init(sampledAt: now, lifecycleIsActive: tunnelLifecycleIsActive, health: health,
+            pauseUntil: pause, isChained: chained, sessionGeneration: stats?.sessionGeneration,
+            forwardedBytes: stats?.forwardedNonDNSByteCount, transportGeneration: stats?.transportGeneration,
+            setupReady: tunnelStartupDidComplete && stats?.setupReady == true,
+            providerLifecycleID: latchedChainedLifecycleEvidenceID,
+            verificationEpoch: runtime?.verificationEpoch, forwardingBaseline: runtime?.forwardingBaseline ?? 0,
+            runtimeCondition: runtime?.runtimeCondition ?? (chained ? .recovering : .normal))
+    }
+
+    /// Five-second renewal is independent of app IPC; existing driver ticks accelerate semantic changes.
+    func startProtectionStatusHeartbeat() {
+        guard tunnelLifecycleIsActive, latchedChainedLifecycleEvidenceID != nil else { return }
+        protectionStatusHeartbeat.assumeIsolated { timer in
+            timer.start(interval: ProtectionStatusPublication.heartbeatSeconds, leeway: .milliseconds(500)) { [weak self] in
+                guard let self else { return }
+                // Intent-owned pause commands can arrive without IPC. Refresh the provider's
+                // pause cache through its existing owner before describing the operational state.
+                self.refreshProtectionPauseStateOnly(reason: "status-heartbeat")
+            }
+        }
+    }
+
+    /// Writes only a small publication, on semantic changes or the heartbeat. No per-query disk churn.
+    func publishProtectionStatus(fromDriverTick: Bool = false) {
+        let clock = ProtectionStatusPublicationClock.capture()
+        if fromDriverTick, let previous = protectionStatusPublication,
+           clock.continuousNanoseconds >= previous.continuousNanoseconds,
+           clock.continuousNanoseconds - previous.continuousNanoseconds < 1_000_000_000 { return }
+        let previous = protectionStatusLastWriteAttempt
+        guard let next = protectionStatusPublisher.observe(currentProtectionStatusEvidence(now: clock.date), clock: clock)
+        else { return }
+        protectionStatusPublication = next
+        let changed = previous?.status != next.status || previous?.providerLifecycleID != next.providerLifecycleID
+            || previous?.sessionGeneration != next.sessionGeneration || previous?.transportGeneration != next.transportGeneration
+            || previous?.verificationEpoch != next.verificationEpoch
+        let renewalDue = previous.map { $0.continuousNanoseconds }.map {
+            clock.continuousNanoseconds >= $0 && Double(clock.continuousNanoseconds - $0) / 1_000_000_000
+                >= ProtectionStatusPublication.heartbeatSeconds
+        } ?? true
+        if changed || renewalDue {
+            // Bound retries even if storage refuses the write: no per-query I/O or Darwin-nudge storm.
+            protectionStatusLastWriteAttempt = next
+            if let url = LavaSecAppGroup.protectionStatusPublicationURL {
+                do {
+                    // INV-PERSIST-2: status must remain readable by the boot/on-demand tunnel before unlock.
+                    try JSONEncoder().encode(next).write(to: url, options: SharedStateFileProtection.atomicControlPlaneWritingOptions)
+                } catch { /* The existing file's absolute lease still expires; IPC retains current truth. */ }
+            }
+        }
+        // Persist before nudging: a foreground reader sees the same semantic publication as IPC.
+        if changed { connectivitySignalNotifier.postNotification(named: TunnelHealthSignal.darwinNotificationName) }
+    }
+
+    /// An IPC reader gets current operational observations with retained provider proof. This only
+    /// advances the projection; it cannot write, probe, repair or execute the app reducer's effects.
+    func sampleProtectionStatusPublication(evidence: ProtectionStatusEvidence? = nil) -> ProtectionStatusPublication? {
+        let clock = ProtectionStatusPublicationClock.capture()
+        let next = protectionStatusPublisher.observe(evidence ?? currentProtectionStatusEvidence(now: clock.date), clock: clock)
+        protectionStatusPublication = next
+        return next
     }
 }

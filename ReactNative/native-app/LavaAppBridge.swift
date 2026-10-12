@@ -198,6 +198,7 @@ final class LavaAppBridge: NSObject, ObservableObject {
         NotificationCenter.default.publisher(for: UIApplication.protectedDataDidBecomeAvailableNotification).sink { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.security.protectedDataDidBecomeAvailable()
+                self?.model.refreshProtectionStatusForForegroundPresentation()
                 self?.publish()
             }
         }.store(in: &subscriptions)
@@ -221,7 +222,11 @@ final class LavaAppBridge: NSObject, ObservableObject {
         NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification).sink { [weak self] _ in
             // Restore the current authorized projection before asynchronous DNS
             // refresh work. snapshot() still withholds fields while Lava is locked.
-            MainActor.assumeIsolated { SecurityController.tracePresentation("application.active"); self?.publish() }
+            MainActor.assumeIsolated {
+                SecurityController.tracePresentation("application.active")
+                self?.model.refreshProtectionStatusForForegroundPresentation()
+                self?.publish()
+            }
             Task { @MainActor [weak self] in
                 self?.model.requestDNSSettingsPresentationRefresh()
                 await self?.refreshManagedDNSPatch()

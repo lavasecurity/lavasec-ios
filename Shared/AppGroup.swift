@@ -16,6 +16,8 @@ enum LavaSecAppGroup {
     // separate from filter-library.json so background warming can never clobber a foreground edit.
     static let backgroundWarmIndexFilename = "background-warm-index.json"
     static let tunnelHealthFilename = "tunnel-health.json"
+    /// Provider-written operational status, independent of the debounced diagnostics snapshot.
+    static let protectionStatusPublicationFilename = "protection-status-publication.json"
     static let diagnosticsFilename = "diagnostics.json"
     static let diagnosticsControlFilename = "diagnostics-control.json"
     /// SQLite depth store for Domain History (`DNSEventLog`): tunnel-writes, app-reads-only.
@@ -42,6 +44,30 @@ enum LavaSecAppGroup {
     static let flushTunnelHealthMessage = "flush-tunnel-health"
     static let readTunnelHealthMessage = "read-tunnel-health"
     static let readProtectionStatusMessage = "read-protection-status"
+
+    static var protectionStatusPublicationURL: URL? {
+        containerURL?.appendingPathComponent(protectionStatusPublicationFilename)
+    }
+
+    /// Uses the existing device-local lifecycle fence. A retired provider's file cannot bless a replacement.
+    static let protectionStatusIdentityWork = ProtectionStatusIdentityWork(operation: readProtectionStatusProviderID)
+
+    private static func readProtectionStatusProviderID() -> String? {
+        guard let lockURL = chainedLifecycleEvidenceLockURL,
+              let accessGroup = chainedUpstreamKeychainAccessGroup else { return nil }
+        let store = ChainedDeviceEligibilityStore(items: ChainedDeviceStateKeychainItemStore(
+            accessGroup: accessGroup, lifecycleEvidenceLockURL: lockURL))
+        guard case .snapshot(let snapshot) = store.read(), snapshot.uncleanTerminationMarkerIsSet else { return nil }
+        return snapshot.activeSessionLifecycleID
+    }
+
+    /// This is a read-only projection: absence or unreadability never seeds shared state.
+    static func readProtectionStatusPublication() -> ProtectionStatusPublication? {
+        guard let url = protectionStatusPublicationURL,
+              case .loaded(let publication) = SharedStateFileReader.read(ProtectionStatusPublication.self, from: url)
+        else { return nil }
+        return publication
+    }
     /// Ask the tunnel for CURRENT chained-upstream runtime truth — a prompt, lightweight read sampled
     /// immediately and about once per second while establishing, then at a lower monitoring cadence
     /// for a live chained session. The NE's `.connected` status flips when the tunnel process starts,

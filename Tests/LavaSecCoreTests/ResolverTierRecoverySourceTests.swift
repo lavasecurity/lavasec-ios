@@ -308,8 +308,12 @@ final class ResolverTierRecoverySourceTests: XCTestCase {
             "self.resolverBackoffPathEpoch += 1", "self.resetResolverTierEvidence()",
             "self.latestMonitoredPathIsSatisfied = update.isSatisfied", "self.handleNetworkPathUpdate(update)"
         ]))
-        XCTAssertTrue(source.contains("self.tunnelLifecycleIsActive = false\n            self.resetResolverTierEvidence()"))
-        XCTAssertTrue(source.contains("self.tunnelLifecycleIsActive = true\n            self.resetResolverTierEvidence()"))
+        let begin = try sourceBlock(in: source, startingAt: "private func beginTunnelLifecycle(",
+                                    endingBefore: "private func invalidateTunnelLifecycle(")
+        let end = try sourceBlock(in: source, startingAt: "private func invalidateTunnelLifecycle(",
+                                  endingBefore: "private func currentTunnelLifecycleIsActive(")
+        XCTAssertTrue(begin.containsTierPinsInOrder(["self.tunnelLifecycleIsActive = true", "self.resetResolverTierEvidence()"]))
+        XCTAssertTrue(end.containsTierPinsInOrder(["self.tunnelLifecycleIsActive = false", "self.resetResolverTierEvidence()"]))
         let plain = try sourceBlock(in: source, startingAt: "func resolvePlainDNS(", endingBefore: "func resolveUDP(")
         XCTAssertTrue(plain.containsTierPinsInOrder(["let udpPathEpoch = currentResolverTierPathEpoch()",
                                             "let udpResult = resolveUDP(", "pathEpoch: udpPathEpoch, actualEgress: actualEgress"]))

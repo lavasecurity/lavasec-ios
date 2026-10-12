@@ -1,3 +1,4 @@
+import {windowLayout} from '../src/window-layout';
 import {useLayoutEffect,useRef,useState,type PropsWithChildren, type ReactNode} from 'react';
 import {ActivityIndicator,Animated,Easing,Pressable,ScrollView,StyleSheet,View} from 'react-native';
 import {LavaActionButton} from '../src';
@@ -31,15 +32,15 @@ export function OnboardingCurtain({welcome,width,height,reduced,crossFade=false,
   </Animated.View>;
 }
 
-/** Keep the source anchor and scrolling page in one flexible stage. A short
+/** Keep the source anchor and scrolling page in one flexible stage. A
  * landscape window uses the source slot beside the page, above the same footer.
  * Each page owns its horizontal inset, so an outgoing page keeps its geometry
  * while Welcome uses the full width. The decorative anchor stays in place. */
 export function OnboardingStageLayout({source,progress,width,height,left=0,right=0,welcome=false,children}:PropsWithChildren<{source:Anchor;progress?:ReactNode;width:number;height:number;left?:number;right?:number;welcome?:boolean}>){
-  const compact=width>height&&height<foundation.layout.expandedSceneMinHeight;
+  const compact=width>height;const sourceSize=128*windowLayout({width,height}).scale;
   return <View testID="onboarding.stage" style={{flex:1,flexDirection:compact?'row':'column',paddingLeft:compact?left:0,paddingRight:compact?right:0}}>
-    <View testID="onboarding.source.column" style={compact?{position:'absolute' as const,left,width:128}:{}}>
-      <View ref={source} testID="onboarding.source" collapsable={false} style={compact?{width:128,height:128}:{height:128}}/>
+    <View testID="onboarding.source.column" style={compact?{position:'absolute' as const,left,width:sourceSize}:{}}>
+      <View ref={source} testID="onboarding.source" collapsable={false} style={compact?{width:sourceSize,height:sourceSize}:{height:sourceSize}}/>
       {progress}
     </View>
     <View testID="onboarding.pages.viewport" style={{flex:1,minWidth:0,overflow:'hidden'}}>{children}</View>

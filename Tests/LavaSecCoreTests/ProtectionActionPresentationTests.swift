@@ -4,6 +4,42 @@ import LavaSecPresentation
 
 @MainActor
 final class ProtectionActionPresentationTests: XCTestCase {
+    func testAcceptedStartImmediatelyLeavesOffAndNeverOverridesObservedOutcomes() {
+        for action in [ProtectionActionKind.turnOn, .toggle] {
+            var presentation = ProtectionActionPresentation()
+            presentation.update(action: action, currentTitle: "Turn On", currentStatus: .off)
+            XCTAssertEqual(presentation.status(whileObserving: .off), .turningOn)
+            for status: ProtectionStatus in [.unavailable, .chainingFailed, .connected(.networkUnavailable),
+                .vpnRecovering, .turningOff, .connected(.healthy)] {
+                XCTAssertEqual(presentation.status(whileObserving: status), status)
+            }
+            presentation.update(action: nil, currentTitle: "Turn On")
+            XCTAssertEqual(presentation.status(whileObserving: .off), .off)
+        }
+    }
+
+    func testStopAndUnrelatedActionsCannotClaimStarting() {
+        for action in ProtectionActionKind.allCases where action != .turnOn && action != .toggle {
+            var presentation = ProtectionActionPresentation()
+            presentation.update(action: action, currentTitle: "Turn On", currentStatus: .off)
+            XCTAssertEqual(presentation.status(whileObserving: .off), .off)
+        }
+        var stop = ProtectionActionPresentation()
+        stop.update(action: .toggle, currentTitle: "Turn Off", currentStatus: .connected(.healthy))
+        XCTAssertEqual(stop.status(whileObserving: .off), .off)
+    }
+
+    func testDisconnectAfterIOSBeginsStartupCannotRevivePreparation() {
+        var presentation = ProtectionActionPresentation()
+        presentation.update(action: .turnOn, currentTitle: "Turn On", currentStatus: .off)
+        presentation.observe(lifecycle: .disconnected)
+        XCTAssertEqual(presentation.status(whileObserving: .off), .turningOn)
+        presentation.observe(lifecycle: .connecting)
+        presentation.observe(lifecycle: .disconnected)
+        XCTAssertEqual(presentation.status(whileObserving: .off), .off)
+        XCTAssertEqual(presentation.pendingTitle, "Turn On", "failure cannot rename the accepted operation")
+    }
+
     func testStartAndStopKeepAcceptedTitleUntilMatchingRelease() {
         for (acceptedTitle, settledTitle) in [("Turn On", "Turn Off"), ("Turn Off", "Turn On"), ("Resume Now", "Turn Off"), ("Reconnect", "Turn Off")] {
             let harness = ActionPresentationHarness(currentTitle: acceptedTitle)

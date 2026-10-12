@@ -412,6 +412,7 @@ extension PacketTunnelProvider {
                         return
                     }
                     self.tunnelStartupDidComplete = true
+                    self.publishProtectionStatus()
                     // The gap a committed self-reconnect opened closes HERE — every known
                     // startup route installed, packets flowing — never at startTunnel entry.
                     Self.closeDanglingSelfReconnectGapIfNeeded()
@@ -479,6 +480,8 @@ extension PacketTunnelProvider {
             // onto the engine queue is one-directional: nothing on the engine queue ever
             // waits on dnsStateQueue (INV-QUEUE-1), so this cannot deadlock.
             self?.chainedRuntime?.driver.sleep()
+            self?.protectionStatusHeartbeat.assumeIsolated { $0.stop() }
+            self?.publishProtectionStatus()
             self?.resolverSleepBeganAt = Date()
             // Drain the event log's buffered best-effort appends before iOS can suspend the
             // process: batched appends (UR-53 follow-up) hold up to a flush window in memory,
@@ -557,6 +560,8 @@ extension PacketTunnelProvider {
             // wakes in 9.7 h in the rc9 field data; the preserve branch is the common
             // case, not the exception).
             self.chainedRuntime?.driver.wake()
+            self.publishProtectionStatus()
+            self.startProtectionStatusHeartbeat()
 
             let sleepBeganAt = self.resolverSleepBeganAt
             self.resolverSleepBeganAt = nil
@@ -675,6 +680,11 @@ extension PacketTunnelProvider {
             self.cancelDNSPatchStartupInstallCompletion()
             self.tunnelLifecycleGeneration += 1
             self.tunnelLifecycleIsActive = true
+            self.tunnelStartupDidComplete = false
+            self.protectionStatusHeartbeat.assumeIsolated { $0.stop() }
+            self.protectionStatusPublisher = .init()
+            self.protectionStatusPublication = nil
+            self.protectionStatusLastWriteAttempt = nil
             self.resetResolverTierEvidence()
             #if DEBUG || LAVA_QA_TOOLS
             LavaSecDeviceDebugLog.append(component: "tunnel", event: "lifecycle-begin", details: [
@@ -696,6 +706,8 @@ extension PacketTunnelProvider {
         let invalidate = {
             self.tunnelLifecycleGeneration += 1
             self.tunnelLifecycleIsActive = false
+            self.protectionStatusHeartbeat.assumeIsolated { $0.stop() }
+            self.publishProtectionStatus()
             self.resetResolverTierEvidence()
             self.dnsPatchStartupInstallPolicy?.cancel()
             self.cancelDNSPatchStartupInstallCompletion()

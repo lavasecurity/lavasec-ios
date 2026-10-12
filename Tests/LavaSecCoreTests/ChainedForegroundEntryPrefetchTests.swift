@@ -174,6 +174,202 @@ final class ChainedForegroundEntryPrefetchTests: XCTestCase {
         XCTAssertEqual(state.milestone, .none)
     }
 
+    private func providerReply(_ publication: ProtectionStatusPublication, bytes: UInt64 = 101,
+                               baseline: UInt64 = 100, condition: ChainedRuntimeCondition = .normal) -> ChainedHandshakeStatus {
+        .init(isChained: true, hasHandshake: true, everHandshaked: true,
+            receivedByteCount: bytes, sessionGeneration: publication.sessionGeneration ?? 1,
+            transportGeneration: publication.transportGeneration ?? 1,
+            providerLifecycleID: publication.providerLifecycleID, verificationEpoch: publication.verificationEpoch,
+            forwardingBaseline: baseline, runtimeCondition: condition,
+            health: .init(startedAt: date, networkPathIsSatisfied: condition != .offline),
+            statusPublication: publication)
+    }
+
+    private func publication(_ publisher: inout ProtectionStatusPublisher, at seconds: Double,
+                             bytes: UInt64, epoch: UInt64, baseline: UInt64,
+                             condition: ChainedRuntimeCondition = .normal) throws -> ProtectionStatusPublication {
+        let time = date.addingTimeInterval(seconds)
+        let evidence = ProtectionStatusEvidence(sampledAt: time, lifecycleIsActive: true,
+            health: .init(startedAt: date, networkPathIsSatisfied: condition != .offline),
+            pauseUntil: nil, isChained: true, sessionGeneration: 1, forwardedBytes: bytes,
+            transportGeneration: 1, setupReady: false, providerLifecycleID: "provider-A",
+            verificationEpoch: epoch, forwardingBaseline: baseline, runtimeCondition: condition)
+        return try XCTUnwrap(publisher.observe(evidence, clock: .init(date: time, bootSessionID: "boot-A",
+            continuousNanoseconds: UInt64(seconds * 1_000_000_000))))
+    }
+
+    func testFreshCanonicalWakeReplyReplacesExpiredFileBeforeForegroundPresentation() throws {
+        var publisher = ProtectionStatusPublisher()
+        let old = try publication(&publisher, at: 1, bytes: 100, epoch: 1, baseline: 0)
+        _ = try publication(&publisher, at: 2, bytes: 100, epoch: 1, baseline: 0, condition: .suspended)
+        let current = try publication(&publisher, at: 3600, bytes: 101, epoch: 2, baseline: 100)
+        var state = settled(sample(bytes: 100), userInitiated: true)
+        var entry = Entry()
+        let token = entry.begin(connection: 1, identity: try XCTUnwrap(state.foregroundEntryIdentity), now: 3600)
+        XCTAssertTrue(entry.stageProviderReply(providerReply(current), for: token, now: 3600.01))
+        let candidate = try XCTUnwrap(entry.consume(connection: 1, identity: state.foregroundEntryIdentity, now: 3600.02))
+        let reply = try XCTUnwrap(candidate.providerReply)
+        var reader = ProtectionStatusPublicationReader()
+        let clock = ProtectionStatusPublicationClock.Sample(date: date.addingTimeInterval(3600.02),
+            bootSessionID: "boot-A", continuousNanoseconds: 3_600_020_000_000)
+        XCTAssertTrue(reader.admit(reply.statusPublication, clock: clock, providerLifecycleID: "provider-A", connectedAt: date))
+        XCTAssertFalse(reader.admit(old, clock: clock, providerLifecycleID: "provider-A", connectedAt: date))
+        XCTAssertEqual(reader.status(clock: clock, providerLifecycleID: "provider-A", connectedAt: date), .connected(.healthy))
+        XCTAssertEqual(P.reduce(state: &state, event: .observed(connection: 1,
+            observation: candidate.observation, now: candidate.receivedAt)), [])
+        XCTAssertEqual(state.claim, .confirmed)
+        XCTAssertEqual(state.lastAcceptedAt, 3600.01, "Activation preserves the real sample age")
+    }
+
+    func testCurrentWakeEpochWithoutNewForwardingNeverRestoresOldProtectedClaim() throws {
+        for condition in [ChainedRuntimeCondition.normal, .offline, .recovering, .suspended, .retired] {
+            var publisher = ProtectionStatusPublisher()
+            _ = try publication(&publisher, at: 1, bytes: 100, epoch: 1, baseline: 0)
+            let current = try publication(&publisher, at: 3600, bytes: 100, epoch: 2, baseline: 100, condition: condition)
+            var state = settled(sample(bytes: 100), userInitiated: true)
+            var entry = Entry()
+            let token = entry.begin(connection: 1, identity: try XCTUnwrap(state.foregroundEntryIdentity), now: 3600)
+            XCTAssertTrue(entry.stageProviderReply(providerReply(current, bytes: 100, condition: condition),
+                for: token, now: 3600.01))
+            let candidate = try XCTUnwrap(entry.consume(connection: 1, identity: state.foregroundEntryIdentity, now: 3600.02))
+            XCTAssertNotEqual(candidate.providerReply?.statusPublication?.status, .connected(.healthy))
+            P.reduce(state: &state, event: .observed(connection: 1, observation: candidate.observation, now: candidate.receivedAt))
+            XCTAssertNotEqual(state.claim, .confirmed)
+            XCTAssertEqual(state.milestone, .none)
+        }
+    }
+
+    func testCanonicalPrefetchKeepsAbsoluteBoundsAndRejectsMismatchedWriter() throws {
+        var publisher = ProtectionStatusPublisher()
+        let current = try publication(&publisher, at: 3600, bytes: 101, epoch: 2, baseline: 100)
+        let identity = try XCTUnwrap(settled().foregroundEntryIdentity)
+        var entry = Entry()
+        let token = entry.begin(connection: 1, identity: identity, now: 3600)
+        XCTAssertTrue(entry.isPending(now: 3600.01), "An in-flight unlock read can be reused")
+        XCTAssertTrue(entry.stageProviderReply(providerReply(current), for: token, now: 3600.01))
+        XCTAssertTrue(entry.isPending(now: 3600.1))
+        XCTAssertTrue(entry.isPending(now: 3601), "Canonical evidence retains its original publication lease")
+        XCTAssertFalse(entry.isPending(now: 3610.01))
+        XCTAssertNil(entry.consume(connection: 1, identity: identity, now: 3610.01))
+        XCTAssertFalse(entry.stageProviderReply(providerReply(current), for: token, now: 3610.02))
+        let fresh = entry.begin(connection: 1, identity: identity, now: 3602)
+        let mismatch = ChainedHandshakeStatus(isChained: true, hasHandshake: true, everHandshaked: true,
+            providerLifecycleID: "provider-B", statusPublication: current)
+        XCTAssertFalse(entry.stageProviderReply(mismatch, for: fresh, now: 3602.01))
+        XCTAssertFalse(entry.stageProviderReply(providerReply(current), for: fresh, now: 3604))
+    }
+
+    func testCanonicalPrefetchStagesCurrentDNSOnlyAndInactiveReplies() throws {
+        let identity = try XCTUnwrap(settled().foregroundEntryIdentity)
+        for active in [true, false] {
+            var entry = Entry()
+            let token = entry.begin(connection: 1, identity: identity, now: 100)
+            let reply = ChainedHandshakeStatus(isChained: false, hasHandshake: false, everHandshaked: false,
+                lifecycleIsActive: active)
+            XCTAssertTrue(entry.stageProviderReply(reply, for: token, now: 100.01))
+            let candidate = try XCTUnwrap(entry.consume(connection: 1, identity: identity, now: 100.02))
+            XCTAssertEqual(candidate.observation, active ? .dnsOnly : .inactive)
+            XCTAssertNotNil(candidate.providerReply)
+        }
+    }
+
+    func testCompletedMissingUnlockReplyAllowsForegroundRetryAndLateCompletionCannotRetireIt() throws {
+        let identity = try XCTUnwrap(settled().foregroundEntryIdentity)
+        var entry = Entry()
+        let unlock = entry.begin(connection: 1, identity: identity, now: 100)
+        XCTAssertTrue(entry.isPending(now: 100.01))
+        XCTAssertFalse(entry.stageProviderReply(nil, for: unlock, now: 100.02))
+        XCTAssertFalse(entry.isPending(now: 100.03), "A completed failed read must not suppress the foreground retry")
+        let foreground = entry.begin(connection: 1, identity: identity, now: 100.04)
+        XCTAssertFalse(entry.stageProviderReply(nil, for: unlock, now: 100.05))
+        XCTAssertTrue(entry.isPending(now: 100.06), "A retired completion cannot finish the newer physical read")
+        var publisher = ProtectionStatusPublisher()
+        let current = try publication(&publisher, at: 100, bytes: 101, epoch: 2, baseline: 100)
+        XCTAssertTrue(entry.stageProviderReply(providerReply(current), for: foreground, now: 100.07))
+        XCTAssertNotNil(entry.consume(connection: 1, identity: identity, now: 100.08))
+    }
+
+    func testInactiveReplyWithRetainedTerminalPublicationFencesOutPreviousHealthyFile() throws {
+        var publisher = ProtectionStatusPublisher()
+        let healthy = try publication(&publisher, at: 1, bytes: 100, epoch: 1, baseline: 0)
+        let clock = ProtectionStatusPublicationClock.Sample(date: date.addingTimeInterval(2),
+            bootSessionID: "boot-A", continuousNanoseconds: 2_000_000_000)
+        let terminal = try XCTUnwrap(publisher.observe(.init(sampledAt: clock.date, lifecycleIsActive: false,
+            health: .init(startedAt: date), pauseUntil: nil, isChained: false,
+            sessionGeneration: nil, forwardedBytes: nil, providerLifecycleID: "provider-A"), clock: clock))
+        XCTAssertEqual(terminal.status, .unavailable)
+        let reply = ChainedHandshakeStatus(isChained: false, hasHandshake: false, everHandshaked: false,
+            lifecycleIsActive: false, providerLifecycleID: nil, statusPublication: terminal)
+        let identity = try XCTUnwrap(settled().foregroundEntryIdentity)
+        var entry = Entry()
+        let token = entry.begin(connection: 1, identity: identity, now: 2)
+        XCTAssertTrue(entry.stageProviderReply(reply, for: token, now: 2.01))
+        let candidate = try XCTUnwrap(entry.consume(connection: 1, identity: identity, now: 2.02))
+        XCTAssertEqual(candidate.observation, .inactive)
+        // Production terminal envelope supplies the retained ID only for an unavailable status.
+        let retainedID = candidate.providerReply?.statusPublication?.providerLifecycleID
+        var reader = ProtectionStatusPublicationReader()
+        XCTAssertTrue(reader.admit(candidate.providerReply?.statusPublication, clock: clock,
+            providerLifecycleID: retainedID, connectedAt: date))
+        XCTAssertFalse(reader.admit(healthy, clock: clock, providerLifecycleID: retainedID, connectedAt: date))
+        XCTAssertEqual(reader.status(clock: clock, providerLifecycleID: retainedID, connectedAt: date), .unavailable)
+    }
+
+    func testForegroundRefreshRetainsCanonicalBackupAcrossTheShortLegacyWindow() throws {
+        let identity = try XCTUnwrap(settled().foregroundEntryIdentity)
+        var publisher = ProtectionStatusPublisher()
+        let current = try publication(&publisher, at: 100, bytes: 101, epoch: 2, baseline: 100)
+        var entry = Entry()
+        let unlock = entry.begin(connection: 1, identity: identity, now: 100)
+        XCTAssertTrue(entry.stageProviderReply(providerReply(current), for: unlock, now: 100.01))
+        let foreground = entry.begin(connection: 1, identity: identity, now: 100.49, retainingCandidate: true)
+        XCTAssertFalse(entry.stageProviderReply(nil, for: foreground, now: 100.5))
+        let candidate = try XCTUnwrap(entry.consume(connection: 1, identity: identity, now: 100.65))
+        XCTAssertEqual(candidate.providerReply?.statusPublication, current)
+        XCTAssertEqual(candidate.receivedAt, 100.01, "Foreground refresh cannot renew the backup's sample")
+
+        let old = entry.begin(connection: 1, identity: identity, now: 101)
+        let restarted = entry.begin(connection: 1, identity: identity, now: 102.9, retainingCandidate: true)
+        XCTAssertFalse(entry.stageProviderReply(providerReply(current), for: old, now: 102.95))
+        XCTAssertTrue(entry.stageProviderReply(providerReply(current), for: restarted, now: 103.01))
+        XCTAssertNotNil(entry.consume(connection: 1, identity: identity, now: 103.05))
+    }
+
+    func testForegroundRefreshReplacesBackupWithCurrentFailureAndCannotCarryAcrossConnections() throws {
+        let identity = try XCTUnwrap(settled().foregroundEntryIdentity)
+        var publisher = ProtectionStatusPublisher()
+        let healthy = try publication(&publisher, at: 100, bytes: 101, epoch: 2, baseline: 100)
+        let failure = try publication(&publisher, at: 101, bytes: 101, epoch: 2, baseline: 100, condition: .offline)
+        var entry = Entry()
+        let unlock = entry.begin(connection: 1, identity: identity, now: 100)
+        XCTAssertTrue(entry.stageProviderReply(providerReply(healthy), for: unlock, now: 100.01))
+        let foreground = entry.begin(connection: 1, identity: identity, now: 100.49, retainingCandidate: true)
+        XCTAssertTrue(entry.stageProviderReply(providerReply(failure, condition: .offline), for: foreground, now: 101.01))
+        let candidate = try XCTUnwrap(entry.consume(connection: 1, identity: identity, now: 101.02))
+        XCTAssertEqual(candidate.providerReply?.statusPublication?.status, .connected(.networkUnavailable))
+        let next = entry.begin(connection: 1, identity: identity, now: 102)
+        XCTAssertTrue(entry.stageProviderReply(providerReply(healthy), for: next, now: 102.01))
+        _ = entry.begin(connection: 2, identity: identity, now: 102.02, retainingCandidate: true)
+        XCTAssertNil(entry.consume(connection: 2, identity: identity, now: 102.03))
+    }
+
+    func testRetainedCanonicalBackupCannotRenewTheProvidersAbsoluteLease() throws {
+        let identity = try XCTUnwrap(settled().foregroundEntryIdentity)
+        var publisher = ProtectionStatusPublisher()
+        let current = try publication(&publisher, at: 100, bytes: 101, epoch: 2, baseline: 100)
+        var entry = Entry()
+        let unlock = entry.begin(connection: 1, identity: identity, now: 100)
+        XCTAssertTrue(entry.stageProviderReply(providerReply(current), for: unlock, now: 100.49))
+        _ = entry.begin(connection: 1, identity: identity, now: 109.98, retainingCandidate: true)
+        let candidate = try XCTUnwrap(entry.consume(connection: 1, identity: identity, now: 110.01))
+        let clock = ProtectionStatusPublicationClock.Sample(date: date.addingTimeInterval(110.01),
+            bootSessionID: "boot-A", continuousNanoseconds: 110_010_000_000)
+        var reader = ProtectionStatusPublicationReader()
+        XCTAssertFalse(reader.admit(candidate.providerReply?.statusPublication, clock: clock,
+            providerLifecycleID: "provider-A", connectedAt: date))
+        XCTAssertEqual(reader.status(clock: clock, providerLifecycleID: "provider-A", connectedAt: date), .unavailable)
+    }
+
     func testUnresolvedUserStartAndTeardownStayOnExistingActiveLane() {
         var state = P.State()
         P.reduce(state: &state, event: .statusChanged(.connected, onDemandConfirmed: true, userInitiated: true, now: 0))

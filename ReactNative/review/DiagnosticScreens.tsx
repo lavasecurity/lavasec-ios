@@ -1,3 +1,4 @@
+import {useWindowStyles} from '../src/window-layout';
 import {useRouteViewState} from '../app/use-route-view-state';
 import {usePlusEntry} from './plus-entry';
 import {SettingsIntro} from './settings-scaffold';
@@ -8,13 +9,13 @@ import {QueryContent, useSettledSearch} from './QueryContent';
 import {useAppQuery} from '../app/queries';
 import {useAppAction} from '../app/actions';
 import {useEffect, useMemo, useRef, useState} from 'react';
-import {ActivityIndicator, View} from 'react-native';
+import {ActivityIndicator, Linking, View} from 'react-native';
 import NativeReview from '../specs/NativeLavaReview';
 import {LavaActionButton, LavaCard} from '../src';
 import {colors} from '../src/colors.ios';
 import {Choice, Copy, DisclosureRow, Screen, Section, Symbol} from './primitives';
 import {Control, Group, Info, ListRow, Quiet, QuietFooter, Search, StatusPill, toolbarButton, useToolbar, nativeSearchOptions} from './scaffold';
-import {DetailNotice, DetailValues, detailStyles as s} from './detail-scaffold';
+import {DetailNotice, DetailValues, detailStyles as base_s} from './detail-scaffold';
 import {useReview} from './ReviewContext';
 import {previewDomains} from './preview-model';
 import {previewNotice, useReviewNavigation} from './navigation';
@@ -22,6 +23,7 @@ import {reviewDNSProviders} from './session';
 import {useIsFocused, useRoute} from '@react-navigation/native';
 
 export function DomainListScreen({history=false}: {history?: boolean}) {
+  const s=useWindowStyles(base_s);
   const upgrade=usePlusEntry();
   const {app,session,setSession,activityExample,live}=useReview(); const run=useAppAction(); const nav=useReviewNavigation();const [search,setSearch]=useRouteViewState('');const [decision,setDecision]=useRouteViewState('All');
   const focused=useIsFocused();const canOpenReview=useRef(focused);
@@ -67,7 +69,7 @@ export function DomainListScreen({history=false}: {history?: boolean}) {
   useToolbar({headerSearchBarOptions:nativeSearchOptions('Search domains',setSearch),unstable_headerRightItems:()=>[toolbarButton('Clear Domain Logs','trash',clear,!canClear)]},[canClear]);
   // The search field belongs to the navigation item, so it no longer rides the
   // page's content insets; with it gone the page has no text input to avoid.
-  return <Screen onRefresh={app?()=>query.refresh():undefined} onEndReached={()=>{if(app&&history&&!query.refreshing&&query.value&&query.value.length>limit&&!loadingMore.current){loadingMore.current=true;setLimit(limit+30);}}}>
+  return <Screen showsVerticalScrollIndicator onRefresh={app?()=>query.refresh():undefined} onEndReached={()=>{if(app&&history&&!query.refreshing&&query.value&&query.value.length>limit&&!loadingMore.current){loadingMore.current=true;setLimit(limit+30);}}}>
     <Section title="Show"><Choice label="Show" options={['All','Allowed','Blocked']} value={decision} onChange={setDecision}/></Section>
     <View style={{gap:foundation.space.md}}>
       <QueryContent pending={!!enabled&&!!app&&!query.value} testID="domain-query-content">
@@ -82,6 +84,7 @@ export function DomainListScreen({history=false}: {history?: boolean}) {
 }
 type NetworkRecord={id:string;title:string;subtitle:string;metadata:string;theme?:{title:string;symbol:string;tone:'green'|'orange'|'secondary'}};
 function NetworkRow({row}:{row:NetworkRecord}) {
+  const s=useWindowStyles(base_s);
   return <View accessible accessibilityRole="text" testID={`network-row.${row.id}`}
     accessibilityLabel={[row.theme?.title,row.metadata,row.title,row.subtitle].filter(Boolean).map(value=>localized(value!)).join(', ')}
     style={s.record}>
@@ -102,21 +105,34 @@ export function NetworkScreen() {
   // accepted empty log starts the next populated log at the first page.
   useEffect(()=>{if(query.value?.length===0)setLimit(30);},[query.value?.length]);
   useToolbar({unstable_headerRightItems:()=>[toolbarButton('Clear network activity','trash',()=>Alert.alert('Clear local network activity?','This removes saved network activity entries from this phone. Filtering counts and domain history are unchanged.',[{text:'Cancel',style:'cancel'},{text:'Clear Activity',style:'destructive',onPress:()=>run({type:'logs.clear',kind:'Clear network activity',surface:'activityViewing'})}]),!query.value?.length)]},[query.value?.length??0]);
-  return <Screen onRefresh={app?()=>query.refresh():undefined} onEndReached={()=>{if(count>limit)setLimit(Math.min(limit+30,count));}}><SettingsIntro summary="Connection and protection events stay on this device for 7 days. Share them only when you choose to attach a bug report."/>
+  return <Screen showsVerticalScrollIndicator onRefresh={app?()=>query.refresh():undefined} onEndReached={()=>{if(count>limit)setLimit(Math.min(limit+30,count));}}><SettingsIntro summary="Connection and protection events stay on this device for 7 days. Share them only when you choose to attach a bug report."/>
     <View testID={query.value?"network.loaded":"network.pending"}><Group>{query.value?.length?query.value.slice(0,limit).map(row=><NetworkRow key={row.id} row={row}/>):<ListRow title={query.error??(app&&!query.value?'Loading network activity…':session.logs['Network activity']?'No network activity yet':'Network activity is off')} />}</Group></View>
   </Screen>;
 }
 
 type Notice={id:string;displayName:string;noticeText:string;plannedUse:string;sourceURL?:string;licenseTextURL?:string;noticeURL?:string;distributionModeDescription?:string};
 type LegalContent={disclaimer:string;sections:{title:string;notices:Notice[]}[]};
+function ProtectionLimitsNotice() {
+  return <Section title="Protection limits">
+    <LavaCard><Copy>Lava cannot block every harmful site. An accessible site is not verified safe. Keep using normal precautions, even when protection is on.</Copy></LavaCard>
+    <Group>
+      <ListRow action icon="doc.text" title="Protection limits & terms" onPress={()=>{void Linking.openURL('https://lavasecurity.app/terms/');}} />
+      <ListRow action icon="doc.text" title="Terms of Use" onPress={()=>{void Linking.openURL('https://www.apple.com/legal/internet-services/itunes/dev/stdeula/');}} />
+      <ListRow action icon="doc.text" title="Privacy Policy" onPress={()=>{void Linking.openURL('https://lavasecurity.app/privacy/');}} />
+    </Group>
+  </Section>;
+}
+
 export function LegalScreen() {
+  const s=useWindowStyles(base_s);
   const run=useAppAction();
   const [expanded,setExpanded]=useRouteViewState<string|undefined>(undefined);
   const [search,setSearch]=useRouteViewState('');
   const data=useMemo<LegalContent|null>(()=>{try{return JSON.parse(NativeReview.getLegalNotices());}catch{return null;}},[]);
-  if(!data)return <Screen><Info title="Legal notices unavailable" description="The local notice catalog could not be read." /></Screen>;
+  if(!data)return <Screen><ProtectionLimitsNotice/><Info title="Legal notices unavailable" description="The local notice catalog could not be read." /></Screen>;
   const sections=data.sections.map(section=>({...section,notices:section.notices.filter(notice=>`${localized(notice.displayName)} ${localized(section.title)} ${localized(notice.noticeText)}`.toLocaleLowerCase().includes(search.toLocaleLowerCase()))})).filter(section=>section.notices.length);
-  return <Screen keyboard><SettingsIntro summary="Credits and licenses for the software used in Lava." />
+  return <Screen keyboard showsVerticalScrollIndicator><SettingsIntro summary="Credits and licenses for the software used in Lava." />
+    <ProtectionLimitsNotice/>
     <Search value={search} onChange={setSearch} label="Search notices" />
     {!sections.length&&<Quiet>No matching notices</Quiet>}
     {sections.map(section=><Section key={section.title} title={section.title}><Group>{section.notices.map(notice=><View key={notice.id}>
@@ -143,7 +159,7 @@ export function StatsScreen() {
     {DoH:'DNS over HTTPS',DoT:'DNS over TLS',DoQ:'DNS over QUIC',IP:'Standard DNS'}[session.transport]??session.transport,
     session.transport==='DoH'?hostname:undefined,
   ].filter(Boolean).map(value=>localized(value!)).join('\n');
-  return <Screen><SettingsIntro summary="Check how your connection is working. These local counters contain no website names."/>
+  return <Screen showsVerticalScrollIndicator><SettingsIntro summary="Check how your connection is working. These local counters contain no website names."/>
     <Section title="App"><Values pending={!!app&&!query.value&&!query.error} rows={app?query.value?.app??[['Version','—'],['Platform','—']]:[['Version','1.5.0'],['Platform','iOS 26.5']]} /></Section>
     <Section title="DNS tiers" footer="Configured settings. With VPN chaining, tiers 1 and 2 require DNS fallback and a split tunnel."><Values metadata pending={!!app&&!query.value&&!query.error} rows={app?query.value?.tiers??[['T0 · VPN chaining','—'],['1 · Primary DNS','—'],['2 · Fallback DNS','—'],['S · System DNS','—']]:[
       ['T0 · VPN chaining',[localized('Off'),localized('Saved configuration unavailable')].join('\n')],

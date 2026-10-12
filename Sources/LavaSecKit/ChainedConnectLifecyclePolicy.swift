@@ -104,6 +104,9 @@ public enum ChainedConnectLifecyclePolicy {
         public let runtimeCondition: ChainedRuntimeCondition
         public let connectivity: ProtectionConnectivitySeverity?
         public let ownsHealth: Bool
+        /// A connected profile alone does not establish whether its live path is chained.
+        public let hasRuntimeObservation: Bool
+        public var awaitingInitialRuntime: Bool { claim == .establishing && !hasRuntimeObservation }
         /// Once this projection owns health, missing live evidence stays unavailable.
         /// A persisted DNS assessment cannot revive an expired chained observation.
         public func effectiveConnectivity(fallback: ProtectionConnectivitySeverity) -> ProtectionConnectivitySeverity? {
@@ -111,13 +114,15 @@ public enum ChainedConnectLifecyclePolicy {
         }
         public init(claim: Claim = .inactive, setupReady: Bool = false, notice: Notice = .none,
                     runtimeCondition: ChainedRuntimeCondition = .normal,
-                    connectivity: ProtectionConnectivitySeverity? = nil, ownsHealth: Bool = false) {
+                    connectivity: ProtectionConnectivitySeverity? = nil, ownsHealth: Bool = false,
+                    hasRuntimeObservation: Bool = false) {
             self.claim = claim
             self.setupReady = setupReady
             self.notice = notice
             self.runtimeCondition = runtimeCondition
             self.connectivity = connectivity
             self.ownsHealth = ownsHealth
+            self.hasRuntimeObservation = hasRuntimeObservation
         }
     }
     /// How long a connected epoch may wait for forwarding evidence before its initial claim becomes
@@ -174,13 +179,14 @@ public enum ChainedConnectLifecyclePolicy {
         fileprivate var connectivity: ProtectionConnectivitySeverity?
         fileprivate var ownsHealth = false
         fileprivate var continuitySupported = false
+        fileprivate var hasRuntimeObservation = false
         public var graceDeadline: TimeInterval? {
             guard let gapStartedAt, let lastAcceptedAt, continuitySupported else { return nil }
             return min(gapStartedAt + observationGraceSeconds, lastAcceptedAt + maximumEvidenceAgeSeconds)
         }
         public var projection: Projection {
             .init(claim: claim, setupReady: setupReady, notice: notice, runtimeCondition: runtimeCondition,
-                  connectivity: connectivity, ownsHealth: ownsHealth)
+                  connectivity: connectivity, ownsHealth: ownsHealth, hasRuntimeObservation: hasRuntimeObservation)
         }
         /// Prefetch is only an optimization for a previously resolved, continuously identified
         /// connection. A pending explicit-start acknowledgement stays on its existing active lane.
@@ -467,6 +473,7 @@ public enum ChainedConnectLifecyclePolicy {
         state.establishmentStartedAt = now
         state.evidence = nil
         resetContinuity(state: &state)
+        state.hasRuntimeObservation = false
         state.setupEvidenceInvalidated = false
         state.initialResolutionDone = false
         state.initialResolutionWasUserInitiated = userInitiated
@@ -500,6 +507,7 @@ public enum ChainedConnectLifecyclePolicy {
             !state.teardownActive
         else { return [] }
 
+        if observation != nil { state.hasRuntimeObservation = true }
         switch observation {
         case .dnsOnly?:
             state.lastAcceptedAt = now

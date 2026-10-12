@@ -215,8 +215,8 @@ test('Settings connection uses the same destination rows in compact and expanded
   mockWindow={...mockWindow,width:1024,height:1366};screen.rerender(panel());
   expect(screen.queryByTestId('connection.phone')).toBeNull();
   expect(screen.getByTestId('connection.dns')).toBeOnTheScreen();
-  expect(screen.getByRole('button',{name:/Filter, Home/})).toBeOnTheScreen();
-  expect(screen.getByTestId('connection.dns.accessory')).toHaveStyle({width:foundation.row.disclosureWidth});
+  expect(screen.getByRole('button',{name:'Filter'})).toBeOnTheScreen();
+  expect(StyleSheet.flatten(screen.getByTestId('connection.dns.accessory').props.style).width).toBeCloseTo(foundation.row.disclosureWidth*1.4);
 });
 
 test('summary metadata stays in its footer slot as filter names, counts, and text scale change',()=>{

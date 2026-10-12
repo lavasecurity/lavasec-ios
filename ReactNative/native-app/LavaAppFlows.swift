@@ -22,6 +22,12 @@ import LavaSecPresentation
 }
 
 @MainActor
+enum LavaAppSheetSizing {
+    case standard
+    case utility
+}
+
+@MainActor
 struct LavaAppNativeFlow: Identifiable {
     let id = UUID()
     let name: String
@@ -52,6 +58,7 @@ struct LavaAppNativeFlow: Identifiable {
     var saveDNSDraft: ((DNSResolutionSelection) -> String?)? = nil
     var reviewedLibrarySession: FilterLibraryEditSession? = nil
     var isImport: Bool { ["import", "importCode", "importScan", "deepLinkImport"].contains(name) }
+    var sheetSizing: LavaAppSheetSizing { isImport ? .utility : .standard }
 }
 
 extension LavaAppBridge {

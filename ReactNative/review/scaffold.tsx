@@ -1,3 +1,4 @@
+import {WindowSizeContext,useWindowLayout,useScaffoldStyles,type WindowSize} from '../src/window-layout';
 import {useHeldActionScrollLock} from '../src/interaction-lock';
 import NativeTextField from '../specs/LavaTextFieldNativeComponent';
 import {BufferedInput,type BufferedInputHandle} from './BufferedInput';
@@ -38,7 +39,7 @@ export const onboardingHeaderOptions={headerTransparent:true,headerStyle:{backgr
 // lavaRow and LavaSheetScaffold. Screens choose an anatomy instead of inventing
 // a card size, row face or presentation for each destination.
 export function Panel({children, warning = false, accent}: PropsWithChildren<{warning?: boolean; accent?: ColorValue}>) {
-  return <View><LavaCard role="panel">{children}</LavaCard>{(warning || accent) && <View pointerEvents="none" style={{position:'absolute',top:0,bottom:0,left:0,right:0,borderWidth:1,borderRadius:foundation.radius.surface,borderCurve:'continuous',borderColor:accent??colors.lavaOrange}} />}</View>;
+  return <View><LavaCard role="panel" borderColor={warning||accent?accent??colors.lavaOrange:undefined}>{children}</LavaCard></View>;
 }
 // Each variant shares one flex slot, whose natural height fits the largest content.
 // This is the Yoga counterpart to a SwiftUI ZStack. Hidden variants contribute only
@@ -53,12 +54,13 @@ export function StableVariants({selectedKey, variants, alignment='top'}: {select
 export function Info({title, description, icon, warning = false, children}: PropsWithChildren<{title: string; description?: string; icon?: string; warning?: boolean}>) {
   const scale = useTextScale(foundation.type.section.dynamicTypeRamp);
   return <Panel warning={warning}><View style={{gap: 10}}>
-    <View style={{flexDirection: 'row', alignItems: 'flex-start', gap: 6}}>{icon && <View style={{width:28*scale,height:22*scale,alignItems:'center',justifyContent:'center'}}><Symbol name={icon} size={28*scale} pointSize={17*scale} tone={warning?"accentOrange":"green"} /></View>}<View style={{flex: 1}}><Copy role="section" lineHeight={22} color={colors.ink}>{title}</Copy></View></View>
+    <View style={{flexDirection: 'row', alignItems: 'flex-start', gap: 6}}>{icon && <View style={{width:28*scale,height:22*scale,alignItems:'center',justifyContent:'center'}}><Symbol responsive={false} name={icon} size={28*scale} pointSize={17*scale} tone={warning?"accentOrange":"green"} /></View>}<View style={{flex: 1}}><Copy role="section" lineHeight={22} color={colors.ink}>{title}</Copy></View></View>
     {description && <Copy role="supporting" color={colors.secondaryText}>{description}</Copy>}
     {children}
   </View></Panel>;
 }
 export function Group({children, plain = false, separators = true, footer, dividerInset = 16, testID, tone='neutral'}: PropsWithChildren<{tone?:'neutral'|'green';plain?: boolean; separators?: boolean; footer?: ReactNode; dividerInset?: number; testID?: string}>) {
+  const s=useScaffoldStyles(windowBase_s);
   const rows = Children.toArray(children);
   // Preserve React's child identity when conditional settings insert/remove a
   // row. Position keys remounted surviving native controls and lost local state.
@@ -71,7 +73,7 @@ export function StatusPill({title,symbol,tone='green'}:{title:string;symbol:stri
   const fill=tone==='orange'?colors.lavaOrangeSoft:tone==='secondary'?colors.secondaryText:colors.softGreen;
   return <View style={{minHeight:24,paddingHorizontal:8,paddingVertical:3,borderRadius:999,overflow:'hidden',flexDirection:'row',alignItems:'center',gap:5,flexShrink:1}}>
     <View pointerEvents="none" style={[StyleSheet.absoluteFill,{backgroundColor:fill,opacity:tone==='secondary'?0.12:1}]}/>
-    <Symbol name={symbol} tone={tone} size={12*scale} pointSize={11*scale} weight="bold"/>
+    <Symbol responsive={false} name={symbol} tone={tone} size={12*scale} pointSize={11*scale} weight="bold"/>
     <Text allowFontScaling dynamicTypeRamp={foundation.type.caption.dynamicTypeRamp} style={{fontSize:foundation.type.caption.fontSize,fontWeight:'600',color,flexShrink:1}}>{title}</Text>
   </View>;
 }
@@ -95,6 +97,7 @@ export function DomainInput({label,placeholder,onChange,onSubmit,editable=true}:
 // Keep the label/value group intact under text-size or width pressure. This is
 // the RN counterpart to native fit-or-stack rows; it never shrinks user text.
 export function AdaptivePair({label,children,alignment='trailing'}: PropsWithChildren<{label:ReactNode;alignment?:'leading'|'trailing'}>) {
+  const s=useScaffoldStyles(windowBase_s);
   const window=useWindowDimensions(); const scale=useTextScale();
   const [width,setWidth]=useState(window.width-72);
   const stacked=width/scale<300;
@@ -113,6 +116,7 @@ export function AccessorySlot({children,switchable=false}: PropsWithChildren<{sw
 }
 export function Quiet({children}: PropsWithChildren) { return <Copy size={13} color={colors.secondaryText}>{children}</Copy>; }
 export function Link({title, onPress, footer = false, testID}: {title: string; onPress: () => void; footer?: boolean; testID?:string}) {
+  const s=useScaffoldStyles(windowBase_s);
   const inExplanation=useContext(ExplanationLinkContext);
   return <Pressable testID={testID} accessibilityRole="link" accessibilityLabel={localized(title)} onPress={onPress} style={[footer||inExplanation?s.quietLink:s.inlineLink,footer&&{alignSelf:'stretch'}]}><Copy testID={testID?`${testID}.label`:undefined} size={13} lineHeight={20} color={colors.safeGreen} weight="600">{title}</Copy></Pressable>;
 }
@@ -126,6 +130,7 @@ export function QuietFooter({note, title, onPress}: {note: string; title: string
 // A labeled native control uses the same row-title face as a switch/list row.
 // Keep this in the scaffold so steppers cannot fall back to body-copy sizing.
 export function Control({children, title}: PropsWithChildren<{title?: string}>) {
+  const s=useScaffoldStyles(windowBase_s);
   return <View style={s.group}><LavaControlContent title={title}>{children}</LavaControlContent></View>;
 }
 // Filter-content lists (blocklists, blocked and allowed domains) lead each row
@@ -142,6 +147,7 @@ export function ListRow({title, subtitle, metadata, icon, leading, trailing, tra
   title: string; subtitle?: string; metadata?: string; icon?: string; leading?: ReactNode; trailing?: ReactNode; outcome?: keyof typeof filterOutcomeSymbol;
   accessibilityHint?:string; trailingRole?:'control'|'disclosure'; separateTrailing?:boolean; expanded?:boolean; minHeight?: number; verticalPadding?: number; onPress?: () => void; onLongPress?:()=>void; pending?:boolean; disabled?: boolean; action?: boolean; color?: ColorValue; testID?: string; selected?: boolean; selectionLocked?:boolean; metadataPrefix?: string; verbatimTitle?:boolean;
 }) {
+  const s=useScaffoldStyles(windowBase_s);
   const hold=useHeldActionScrollLock(!!onLongPress&&!disabled);
   // Visible content owns the inset; independent 44pt targets share that space.
   const content = <View style={[s.listRowContent,verticalPadding!==undefined&&{paddingVertical:verticalPadding}]}>
@@ -169,6 +175,7 @@ export function ListRow({title, subtitle, metadata, icon, leading, trailing, tra
 export function Toggle({title, summary, titleRole, value, onChange, disabled = false, pending = false, standalone = false, optimistic = true, accessibilityHint,testID}: {
   title: string; summary?:string; titleRole?:'rowTitle'|'cardTitle'; accessibilityHint?:string; value: boolean; onChange: (next: boolean) => void | Promise<unknown>; disabled?: boolean; pending?: boolean; standalone?: boolean; optimistic?:boolean;testID?:string;
 }) {
+  const s=useScaffoldStyles(windowBase_s);
   return <View style={standalone?s.group:undefined}><LavaToggleRow testID={testID} title={title} summary={summary} titleRole={titleRole} accessibilityHint={accessibilityHint?localized(accessibilityHint):undefined} value={value} onValueChange={onChange} disabled={disabled} pending={pending} optimistic={optimistic}/></View>;
 }
 // Catalog controls own their native capsule material. The shared sticky strip
@@ -178,6 +185,7 @@ export function CatalogControlMaterial() {
   return <NativeDecoration symbol="catalog.control.material" colorScheme={scheme} pointerEvents="none" accessible={false} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={StyleSheet.absoluteFill}/>;
 }
 export function Search({ref,value, onChange, label = 'Search domains',resetRevision=0,surface='card'}: {ref?:Ref<BufferedInputHandle>;value: string; onChange: (value: string) => void; label?: string;resetRevision?:number;surface?:'card'|'catalog'}) {
+  const s=useScaffoldStyles(windowBase_s);
   const scale=useTextScale();
   const catalog=surface==='catalog';
   const target=catalog?foundation.control.target:48;
@@ -221,6 +229,7 @@ export const fullScreenModalPresentation:NativeStackNavigationOptions = {
 // has committed a replacement callback or finished retiring.
 type SheetOwner={mounted:boolean;listeners:Set<()=>void>};
 function NativeSheetFooter({app,live,owner,children}:{app?:AppStore;live?:AppSnapshot;owner:SheetOwner;children:ReactNode}) {
+  const s=useScaffoldStyles(windowBase_s);
   const subscribe=(listener:()=>void)=>{owner.listeners.add(listener);const unsubscribe=app?.subscribe(listener);return()=>{owner.listeners.delete(listener);unsubscribe?.();};};
   const interactive=useSyncExternalStore(subscribe,()=>owner.mounted&&mayInteractWithPresentation(app));
   const concealed=useSyncExternalStore(subscribe,()=>!owner.mounted||!!app&&(!!app.getPresentationHydration?.().required
@@ -234,15 +243,24 @@ export function useSheetHeaderInset(){
   const height=useContext(HeaderHeightContext)??0;
   return Platform.OS==='ios'?height:0;
 }
-export function Sheet({children, footer, header, scrollRef,headerMaterial=true,scrollMode='form'}: PropsWithChildren<{footer?: ReactNode; header?: ReactNode; scrollRef?: Ref<ScrollViewInstance>;headerMaterial?:boolean;scrollMode?:'form'|'list'}>) {
+type SheetProps=PropsWithChildren<{footer?: ReactNode; header?: ReactNode; scrollRef?: Ref<ScrollViewInstance>;headerMaterial?:boolean;scrollMode?:'form'|'list';showsVerticalScrollIndicator?:boolean}>;
+export function Sheet(props:SheetProps){
+  const [viewport,setViewport]=useState<WindowSize|null>(null);
+  const measure=(size:WindowSize)=>{if(size.width>0&&size.height>0)setViewport(previous=>
+    previous?.width===size.width&&previous.height===size.height?previous:{width:size.width,height:size.height});};
+  return <WindowSizeContext.Provider value={viewport}><SheetBody {...props} onViewport={measure}/></WindowSizeContext.Provider>;
+}
+function SheetBody({children, footer, header, scrollRef,headerMaterial=true,scrollMode='form',showsVerticalScrollIndicator=false,onViewport}:SheetProps&{onViewport:(size:WindowSize)=>void}) {
+  const s=useScaffoldStyles(windowBase_s);
+  const layout=useWindowLayout();const viewport=useContext(WindowSizeContext);
   const nativeLayout=usePresentationNativeLayout();
   const navigation = useNavigation<NativeStackNavigationProp<ParamListBase>>();
   const scheme=useLavaColorScheme();
   const insets=useContext(SafeAreaInsetsContext);
   const horizontalPadding=insets&&(insets.left!==0||insets.right!==0)?{
-    paddingLeft:foundation.space.screenHorizontal+insets.left,paddingRight:foundation.space.screenHorizontal+insets.right,
+    paddingLeft:foundation.space.screenHorizontal*layout.scale+insets.left,paddingRight:foundation.space.screenHorizontal*layout.scale+insets.right,
   }:undefined;
-  const horizontalReadingInsets=horizontalPadding?{...horizontalPadding,maxWidth:foundation.layout.readingWidth+insets!.left+insets!.right}:undefined;
+  const horizontalReadingInsets=horizontalPadding?{...horizontalPadding,maxWidth:layout.readingWidth+insets!.left+insets!.right}:undefined;
   const nativeHeaderInset=useSheetHeaderInset();
   const [viewportHeight,setViewportHeight]=useState(0);
   const [controlsHeight,setControlsHeight]=useState(0);
@@ -278,8 +296,8 @@ export function Sheet({children, footer, header, scrollRef,headerMaterial=true,s
   const canInteract=()=>!concealed&&mayInteractWithPresentation(review?.app);
   const interactive=useSyncExternalStore(review?.app?.subscribe??(()=>()=>{}),canInteract);
   useLayoutEffect(() => {
-    navigation.setOptions({unstable_sheetFooter: footer ? () => owner.current.mounted?<NativeSheetFooter app={review?.app} live={review?.live} owner={owner.current}>{footer}</NativeSheetFooter>:null : undefined});
-  }, [navigation, footer, review?.app,review?.live, interactive]);
+    navigation.setOptions({unstable_sheetFooter: footer ? () => owner.current.mounted?<WindowSizeContext.Provider value={viewport}><NativeSheetFooter app={review?.app} live={review?.live} owner={owner.current}>{footer}</NativeSheetFooter></WindowSizeContext.Provider>:null : undefined});
+  }, [navigation, footer, review?.app,review?.live, interactive,viewport]);
   // Native-stack makes its first scroll descendant use automatic safe-area
   // insets on iOS. Start the list viewport below the bar, so its content starts
   // at zero with no duplicated inset or negative scrollTo correction (RN clamps
@@ -287,8 +305,8 @@ export function Sheet({children, footer, header, scrollRef,headerMaterial=true,s
   // so neither a pan nor keyboard adjustment can move them. Only their measured
   // height is reserved in the natural-sized results; rows still pass underneath
   // the individual glass capsules. Keep the scroll view first for sheet sizing.
-  if(scrollMode==='list')return <View onLayout={nativeLayout} pointerEvents={interactive?'auto':'none'} accessibilityElementsHidden={!interactive} importantForAccessibility={interactive?'auto':'no-hide-descendants'} style={{flex:1,backgroundColor:colors.groupedBackground,...(concealed?{opacity:0}:{})}}>
-    <ScrollView testID="sheet.results" ref={nativeScroll} style={{flex:1,marginTop:nativeHeaderInset}} bounces={false} alwaysBounceVertical={false} automaticallyAdjustKeyboardInsets contentInsetAdjustmentBehavior="automatic" keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive" scrollIndicatorInsets={{top:controlsHeight}} contentContainerStyle={s.sheetPinnedContent}>
+  if(scrollMode==='list')return <View onLayout={event=>{nativeLayout(event);onViewport(event.nativeEvent.layout);}} pointerEvents={interactive?'auto':'none'} accessibilityElementsHidden={!interactive} importantForAccessibility={interactive?'auto':'no-hide-descendants'} style={{flex:1,backgroundColor:colors.groupedBackground,...(concealed?{opacity:0}:{})}}>
+    <ScrollView testID="sheet.results" ref={nativeScroll} showsVerticalScrollIndicator={showsVerticalScrollIndicator} showsHorizontalScrollIndicator={false} style={{flex:1,marginTop:nativeHeaderInset}} bounces={false} alwaysBounceVertical={false} automaticallyAdjustKeyboardInsets contentInsetAdjustmentBehavior="automatic" keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive" scrollIndicatorInsets={{top:controlsHeight}} contentContainerStyle={s.sheetPinnedContent}>
       <View style={{height:controlsHeight}}/>
       <View style={[s.sheetPinnedBody,horizontalReadingInsets]}>{children}</View>
     </ScrollView>
@@ -308,7 +326,7 @@ export function Sheet({children, footer, header, scrollRef,headerMaterial=true,s
   // Keep the material's scroll viewport full-width. Safe edges belong to its
   // content, with the cap expanded by that padding to retain the reading band.
   // The detached native footer already has its own native SafeAreaView.
-  return <ScrollView ref={nativeScroll} onLayout={event=>{nativeLayout(event);setViewportHeight(event.nativeEvent.layout.height);}} stickyHeaderIndices={header?[0]:undefined} pointerEvents={interactive?'auto':'none'} accessibilityElementsHidden={!interactive} importantForAccessibility={interactive?'auto':'no-hide-descendants'} style={{flex:1,backgroundColor:colors.groupedBackground,...(concealed?{opacity:0}:{})}} automaticallyAdjustKeyboardInsets automaticallyAdjustContentInsets={false} contentInset={{top:nativeHeaderInset}} contentOffset={pinnedOffset.current} onScroll={event=>{latestOffset.current=event.nativeEvent.contentOffset;}} scrollEventThrottle={16} contentInsetAdjustmentBehavior="never" scrollIndicatorInsets={{top:nativeHeaderInset}} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive" contentContainerStyle={[header?s.sheetPinnedContent:[s.sheetContent,horizontalReadingInsets],{minHeight:Math.max(0,viewportHeight-nativeHeaderInset)}]}>
+  return <ScrollView ref={nativeScroll} showsVerticalScrollIndicator={showsVerticalScrollIndicator} showsHorizontalScrollIndicator={false} onLayout={event=>{nativeLayout(event);onViewport(event.nativeEvent.layout);setViewportHeight(event.nativeEvent.layout.height);}} stickyHeaderIndices={header?[0]:undefined} pointerEvents={interactive?'auto':'none'} accessibilityElementsHidden={!interactive} importantForAccessibility={interactive?'auto':'no-hide-descendants'} style={{flex:1,backgroundColor:colors.groupedBackground,...(concealed?{opacity:0}:{})}} automaticallyAdjustKeyboardInsets automaticallyAdjustContentInsets={false} contentInset={{top:nativeHeaderInset}} contentOffset={pinnedOffset.current} onScroll={event=>{latestOffset.current=event.nativeEvent.contentOffset;}} scrollEventThrottle={16} contentInsetAdjustmentBehavior="never" scrollIndicatorInsets={{top:nativeHeaderInset}} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive" contentContainerStyle={[header?s.sheetPinnedContent:[s.sheetContent,horizontalReadingInsets],{minHeight:Math.max(0,viewportHeight-nativeHeaderInset)}]}>
     {header&&<View collapsable={false} testID="sheet.pinned-header" pointerEvents={interactive?'auto':'none'} accessibilityElementsHidden={!interactive} importantForAccessibility={interactive?'auto':'no-hide-descendants'}>
       {headerMaterial&&<NativeDecoration symbol="sheet.header.material" colorScheme={scheme} pointerEvents="none" style={StyleSheet.absoluteFill}/>}
       <View style={[s.sheetHeader,horizontalPadding]}>{header}</View>
@@ -402,3 +420,5 @@ const s = StyleSheet.create({
   sheetHeader: {paddingHorizontal: foundation.space.screenHorizontal, paddingTop: foundation.space.md, paddingBottom: foundation.row.verticalInset},
   sheetFooter: {width:'100%',maxWidth:foundation.layout.readingWidth,alignSelf:'center',paddingHorizontal: foundation.space.screenHorizontal, paddingTop: foundation.space.md, paddingBottom: foundation.space.md, backgroundColor: colors.groupedBackground},
 });
+
+const windowBase_s=s;

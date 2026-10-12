@@ -1,3 +1,4 @@
+import {scaleWindowStyle,useWindowLayout} from './window-layout';
 import type {PropsWithChildren} from 'react';
 import {StyleSheet, View, type ColorValue, type StyleProp, type ViewStyle} from 'react-native';
 import {colors} from './colors.ios';
@@ -7,6 +8,7 @@ import {lavaTokens} from './generated/tokens';
 export function LavaSurface({children, role='card', borderColor, plain=false, style, contentStyle, testID}: PropsWithChildren<{
   role?:'card'|'panel'; borderColor?:ColorValue; plain?:boolean; style?:StyleProp<ViewStyle>; contentStyle?:StyleProp<ViewStyle>; testID?:string;
 }>) {
+  const shape=scaleWindowStyle(windowShape,useWindowLayout().scale);
   const fill=plain?'transparent':colors[role==='panel'?lavaTokens.surface.panelBackground:lavaTokens.surface.cardBackground];
   const stroke=borderColor??(role==='panel'?colors[lavaTokens.surface.panelStroke]:undefined);
   return <View testID={testID} style={style}>
@@ -18,4 +20,4 @@ export function LavaSurface({children, role='card', borderColor, plain=false, st
       style={[StyleSheet.absoluteFill,shape,{overflow:'hidden',borderColor:stroke,borderWidth:lavaTokens.surface.outlineWidth}]} />}
   </View>;
 }
-const shape:ViewStyle={borderRadius:lavaTokens.surface.cardCornerRadius,borderCurve:'continuous'};
+const windowShape:ViewStyle={borderRadius:lavaTokens.surface.cardCornerRadius,borderCurve:'continuous'};

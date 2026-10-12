@@ -1,5 +1,6 @@
+import {WindowSizeContext,useWindowLayout,type WindowSize} from '../src/window-layout';
 import {createContext,useContext,useLayoutEffect,useRef,useState,type ComponentRef,type PropsWithChildren,type ReactNode,type Ref,type RefObject} from 'react';
-import {KeyboardAvoidingView,Platform,PlatformColor,Pressable,ScrollView,StyleSheet,View,useWindowDimensions,type TextProps} from 'react-native';
+import {KeyboardAvoidingView,Platform,PlatformColor,Pressable,ScrollView,StyleSheet,View,useWindowDimensions,type LayoutChangeEvent,type TextProps} from 'react-native';
 import {SafeAreaInsetsContext} from 'react-native-safe-area-context';
 import {colors} from '../src/colors';
 import {foundation} from '../src/foundation';
@@ -47,13 +48,22 @@ export function FormActions({titles,children}:{titles:readonly string[];children
 
 // A native-hosted modal already has a UIKit sheet. Its RN content owns ordinary
 // scrolling and the bottom action inset without presenting a second sheet.
-export function FlowSheet({children,header,footer,scrolls=true,feedback=false,centered=false,nativeKeyboardAvoidance=false}:PropsWithChildren<{header?:ReactNode;footer?:ReactNode;scrolls?:boolean;feedback?:boolean;centered?:boolean;nativeKeyboardAvoidance?:boolean}>){
+type FlowSheetProps=PropsWithChildren<{header?:ReactNode;footer?:ReactNode;scrolls?:boolean;feedback?:boolean;centered?:boolean;nativeKeyboardAvoidance?:boolean}>;
+export function FlowSheet(props:FlowSheetProps){
+  const [viewport,setViewport]=useState<WindowSize|null>(null);
+  const measure=(event:LayoutChangeEvent)=>{
+    const {width,height}=event.nativeEvent.layout;
+    if(width>0&&height>0)setViewport(previous=>previous?.width===width&&previous.height===height?previous:{width,height});
+  };
+  return <WindowSizeContext.Provider value={viewport}><FlowSheetBody {...props} onViewport={measure}/></WindowSizeContext.Provider>;
+}
+function FlowSheetBody({children,header,footer,scrolls=true,feedback=false,centered=false,nativeKeyboardAvoidance=false,onViewport}:FlowSheetProps&{onViewport:(event:LayoutChangeEvent)=>void}){
   const nativeLayout=usePresentationNativeLayout();
-  const insets=useContext(SafeAreaInsetsContext);const {width,height}=useWindowDimensions();const compact=!centered&&width>height;
+  const layout=useWindowLayout();const insets=useContext(SafeAreaInsetsContext);const {width,height}=layout;const compact=!centered&&width>height;
   const horizontalPadding=insets&&(insets.left!==0||insets.right!==0)?{
-    paddingLeft:foundation.space.screenHorizontal+insets.left,paddingRight:foundation.space.screenHorizontal+insets.right,
+    paddingLeft:foundation.space.screenHorizontal*layout.scale+insets.left,paddingRight:foundation.space.screenHorizontal*layout.scale+insets.right,
   }:undefined;
-  const horizontalReadingInsets=horizontalPadding?{...horizontalPadding,maxWidth:foundation.layout.readingWidth+insets!.left+insets!.right}:undefined;
+  const horizontalReadingInsets=horizontalPadding?{...horizontalPadding,maxWidth:layout.readingWidth+insets!.left+insets!.right}:undefined;
   const headerInset=useSheetHeaderInset();
   const scroll=useRef<ComponentRef<typeof ScrollView>>(null);const [viewport,setViewport]=useState(0);
   const content=<View style={{gap:18,...(centered?{flexGrow:1,justifyContent:'center' as const}: {})}}>{children}{compact&&footer&&<View style={{paddingBottom:24}}>{footer}</View>}</View>;
@@ -61,13 +71,13 @@ export function FlowSheet({children,header,footer,scrolls=true,feedback=false,ce
   // padding again creates transient viewports and changes its retained offset.
   // Safe sides pad each content slot once; inline compact actions inherit their
   // scroll body's padding. The scroll viewport remains full-width for UIKit.
-  return <SheetScrollContext.Provider value={{height:Math.max(0,viewport-headerInset),headerInset,scroll}}><KeyboardAvoidingView behavior={Platform.OS==='ios'&&!nativeKeyboardAvoidance?'padding':undefined} style={{flex:1,backgroundColor:colors.groupedBackground}}>
-    {header&&<View style={{paddingHorizontal:foundation.space.screenHorizontal,paddingTop:12,paddingBottom:10,...horizontalPadding}}>{header}</View>}
+  return <SheetScrollContext.Provider value={{height:Math.max(0,viewport-headerInset),headerInset,scroll}}><KeyboardAvoidingView onLayout={onViewport} behavior={Platform.OS==='ios'&&!nativeKeyboardAvoidance?'padding':undefined} style={{flex:1,backgroundColor:colors.groupedBackground}}>
+    {header&&<View style={{paddingHorizontal:foundation.space.screenHorizontal*layout.scale,paddingTop:12*layout.scale,paddingBottom:10,...horizontalPadding}}>{header}</View>}
     {scrolls?<ScrollView ref={scroll} onLayout={event=>{nativeLayout(event);setViewport(event.nativeEvent.layout.height);}} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive"
-      contentInsetAdjustmentBehavior="automatic" showsVerticalScrollIndicator={false}
-      contentContainerStyle={{width:'100%',maxWidth:foundation.layout.readingWidth,alignSelf:'center',paddingHorizontal:foundation.space.screenHorizontal,paddingTop:centered?18:feedback?16:28,paddingBottom:centered?18:compact&&footer?0:44,...(centered?{flexGrow:1}: {}),...horizontalReadingInsets}}>{content}</ScrollView>
+      contentInsetAdjustmentBehavior="automatic" showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false}
+      contentContainerStyle={{width:'100%',maxWidth:layout.readingWidth,alignSelf:'center',paddingHorizontal:foundation.space.screenHorizontal*layout.scale,paddingTop:centered?18:feedback?16:28,paddingBottom:centered?18:compact&&footer?0:44,...(centered?{flexGrow:1}: {}),...horizontalReadingInsets}}>{content}</ScrollView>
       :<View onLayout={nativeLayout} style={{flex:1,paddingHorizontal:foundation.space.screenHorizontal,paddingTop:16,paddingBottom:24,...horizontalPadding}}>{content}</View>}
-    {!compact&&footer&&<View>{feedback&&<FormDivider/>}<View style={{width:'100%',maxWidth:foundation.layout.readingWidth,alignSelf:'center',paddingHorizontal:foundation.space.screenHorizontal,paddingTop:12,paddingBottom:(feedback?12:24)+(insets?.bottom??0),...horizontalReadingInsets}}>{footer}</View></View>}
+    {!compact&&footer&&<View>{feedback&&<FormDivider/>}<View style={{width:'100%',maxWidth:layout.readingWidth,alignSelf:'center',paddingHorizontal:foundation.space.screenHorizontal*layout.scale,paddingTop:12*layout.scale,paddingBottom:(feedback?12:24)+(insets?.bottom??0),...horizontalReadingInsets}}>{footer}</View></View>}
   </KeyboardAvoidingView></SheetScrollContext.Provider>;
 }
 const formLabel=Platform.OS==='ios'?PlatformColor('label'):colors.primaryText;
@@ -146,7 +156,7 @@ export function LicenseReader({text}:{text:string}){
   const onLayout=usePresentationNativeLayout();
   const insets=useContext(SafeAreaInsetsContext);
   const horizontalPadding=insets&&(insets.left!==0||insets.right!==0)?{paddingLeft:16+insets.left,paddingRight:16+insets.right}:undefined;
-  return <ScrollView onLayout={onLayout} contentInsetAdjustmentBehavior="automatic" contentContainerStyle={{padding:16,...horizontalPadding}}>
+  return <ScrollView onLayout={onLayout} showsVerticalScrollIndicator showsHorizontalScrollIndicator={false} contentInsetAdjustmentBehavior="automatic" contentContainerStyle={{padding:16,...horizontalPadding}}>
     <Text verbatim selectable allowFontScaling dynamicTypeRamp="footnote" style={{fontFamily:Platform.OS==='ios'?'Menlo':'monospace',fontSize:13,color:colors.primaryText}}>{text}</Text>
   </ScrollView>;
 }

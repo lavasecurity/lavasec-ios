@@ -1,6 +1,7 @@
 import {createContext, useContext, type ReactNode} from 'react';
 import {Alert as NativeAlert, Text as NativeText, StyleSheet, type TextProps} from 'react-native';
 import {translations} from './translations';
+import {useWindowLayout} from '../src/window-layout';
 export type Presentation = {locale:string;textScales:Record<string,number>|null};
 export const PresentationContext = createContext<Presentation>({locale:'en',textScales:null});
 let locale = 'en';
@@ -42,12 +43,15 @@ function localizedChildren(value:ReactNode):ReactNode {
   if(Array.isArray(value)&&value.every(x=>typeof x==='string'||typeof x==='number'))return localized(value.join(''));
   return value;
 }
-export function Text({verbatim=false,...props}:TextProps&{verbatim?:boolean}) {
+export function Text({verbatim=false,responsive=true,...props}:TextProps&{verbatim?:boolean;responsive?:boolean}) {
   const {textScales}=useContext(PresentationContext);
+  const layout=useWindowLayout();const windowScale=responsive?layout.scale:1;
   const style=StyleSheet.flatten(props.style);
   const scale=props.allowFontScaling!==false?textScales?.[props.dynamicTypeRamp??'body']:undefined;
+  const sizedStyle=windowScale===1?props.style:[props.style,{fontSize:(style?.fontSize??17)*windowScale,...(style?.lineHeight?{lineHeight:style.lineHeight*windowScale}:{})}];
   return <NativeText {...props} accessibilityLabel={props.accessibilityLabel?(verbatim?props.accessibilityLabel:localized(props.accessibilityLabel)):undefined}
-    {...(scale===undefined?{}:{allowFontScaling:false,dynamicTypeRamp:undefined,style:[props.style,{fontSize:(style?.fontSize??17)*scale,...(style?.lineHeight?{lineHeight:style.lineHeight*scale}:{})}]})}>{verbatim?props.children:localizedChildren(props.children)}</NativeText>;
+    style={sizedStyle}
+    {...(scale===undefined?{}:{allowFontScaling:false,dynamicTypeRamp:undefined,style:[props.style,{fontSize:(style?.fontSize??17)*scale*windowScale,...(style?.lineHeight?{lineHeight:style.lineHeight*scale*windowScale}:{})}]})}>{verbatim?props.children:localizedChildren(props.children)}</NativeText>;
 }
 type AlertOptions=NonNullable<Parameters<typeof NativeAlert.alert>[3]>&{verbatimTitle?:boolean;verbatimMessage?:boolean};
 export const Alert:{alert:(title:string,message?:string,buttons?:Parameters<typeof NativeAlert.alert>[2],options?:AlertOptions)=>void;prompt:typeof NativeAlert.prompt} = {

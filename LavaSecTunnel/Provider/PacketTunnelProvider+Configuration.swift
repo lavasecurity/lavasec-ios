@@ -724,6 +724,7 @@ extension PacketTunnelProvider {
         let didChangePauseActivity = pauseIsActive != lastAppliedTemporaryProtectionPauseIsActive
         lastAppliedTemporaryProtectionPauseIsActive = pauseIsActive
         scheduleProtectionPauseResumeIfNeeded(reason: reason)
+        publishProtectionStatus()
         if didChangePauseActivity { scheduleProtectionNotificationIfNeeded() }
 
         #if DEBUG || LAVA_QA_TOOLS

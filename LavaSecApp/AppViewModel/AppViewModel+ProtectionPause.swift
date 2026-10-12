@@ -67,14 +67,17 @@ extension AppViewModel {
             do {
                 try await LavaProtectionCommandService.perform(request, commandID: operationID.rawValue)
                 loadTemporaryProtectionPause()
-                if isProtectionTemporarilyPaused {
+                // Acknowledge the command's persisted window; operational presentation waits
+                // for the provider observation and can still be healthy during this await.
+                let pauseWasAccepted = vpnStatus == .connected && temporaryProtectionPauseUntil != nil
+                if pauseWasAccepted {
                     scheduleTemporaryProtectionResume()
                 }
                 await notifyTunnelProtectionPauseUpdated(operationID: operationID)
                 reconcileLiveActivity()
-                actionStatus = isProtectionTemporarilyPaused ? "paused" : "noop"
+                actionStatus = pauseWasAccepted ? "paused" : "noop"
                 LavaFeedbackCoordinator.shared.finish("guard.pause", feedbackID, .acknowledged,
-                    cancelled: !isProtectionTemporarilyPaused)
+                    cancelled: !pauseWasAccepted)
             } catch {
                 actionStatus = "error"
                 vpnMessage = Self.vpnErrorMessage(prefix: "Could not pause protection".lavaLocalized, error: error)
