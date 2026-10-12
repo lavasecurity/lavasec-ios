@@ -110,3 +110,12 @@ third-party dependencies and blocklist data attribution.
 
 Please report vulnerabilities privately — see [SECURITY.md](SECURITY.md). Do not
 open public issues for security reports.
+
+## Protection limits notice
+
+Legal Notices shows the limits of domain filtering and links to
+[Protection limits & terms](https://lavasecurity.app/terms/). The full notice lives
+in `lavasec-web`, alongside its translations and legal-review notes. Deploy and
+verify that page before releasing an app version with this link. Review the notice
+and translations for legal equivalence in the markets served. The archived
+`lavasec-doc` repository is not a source for this notice.

@@ -220,6 +220,9 @@ private final class LavaAppViewController: UIViewController {
             .lavaTextSizeOverride(m.customization.textSizeOverride)
             .tint(LavaStyle.safeGreen)
         let controller = LavaAppFlowController(rootView: AnyView(content))
+        if flow.sheetSizing == .utility {
+            controller.fitUtilitySheet()
+        }
         controller.onDismiss = { [weak self] in
             if bridge.flow?.id == flow.id { bridge.flow = nil }
             if flow.name == "feedback" { bridge.retireFeedback(flow.id) }
@@ -232,7 +235,8 @@ private final class LavaAppViewController: UIViewController {
             flow.onDismiss?()
             bridge.publish()
         }
-        controller.modalPresentationStyle = flow.name == "preparation" ? .fullScreen : .pageSheet
+        controller.modalPresentationStyle = flow.name == "preparation" ? .fullScreen
+            : controller.fitsUtilitySheet ? .formSheet : .pageSheet
         if flow.name == "account", let sheet = controller.sheetPresentationController {
             // UIKit owns the effective detents of this hosted SwiftUI sheet.
             // Keep its growing/scrolling account content reachable at large text.
@@ -313,6 +317,80 @@ private final class LavaAppViewController: UIViewController {
 private final class LavaAppFlowController: UIHostingController<AnyView>, UIAdaptivePresentationControllerDelegate {
     var onDismiss: (() -> Void)?
     var onDismissAttempt: (() -> Void)?
+    private(set) var fitsUtilitySheet = false
+    private var naturalSheetHeight: CGFloat = 0
+    private var fittedSize: CGSize = .zero
+    private var fittedSheetActive = false
+    private var utilitySizeUpdatePending = false
+
+    /// UIKit retains presentation, bar, keyboard avoidance and dismissal. Only
+    /// the shared scaffold's natural height and the large-window width change.
+    func fitUtilitySheet() {
+        fitsUtilitySheet = true
+        viewIfLoaded?.accessibilityIdentifier = "lava.utility-sheet"
+        rootView = AnyView(rootView.onPreferenceChange(LavaSheetContentSizeKey.self) { [weak self] size in
+            guard let self, size.height > 0 else { return }
+            self.naturalSheetHeight = size.height
+            self.scheduleUtilitySheetSize()
+        })
+        scheduleUtilitySheetSize()
+    }
+
+    private func scheduleUtilitySheetSize() {
+        guard !utilitySizeUpdatePending else { return }
+        utilitySizeUpdatePending = true
+        // Preferences arrive during SwiftUI layout. Coalesce the measurements
+        // and apply presentation geometry after that layout transaction ends.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.utilitySizeUpdatePending = false
+            self.updateUtilitySheetSize()
+        }
+    }
+
+    private func updateUtilitySheetSize() {
+        guard fitsUtilitySheet, let sheet = sheetPresentationController else { return }
+        let container = presentingViewController?.view.bounds.size ?? view.window?.bounds.size ?? .zero
+        let roomyWindow = min(container.width, container.height) > 480
+        guard roomyWindow else {
+            if fittedSheetActive {
+                fittedSheetActive = false
+                fittedSize = .zero
+                preferredContentSize = .zero
+            }
+            return
+        }
+        // SwiftUI can host its native bar without exposing a navigation
+        // controller as a child. Measure the public UINavigationBar itself;
+        // its position, contents and frame stay owned by SwiftUI/UIKit.
+        func navigationHeight(_ view: UIView) -> CGFloat {
+            if let bar = view as? UINavigationBar { return bar.isHidden ? 0 : bar.bounds.height }
+            return view.subviews.map(navigationHeight).max() ?? 0
+        }
+        let height = max(320, naturalSheetHeight + navigationHeight(view)).rounded(.up)
+        let size = CGSize(width: min(640, container.width * 0.85),
+                          height: min(height, container.height * 0.85))
+        guard !fittedSheetActive || size != fittedSize else { return }
+        fittedSheetActive = true
+        fittedSize = size
+        UIView.performWithoutAnimation {
+            // The native form sheet owns placement and keyboard avoidance.
+            // One preferred size controls both dimensions; no height detent
+            // competes with it or anchors a short sheet below the center.
+            sheet.prefersPageSizing = false
+            preferredContentSize = size
+        }
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        if fitsUtilitySheet { view.accessibilityIdentifier = "lava.utility-sheet" }
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        if fitsUtilitySheet { scheduleUtilitySheetSize() }
+    }
     private var completedDismissal = false
     private func completeDismissal() {
         guard !completedDismissal else { return }

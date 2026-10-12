@@ -41,6 +41,10 @@ extension PacketTunnelProvider {
             // pending masked-handoff capture retry from the previous session is moot.
             self.cancelDeviceDNSCaptureRetry()
             self.applyResolverHealthEvent(.lifecycleReset(occurredAt: Date()))
+            if self.latchedChainedLifecycleEvidenceID != nil {
+                self.publishProtectionStatus()
+                self.startProtectionStatusHeartbeat()
+            }
         }
     }
 

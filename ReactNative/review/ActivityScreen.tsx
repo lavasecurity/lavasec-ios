@@ -13,7 +13,6 @@ import {QuietFooter} from './scaffold';
 import {useReview} from './ReviewContext';
 import {activityEmpty, activityExample} from './activity-model';
 import {useReviewNavigation} from './navigation';
-import {detailStyles as s} from './detail-scaffold';
 import {StorySurface} from './story-scaffold';
 import {ActivityCharts} from './activity-scaffold';
 import {SettingsSurface} from './settings-scaffold';

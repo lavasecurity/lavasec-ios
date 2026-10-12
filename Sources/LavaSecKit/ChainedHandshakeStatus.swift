@@ -58,6 +58,8 @@ public struct ChainedHandshakeStatus: Codable, Equatable, Sendable {
     public var runtimeCondition: ChainedRuntimeCondition = .normal
     /// Current in-memory provider health, sampled on its state queue without a flush.
     public var health: TunnelHealthSnapshot?
+    /// The same canonical publication available to foreground and read-only external observers.
+    public var statusPublication: ProtectionStatusPublication?
 
     /// Whether the provider still has an active tunnel lifecycle.
     ///
@@ -94,7 +96,8 @@ public struct ChainedHandshakeStatus: Codable, Equatable, Sendable {
         verificationEpoch: UInt64? = nil,
         forwardingBaseline: UInt64 = 0,
         runtimeCondition: ChainedRuntimeCondition = .normal,
-        health: TunnelHealthSnapshot? = nil
+        health: TunnelHealthSnapshot? = nil,
+        statusPublication: ProtectionStatusPublication? = nil
     ) {
         self.isChained = isChained
         self.hasHandshake = hasHandshake
@@ -108,6 +111,7 @@ public struct ChainedHandshakeStatus: Codable, Equatable, Sendable {
         self.forwardingBaseline = forwardingBaseline
         self.runtimeCondition = runtimeCondition
         self.health = health
+        self.statusPublication = statusPublication
         self.lifecycleIsActive = lifecycleIsActive
         lifecycleIsActiveWasExplicit = true
     }
@@ -116,6 +120,7 @@ public struct ChainedHandshakeStatus: Codable, Equatable, Sendable {
         case isChained, hasHandshake, everHandshaked, receivedByteCount, sessionGeneration
         case lifecycleIsActive, transportGeneration, setupReady
         case providerLifecycleID, verificationEpoch, forwardingBaseline, runtimeCondition, health
+        case statusPublication
     }
 
     /// Decodes current and older prompt replies without dropping newly added evidence fields.
@@ -140,6 +145,7 @@ public struct ChainedHandshakeStatus: Codable, Equatable, Sendable {
         forwardingBaseline = try container.decodeIfPresent(UInt64.self, forKey: .forwardingBaseline) ?? 0
         runtimeCondition = try container.decodeIfPresent(ChainedRuntimeCondition.self, forKey: .runtimeCondition) ?? .normal
         health = try container.decodeIfPresent(TunnelHealthSnapshot.self, forKey: .health)
+        statusPublication = try container.decodeIfPresent(ProtectionStatusPublication.self, forKey: .statusPublication)
         if let explicitLifecycle =
             try container.decodeIfPresent(Bool.self, forKey: .lifecycleIsActive)
         {
@@ -167,6 +173,7 @@ public struct ChainedHandshakeStatus: Codable, Equatable, Sendable {
             && lhs.forwardingBaseline == rhs.forwardingBaseline
             && lhs.runtimeCondition == rhs.runtimeCondition
             && lhs.health == rhs.health
+            && lhs.statusPublication == rhs.statusPublication
             && lhs.lifecycleIsActive == rhs.lifecycleIsActive
             && lhs.lifecycleIsActiveWasExplicit == rhs.lifecycleIsActiveWasExplicit
     }
@@ -187,6 +194,7 @@ public struct ChainedHandshakeStatus: Codable, Equatable, Sendable {
         try container.encode(forwardingBaseline, forKey: .forwardingBaseline)
         try container.encode(runtimeCondition, forKey: .runtimeCondition)
         try container.encodeIfPresent(health, forKey: .health)
+        try container.encodeIfPresent(statusPublication, forKey: .statusPublication)
         if lifecycleIsActiveWasExplicit {
             try container.encode(lifecycleIsActive, forKey: .lifecycleIsActive)
         }

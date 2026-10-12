@@ -1,7 +1,11 @@
 import {act,fireEvent,render,screen,within} from '@testing-library/react-native';
+import {useSyncExternalStore} from 'react';
 import {Animated,AppState,StyleSheet,View} from 'react-native';
 import * as SafeArea from 'react-native-safe-area-context';
-import type {AppCommand,OnboardingSetup} from '../app/contract';
+import type {AppCommand,AppSnapshot,OnboardingSetup} from '../app/contract';
+import {AppStore} from '../app/store';
+import type {Spec} from '../specs/NativeLavaApp';
+import {colors} from '../src/colors';
 import {LavaActionButton} from '../src';
 import {OnboardingFlow,OnboardingPages} from '../review/OnboardingFlow';
 import {OnboardingGeometryContext,type Anchor} from '../review/onboarding-geometry';
@@ -40,6 +44,110 @@ const flow=(page:number,width=874,height=402)=>{
   const anchor:Anchor={current:null};
   return <OnboardingGeometryContext.Provider value={{panel:anchor,mascot:anchor,action:anchor,source:anchor,root:anchor,origin:{x:0,y:0},size:{width,height},sourceFrame:{x:59,y:48,width:128,height:128},setup:setup(page)}}><OnboardingFlow/></OnboardingGeometryContext.Provider>;
 };
+const deferred=<T,>()=>{let resolve!:(value:T)=>void;const promise=new Promise<T>(yes=>{resolve=yes;});return {promise,resolve};};
+function permissionRuntime(coverRequired=false){
+  AppState.currentState='active';
+  const state:OnboardingSetup={...setup(2),mock:false,vpnInstalled:true};
+  let revision=1,granted=false,event!:(value:string)=>void;
+  const listeners=new Set<(state:string)=>void>();
+  jest.spyOn(AppState,'addEventListener').mockImplementation((_event,listener)=>{
+    listeners.add(listener as (state:string)=>void);return {remove:()=>listeners.delete(listener as (state:string)=>void)};
+  });
+  const snapshot=()=>({schema:1,fullApp:true,revision,backgroundPrivacyCoverRequired:coverRequired,
+    onboardingSetup:{...state},security:{readRevision:7}} as unknown as AppSnapshot);
+  const native={getSnapshot:jest.fn(async()=>JSON.stringify(snapshot())),
+    onSnapshot:(callback:(value:string)=>void)=>{event=callback;return {remove(){}};},
+    command:jest.fn(async(request:string)=>{
+      if(JSON.parse(request).type==='onboarding.enter')state.notifications=granted;
+      ++revision;const value=snapshot();event(JSON.stringify(value));return JSON.stringify({snapshot:value,result:null});
+    })};
+  const app=new AppStore(native as unknown as Spec,snapshot()),disconnect=app.connect();
+  jest.mocked(useReview).mockImplementation(()=>{
+    const current=useSyncExternalStore(app.subscribe,app.getSnapshot);
+    return {look:'lava',app,live:current.snapshot??current.displaySnapshot??undefined} as unknown as ReturnType<typeof useReview>;
+  });
+  const anchor:Anchor={current:null};
+  function Runtime(){
+    const current=useSyncExternalStore(app.subscribe,app.getSnapshot);
+    const visit=(current.snapshot??current.displaySnapshot)?.onboardingSetup??state;
+    return <OnboardingGeometryContext.Provider value={{panel:anchor,mascot:anchor,action:anchor,source:anchor,root:anchor,
+      origin:{x:0,y:0},size:{width:402,height:874},setup:visit}}><OnboardingFlow/></OnboardingGeometryContext.Provider>;
+  }
+  return {app,native,disconnect,Runtime,grant:(allowed:boolean)=>{granted=allowed;},
+    emit:(phase:'active'|'inactive'|'background')=>{AppState.currentState=phase;for(const listener of listeners)listener(phase);},
+    snapshot:()=>{++revision;return JSON.stringify(snapshot());}};
+}
+test.each([['snapshot first',true],['activation first',false]] as const)('notification grant turns the row green after permission-sheet resume: %s',async(_ordering,snapshotFirst)=>{
+  const runtime=permissionRuntime();await runtime.app.refresh();
+  try{
+    render(<runtime.Runtime/>);await act(async()=>{});
+    expect(screen.getByTestId('onboarding.notifications').props.accessibilityState.selected).toBe(false);
+    runtime.native.command.mockClear();
+    act(()=>runtime.emit('inactive'));
+    expect(runtime.app.getSnapshot().snapshot).toBeNull();
+    expect(runtime.app.getSnapshot().displaySnapshot?.onboardingSetup?.id).toBe('visit');
+    runtime.grant(true);
+    const fresh=deferred<string>();runtime.native.getSnapshot.mockImplementation(()=>fresh.promise);
+    if(snapshotFirst){
+      // UIKit's current projection can arrive before the JS active listener.
+      await act(async()=>{AppState.currentState='active';const pending=runtime.app.refresh();fresh.resolve(runtime.snapshot());await pending;});
+      act(()=>runtime.emit('active'));
+    }else{
+      act(()=>runtime.emit('active'));await act(async()=>{});
+      expect(runtime.native.command).not.toHaveBeenCalled();
+      await act(async()=>{fresh.resolve(runtime.snapshot());await runtime.app.refresh();});
+    }
+    await act(async()=>{});
+    expect(runtime.app.getSnapshot().snapshot?.security?.readRevision).toBe(7);
+    expect(runtime.native.command.mock.calls.filter(([request])=>JSON.parse(request).type==='onboarding.enter')).toHaveLength(1);
+    expect(screen.getByTestId('onboarding.notifications').props.accessibilityState).toMatchObject({selected:true,disabled:true});
+    expect(screen.getByTestId('onboarding.notifications')).toHaveStyle({backgroundColor:colors.safeControlGreen});
+    expect(screen.getByText('Notifications enabled (optional)')).toBeTruthy();
+  }finally{act(()=>runtime.disconnect());}
+});
+test('denied notifications stay off after foreground authority returns',async()=>{
+  const runtime=permissionRuntime();await runtime.app.refresh();
+  try{
+    render(<runtime.Runtime/>);await act(async()=>{});runtime.native.command.mockClear();
+    act(()=>runtime.emit('background'));runtime.grant(false);
+    expect(runtime.native.command).not.toHaveBeenCalled();
+    act(()=>runtime.emit('active'));await act(async()=>{await runtime.app.refresh();});
+    expect(runtime.native.command.mock.calls.some(([request])=>JSON.parse(request).type==='onboarding.enter')).toBe(true);
+    expect(screen.getByTestId('onboarding.notifications').props.accessibilityState).toMatchObject({selected:false,disabled:false});
+    expect(screen.getByText('Enable notifications (optional)')).toBeTruthy();
+  }finally{act(()=>runtime.disconnect());}
+});
+test('notification permission refresh survives a batched pause and resume',async()=>{
+  const runtime=permissionRuntime();await runtime.app.refresh();
+  try{
+    render(<runtime.Runtime/>);await act(async()=>{});runtime.native.command.mockClear();
+    await act(async()=>{runtime.emit('inactive');runtime.grant(true);runtime.emit('active');await runtime.app.refresh();});
+    expect(screen.getByTestId('onboarding.notifications').props.accessibilityState.selected).toBe(true);
+  }finally{act(()=>runtime.disconnect());}
+});
+test('permission preparation runs under the resume cover while interactive permission requests stay blocked',async()=>{
+  const runtime=permissionRuntime(true);await runtime.app.refresh();
+  const initial=deferred<string>(),fresh=deferred<string>();runtime.native.command.mockReturnValueOnce(initial.promise).mockReturnValueOnce(fresh.promise);
+  const originalCommand=runtime.native.command.getMockImplementation()!;
+  try{
+    render(<runtime.Runtime/>);await act(async()=>{});
+    // Keep the initial entry in flight across a privacy boundary. A fresh entry
+    // must queue behind it rather than coalesce with its obsolete read turn.
+    act(()=>runtime.emit('inactive'));runtime.grant(true);
+    runtime.native.command.mockClear();
+    act(()=>runtime.emit('active'));await act(async()=>{await runtime.app.refresh();});
+    await act(async()=>{runtime.app.completePresentationLayout(runtime.app.getPresentationHydration().epoch);});
+    expect(runtime.app.getPresentationHydration().required).toBe(true);
+    fireEvent.press(screen.getByTestId('onboarding.notifications'));
+    expect(runtime.native.command.mock.calls.some(([request])=>JSON.parse(request).type==='onboarding.notifications')).toBe(false);
+    await act(async()=>{initial.resolve(await originalCommand(JSON.stringify({type:'onboarding.enter',id:'visit'})));});
+    expect(runtime.native.command.mock.calls.filter(([request])=>JSON.parse(request).type==='onboarding.enter')).toHaveLength(1);
+    expect(runtime.app.getPresentationHydration().required).toBe(true);
+    await act(async()=>{fresh.resolve(await originalCommand(JSON.stringify({type:'onboarding.enter',id:'visit'})));});
+    expect(screen.getByTestId('onboarding.notifications').props.accessibilityState.selected).toBe(true);
+    expect(runtime.app.getPresentationHydration().required).toBe(false);
+  }finally{act(()=>runtime.disconnect());}
+});
 test('the decorative onboarding mascot does not announce internal English animation states',()=>{
   render(flow(2));
   const mascot=screen.getByTestId('onboarding.mascot',{includeHiddenElements:true});
@@ -132,13 +240,22 @@ test.each([0,1,2,4])('landscape page %s delegates its single title to the native
   expect(screen.getByRole('header',{name:onboardingPageTitle(page)})).toBeTruthy();
   expect(within(screen.getByTestId('onboarding.footer')).getByTestId('onboarding.steps')).toBeTruthy();
 });
-test.each([[1024,768],[1080,810],[1366,1024],[874,500]])('expanded landscape %s×%s retains a single footer progress group through Welcome return',(width,height)=>{
+test.each([[700,600,140.8],[1024,768,158.72],[1080,810,163.2],[1366,1024,179.2],[874,500,130.13333333333333]])('landscape %s×%s reserves the source lane and retains one progress group through Welcome return',(width,height,sourceSize)=>{
   render(flow(1,width,height));
-  expect(within(screen.getByTestId('onboarding.source.column')).queryByTestId('onboarding.steps',{includeHiddenElements:true})).toBeNull();
-  expect(within(screen.getByTestId('onboarding.footer')).getByTestId('onboarding.steps')).toBeTruthy();
+  expect(screen.UNSAFE_getByType(OnboardingPages).props.sourceInset).toBeCloseTo(sourceSize);
+  expect(screen.getByTestId('onboarding.source.column')).toHaveStyle({position:'absolute'});
+  expect(StyleSheet.flatten(screen.getByTestId('onboarding.source.column').props.style).width).toBeCloseTo(sourceSize);
+  expect(within(screen.getByTestId('onboarding.source.column')).getByTestId('onboarding.steps')).toBeTruthy();
+  expect(within(screen.getByTestId('onboarding.footer')).queryByTestId('onboarding.steps',{includeHiddenElements:true})).toBeNull();
   screen.rerender(flow(0,width,height));
-  expect(screen.getAllByTestId('onboarding.steps',{includeHiddenElements:true})).toHaveLength(1);
-  expect(within(screen.getByTestId('onboarding.source.column')).queryByTestId('onboarding.steps',{includeHiddenElements:true})).toBeNull();
+  expect(screen.getAllByTestId('onboarding.steps')).toHaveLength(1);
+  expect(within(screen.getByTestId('onboarding.source.column')).queryByTestId('onboarding.steps')).toBeNull();
+});
+test('tablet onboarding mascot uses the same baseline as its Guard destination',()=>{
+  render(flow(2,1032,1376));
+  const drawing=screen.UNSAFE_getAllByType(View).find(node=>node.props.size&&node.props.mood)!;
+  expect(drawing.props.size).toBeCloseTo(134.4);
+  expect(StyleSheet.flatten(screen.getByTestId('onboarding.source').props.style).height).toBeCloseTo(179.2);
 });
 test('rapid absolute choices retain every intent while identical pending navigation is deduplicated',async()=>{
   const pending:Array<{action:AppCommand;resolve:()=>void}>=[];

@@ -40,6 +40,12 @@ extension AppViewModel {
             MainActor.assumeIsolated { self?.setChainedObservationActive(false) }
         }.store(in: &chainedApplicationLifecycleObservers)
         center.publisher(for: UIApplication.willEnterForegroundNotification).sink { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.startChainedForegroundEntryPrefetch(restarting: true)
+                self?.refreshProviderStatusPublication(revalidateIdentity: true)
+            }
+        }.store(in: &chainedApplicationLifecycleObservers)
+        center.publisher(for: UIApplication.protectedDataDidBecomeAvailableNotification).sink { [weak self] _ in
             MainActor.assumeIsolated { self?.beginChainedForegroundEntryPrefetch() }
         }.store(in: &chainedApplicationLifecycleObservers)
         center.publisher(for: UIApplication.didBecomeActiveNotification).sink { [weak self] _ in
@@ -48,6 +54,14 @@ extension AppViewModel {
             }
         }.store(in: &chainedApplicationLifecycleObservers)
         setChainedObservationActive(UIApplication.shared.applicationState == .active)
+    }
+
+    /// Both hosts activate the same observation owner before exposing their foreground snapshot.
+    /// Notification observer registration order cannot publish an expired file ahead of prefetched IPC.
+    func refreshProtectionStatusForForegroundPresentation() {
+        if UIApplication.shared.applicationState == .active { setChainedObservationActive(true) }
+        else { beginChainedForegroundEntryPrefetch() }
+        refreshProviderStatusPublication(revalidateIdentity: true)
     }
 
     private func logChainedEstablishmentGate(
@@ -79,6 +93,179 @@ extension AppViewModel {
         if chainedProjection != next {
             chainedProjectionRevision &+= 1
             chainedProjection = next
+        }
+    }
+
+    /// Operational status is provider-owned; the app reducer still owns explicit-start feedback and mutations.
+    var canonicalProviderStatus: ProtectionStatus? {
+        guard vpnStatus == .connected, providerStatusOwnsPresentation else { return nil }
+        // INV-STATUS-1: one semantic value per publication/expiry. Reading the clock separately
+        // for each facet could straddle the deadline and tear the headline from its material.
+        return providerStatusPresentation ?? .unavailable
+    }
+
+    /// Reads before foreground rendering. A missing read cannot mint or renew a positive lease.
+    func refreshProviderStatusPublication(revalidateIdentity: Bool = false) {
+        refreshProviderStatusPublication(from: tunnelManager, revalidateIdentity: revalidateIdentity)
+    }
+
+    func refreshProviderStatusPublication(from manager: NETunnelProviderManager?, revalidateIdentity: Bool = false) {
+        guard manager?.connection.status == .connected else {
+            providerStatusExpiryTask?.cancel()
+            providerStatusExpiryTask = nil
+            providerStatusOwnsPresentation = false
+            providerStatusLifecycleID = nil
+            providerStatusIdentityTask?.cancel()
+            providerStatusIdentityTask = nil
+            providerStatusIdentityGeneration &+= 1
+            providerStatusIdentityConnectedAt = nil
+            providerStatusIdentityVerifiedAt = nil
+            providerStatusConnectionProof = nil
+            providerStatusKnownDNSOnlyConnectedAt = nil
+            providerStatusIdentityIsUncertain = false
+            providerStatusReader = .init()
+            providerStatusPresentation = nil
+            return
+        }
+        let connectedAt = manager?.connection.connectedDate
+        if let connectedAt, providerStatusKnownDNSOnlyConnectedAt == connectedAt { return }
+        if providerStatusIdentityConnectedAt != connectedAt {
+            providerStatusIdentityTask?.cancel()
+            providerStatusIdentityTask = nil
+            providerStatusIdentityGeneration &+= 1
+            providerStatusIdentityConnectedAt = connectedAt
+            providerStatusIdentityVerifiedAt = nil
+            providerStatusConnectionProof = nil
+            providerStatusLifecycleID = nil
+            providerStatusReader = .init()
+            providerStatusOwnsPresentation = false
+            providerStatusIdentityIsUncertain = false
+            providerStatusPresentation = nil
+        }
+        admitProviderStatusPublication(LavaSecAppGroup.readProtectionStatusPublication(), connectedAt: connectedAt)
+        if revalidateIdentity || providerStatusIdentityVerifiedAt == nil || providerStatusIdentityIsUncertain {
+            requestProviderStatusIdentity(connectedAt: connectedAt)
+        }
+    }
+
+    /// A fenced live IPC reply supplies current incarnation truth without waiting on securityd.
+    func admitProviderStatusReply(_ reply: ChainedHandshakeStatus) {
+        let observation = ChainedRuntimeObservation.fromTunnelReply(reply)
+        if observation == .dnsOnly {
+            // A current, explicit DNS-only observation ends chained publication ownership.
+            // The existing DNS health/failure-marker projection owns this path, including fallback.
+            refreshProviderStatusPublication(from: nil)
+            providerStatusKnownDNSOnlyConnectedAt = tunnelManager?.connection.connectedDate
+        } else {
+            // Invalidation clears the runtime ID, while its terminal publication retains the
+            // writer ID. Fenced IPC can admit that negative envelope and fence out the old file.
+            let providerID = observation == .inactive && reply.statusPublication?.status == .unavailable
+                ? reply.statusPublication?.providerLifecycleID : reply.providerLifecycleID
+            // Both callers fence the exact NE session, connected date and activity across the await.
+            // Retire an older metadata descendant before it can overwrite this newer live identity.
+            providerStatusIdentityTask?.cancel()
+            providerStatusIdentityTask = nil
+            providerStatusIdentityGeneration &+= 1
+            providerStatusIdentityConnectedAt = tunnelManager?.connection.connectedDate
+            providerStatusIdentityVerifiedAt = ProtectionStatusPublicationClock.capture()
+            providerStatusConnectionProof = reply.statusPublication.flatMap { publication in
+                guard publication.providerLifecycleID == providerID,
+                      let clock = providerStatusIdentityVerifiedAt,
+                      let connectedAt = tunnelManager?.connection.connectedDate else { return nil }
+                return .init(publication: publication, connectedAt: connectedAt, verifiedAt: clock)
+            }
+            providerStatusKnownDNSOnlyConnectedAt = nil
+            providerStatusIdentityIsUncertain = false
+            if providerStatusLifecycleID != providerID { providerStatusReader = .init() }
+            providerStatusLifecycleID = providerID
+            if reply.statusPublication == nil { providerStatusOwnsPresentation = false }
+            admitProviderStatusPublication(reply.statusPublication)
+        }
+    }
+
+    /// One bounded, coalesced background read. Cancellation retires logical ownership, never its physical slot.
+    private func requestProviderStatusIdentity(connectedAt: Date?) {
+        guard let connectedAt, providerStatusIdentityTask == nil else { return }
+        providerStatusIdentityGeneration &+= 1
+        let generation = providerStatusIdentityGeneration
+        let requestedAt = ProtectionStatusPublicationClock.capture()
+        providerStatusIdentityTask = Task { [weak self] in
+            let outcome = await LavaSecAppGroup.protectionStatusIdentityWork.read()
+            guard let self, !Task.isCancelled, self.providerStatusIdentityGeneration == generation,
+                  self.tunnelManager?.connection.status == .connected,
+                  self.tunnelManager?.connection.connectedDate == connectedAt else { return }
+            self.providerStatusIdentityTask = nil
+            // Absence also covers an unreadable/contended shared record at unlock. It cannot
+            // revoke identity already proven by live IPC; the existing absolute lease still expires.
+            guard case .observed(let id?, let began) = outcome, !id.isEmpty,
+                  began.isAtOrAfter(requestedAt) else { return }
+            if self.providerStatusLifecycleID != id {
+                self.providerStatusReader = .init()
+                self.providerStatusConnectionProof = nil
+            }
+            self.providerStatusLifecycleID = id
+            self.providerStatusIdentityVerifiedAt = began
+            self.providerStatusIdentityIsUncertain = false
+            self.admitProviderStatusPublication(LavaSecAppGroup.readProtectionStatusPublication(), connectedAt: connectedAt)
+        }
+    }
+
+    /// File and IPC publications share revision ordering and the cached incarnation fence.
+    func admitProviderStatusPublication(_ candidate: ProtectionStatusPublication?, connectedAt: Date? = nil) {
+        let providerID = providerStatusLifecycleID
+        var reader = providerStatusReader
+        let clock = ProtectionStatusPublicationClock.capture()
+        if (providerStatusOwnsPresentation || providerStatusIdentityVerifiedAt != nil),
+           candidate?.requiresIdentityRevalidation(providerLifecycleID: providerID,
+            verifiedAt: providerStatusIdentityVerifiedAt, clock: clock, connectionProof: providerStatusConnectionProof) == true {
+            // A newer foreign publication invalidates optimism immediately. Metadata and a
+            // fenced live reply can resolve it; an older retired writer cannot erase fresh proof.
+            providerStatusIdentityIsUncertain = true
+            providerStatusOwnsPresentation = true
+        }
+        // Acquire operational ownership only from an admitted current-session publication.
+        // A previous tunnel's file or unverified identity cannot interrupt initial startup.
+        let admitted = reader.admit(candidate, clock: clock, providerLifecycleID: providerID,
+            connectedAt: connectedAt ?? tunnelManager?.connection.connectedDate,
+            connectionProof: providerStatusConnectionProof)
+        if admitted { providerStatusOwnsPresentation = true }
+        providerStatusReader = reader
+        let next = providerStatusOwnsPresentation ? providerStatusIdentityIsUncertain ? .unavailable
+            : reader.status(clock: clock, providerLifecycleID: providerID,
+                connectedAt: connectedAt ?? tunnelManager?.connection.connectedDate,
+                connectionProof: providerStatusConnectionProof) : nil
+        // Inactive snapshots are already frozen when observation suspends. Do not paint expiry
+        // during the unlock transition before current IPC can be consumed. Activation always
+        // evaluates the absolute lease, even if IPC is missing; new failures still publish here.
+        if !chainedObservationActive, UIApplication.shared.applicationState != .active,
+           !admitted, !providerStatusIdentityIsUncertain, next == .unavailable { return }
+        if case .paused? = next { loadTemporaryProtectionPause() }
+        if providerStatusPresentation != next {
+            chainedProjectionRevision &+= 1
+            providerStatusPresentation = next
+        }
+        providerStatusExpiryTask?.cancel()
+        providerStatusExpiryTask = nil
+        guard !providerStatusIdentityIsUncertain, chainedObservationActive, let publication = reader.publication,
+              publication.isValid(clock: clock, providerLifecycleID: providerID,
+                connectedAt: connectedAt ?? tunnelManager?.connection.connectedDate,
+                connectionProof: providerStatusConnectionProof) else { return }
+        let remainingLease = publication.remainingLease(clock: clock, connectionProof: providerStatusConnectionProof)
+        providerStatusExpiryTask = Task { [weak self] in
+            do {
+                try await ContinuousClock().sleep(for: .seconds(remainingLease))
+                guard let self, !Task.isCancelled, self.chainedObservationActive,
+                      self.providerStatusReader.publication == publication else { return }
+                // Trigger every Guard/RN facet together. The reader itself checks the absolute deadline.
+                let status = self.providerStatusReader.status(clock: ProtectionStatusPublicationClock.capture(),
+                    providerLifecycleID: self.providerStatusLifecycleID,
+                    connectedAt: self.tunnelManager?.connection.connectedDate,
+                    connectionProof: self.providerStatusConnectionProof)
+                if self.providerStatusPresentation != status {
+                    self.chainedProjectionRevision &+= 1
+                    self.providerStatusPresentation = status
+                }
+            } catch { /* New observations and visibility changes cancel this exact publication deadline. */ }
         }
     }
 
@@ -242,6 +429,7 @@ extension AppViewModel {
                         return
                     }
                     try Task.checkCancellation()
+                    if let reply { self.admitProviderStatusReply(reply) }
                     let observation = ChainedRuntimeObservation.fromTunnelReply(reply)
                     if observation == nil {
                         self.logVPNDebugEvent("chained-observation-unavailable", details: [
@@ -292,13 +480,22 @@ extension AppViewModel {
     /// Suspend only observation, not the tunnel lifecycle, recovery arm or its proof.
     /// Resume with an immediate fresh sample of the same connected epoch.
     private func setChainedObservationActive(_ active: Bool) {
+        if !active {
+            providerStatusExpiryTask?.cancel()
+            providerStatusExpiryTask = nil
+        }
         if !active { cancelChainedForegroundEntryPrefetch() }
         guard chainedObservationLifetime.setActive(active) else { return }
+        let candidate = active ? consumeChainedForegroundEntryPrefetch() : nil
+        if active {
+            if let reply = candidate?.providerReply { admitProviderStatusReply(reply) }
+            refreshProviderStatusPublication(revalidateIdentity: true)
+        }
         logVPNDebugEvent("chained-observation-lifecycle", details: [
             "active": String(active), "generation": String(chainedObservationLifetime.generation),
             "connection": chainedSamplingConnection.map(String.init) ?? "none"
         ])
-        if active, let candidate = consumeChainedForegroundEntryPrefetch(),
+        if active, let candidate,
            let connection = chainedSamplingConnection {
             // This is a fresh provider observation, not renewed grace for the old claim.
             // Admit before publishing an expired resume gap; preserve its actual receipt time.
@@ -410,11 +607,19 @@ extension AppViewModel {
     }
 
     /// Starts during UIKit's foreground transition. It may stage evidence while inactive, but
-    /// only didBecomeActive can admit it. Neither activation nor cancellation awaits this task;
+    /// only the active observation owner can admit it. Neither activation nor cancellation awaits this task;
     /// the existing two-second IPC deadline also bounds a provider that never replies.
     private func beginChainedForegroundEntryPrefetch() {
-        cancelChainedForegroundEntryPrefetch()
-        guard !chainedObservationActive, vpnStatus == .connected, !isTearingDownProtection,
+        startChainedForegroundEntryPrefetch(restarting: false)
+    }
+
+    private func startChainedForegroundEntryPrefetch(restarting: Bool) {
+        guard !chainedObservationActive else { return }
+        if !restarting, chainedForegroundEntryTask != nil,
+           chainedForegroundEntryPrefetch.isPending(now: Self.chainedObservationNow) {
+            return
+        }
+        guard vpnStatus == .connected, !isTearingDownProtection,
               let connection = chainedSamplingConnection,
               let identity = chainedConnectLifecycleState.foregroundEntryIdentity,
               let session = tunnelManager?.connection as? NETunnelProviderSession,
@@ -423,10 +628,19 @@ extension AppViewModel {
               mutationIdentity.connection == connection,
               mutationIdentity.protectionIntentRevision == userProtectionIntent.revision,
               let restartGeneration = try? LavaProtectionCommandService.captureExternalRestartGeneration(),
-              mutationIdentity.externalRestartGeneration == restartGeneration else { return }
+              mutationIdentity.externalRestartGeneration == restartGeneration else {
+            cancelChainedForegroundEntryPrefetch()
+            return
+        }
+        let connectedAt = session.connectedDate
+        let retain = restarting && chainedForegroundEntrySession === session
+            && chainedForegroundEntryConnectedAt == connectedAt
+            && chainedForegroundEntryMutationIdentity == mutationIdentity
+        chainedForegroundEntryTask?.cancel()
         let token = chainedForegroundEntryPrefetch.begin(connection: connection, identity: identity,
-                                                         now: Self.chainedObservationNow)
+            now: Self.chainedObservationNow, retainingCandidate: retain)
         chainedForegroundEntrySession = session
+        chainedForegroundEntryConnectedAt = connectedAt
         chainedForegroundEntryMutationIdentity = mutationIdentity
         logVPNDebugEvent("chained-entry-prefetch", details: [
             "phase": "begin", "connection": String(connection), "generation": String(token.generation)
@@ -438,9 +652,10 @@ extension AppViewModel {
             let result = await self.queryChainedHandshakeObservation(reloadMissingManager: false)
             guard !Task.isCancelled, !self.chainedObservationActive,
                   self.tunnelManager?.connection === session,
+                  session.connectedDate == connectedAt,
                   self.chainedForegroundEntryMutationIdentity == mutationIdentity else { return }
-            let staged = self.chainedForegroundEntryPrefetch.stage(
-                ChainedRuntimeObservation.fromTunnelReply(result.reply), for: token,
+            let staged = self.chainedForegroundEntryPrefetch.stageProviderReply(
+                result.reply, for: token,
                 now: Self.chainedObservationNow)
             self.logVPNDebugEvent("chained-entry-prefetch", details: [
                 "phase": staged ? "staged" : "rejected", "connection": String(connection),
@@ -455,6 +670,7 @@ extension AppViewModel {
               vpnStatus == .connected, !isTearingDownProtection,
               let session = chainedForegroundEntrySession, session.status == .connected,
               tunnelManager?.connection === session,
+              session.connectedDate == chainedForegroundEntryConnectedAt,
               let identity = chainedForegroundEntryMutationIdentity,
               identity == chainedLifecycleMutationIdentity,
               identity.protectionIntentRevision == userProtectionIntent.revision,
@@ -462,6 +678,14 @@ extension AppViewModel {
               identity.externalRestartGeneration == restartGeneration else { return nil }
         let candidate = chainedForegroundEntryPrefetch.consume(connection: chainedSamplingConnection,
             identity: chainedConnectLifecycleState.foregroundEntryIdentity, now: Self.chainedObservationNow)
+        if let publication = candidate?.providerReply?.statusPublication {
+            guard let connectedAt = session.connectedDate else { return nil }
+            let clock = ProtectionStatusPublicationClock.capture()
+            let proof = ProtectionStatusPublicationConnectionProof(publication: publication,
+                connectedAt: connectedAt, verifiedAt: clock)
+            guard publication.isValid(clock: clock, providerLifecycleID: publication.providerLifecycleID,
+                connectedAt: connectedAt, connectionProof: proof) else { return nil }
+        }
         logVPNDebugEvent("chained-entry-prefetch", details: [
             "phase": candidate == nil ? "unavailable" : "admitted",
             "connection": String(identity.connection)
@@ -474,6 +698,7 @@ extension AppViewModel {
         chainedForegroundEntryTask?.cancel()
         chainedForegroundEntryTask = nil
         chainedForegroundEntrySession = nil
+        chainedForegroundEntryConnectedAt = nil
         chainedForegroundEntryMutationIdentity = nil
     }
 

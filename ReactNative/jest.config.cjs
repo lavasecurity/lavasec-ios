@@ -5,6 +5,6 @@ module.exports = {
   // i18n coverage: see tests/i18n-coverage/global-teardown.js.
   globalSetup: '<rootDir>/tests/i18n-coverage/global-setup.js',
   globalTeardown: '<rootDir>/tests/i18n-coverage/global-teardown.js',
-  setupFilesAfterEnv: ['<rootDir>/tests/i18n-coverage/observe.ts'],
+  setupFilesAfterEnv: ['<rootDir>/tests/window-defaults.ts','<rootDir>/tests/i18n-coverage/observe.ts'],
   moduleFileExtensions: ['ios.tsx', 'ios.ts', 'ts', 'tsx', 'js', 'jsx', 'json', 'node'],
 };

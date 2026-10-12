@@ -2,6 +2,28 @@ import XCTest
 @testable import LavaSecCore
 
 final class ProtectionStatusTests: XCTestCase {
+    func testUnresolvedInitialModeUsesOneStartingStateWithoutMaskingFailure() {
+        XCTAssertEqual(ProtectionStatus.resolve(lifecycle: .connected, chainedEstablishing: true,
+            awaitingInitialRuntime: true, connectivity: .healthy), .turningOn)
+        XCTAssertEqual(ProtectionStatus.resolve(lifecycle: .connected, awaitingInitialRuntime: true), .turningOn)
+        XCTAssertEqual(ProtectionStatus.resolve(lifecycle: .connected, awaitingInitialRuntime: true,
+            observationUnavailable: true, connectivity: .healthy), .unavailable)
+        XCTAssertEqual(ProtectionStatus.resolve(lifecycle: .connected, awaitingInitialRuntime: true,
+            chainedFailure: true, connectivity: .healthy), .chainingFailed)
+        for severity in [ProtectionConnectivitySeverity.networkUnavailable, .dnsSlow, .needsReconnect,
+            .recovering, .usingDeviceDNSFallback, .usingEncryptedFallback] {
+            XCTAssertEqual(ProtectionStatus.resolve(lifecycle: .connected, awaitingInitialRuntime: true,
+                connectivity: severity), .connected(severity))
+        }
+        for condition in [ChainedRuntimeCondition.suspended, .retired] {
+            XCTAssertEqual(ProtectionStatus.resolve(lifecycle: .connected, awaitingInitialRuntime: true,
+                runtimeCondition: condition, connectivity: .healthy), .unavailable)
+        }
+        XCTAssertEqual(ProtectionStatus.resolve(lifecycle: .connected, awaitingInitialRuntime: true,
+            runtimeCondition: .recovering, connectivity: .healthy), .vpnRecovering)
+        XCTAssertEqual(ProtectionStatus.resolve(lifecycle: .disconnecting, awaitingInitialRuntime: true), .turningOff)
+    }
+
 
     func testReadinessIsNeutralAndYieldsToPauseUnknownAndRealFailure() {
         XCTAssertEqual(ProtectionStatus.resolve(lifecycle: .connected, chainedEstablishing: true,

@@ -1,3 +1,4 @@
+import {useWindowLayout,useWindowStyles} from './window-layout';
 import {useHeldActionScrollLock} from './interaction-lock';
 import {localized} from '../app/presentation';
 import {Text} from '../app/presentation';
@@ -17,11 +18,12 @@ export {LavaToggleRow,LavaToggleControl} from './toggle-row.ios';
 // Matches native LavaSelectionAccessory. A blank slot keeps row content stable;
 // the full row is the target, so this mark never becomes another AX control.
 export function LavaSelectionAccessory({state,disabled=false}:LavaSelectionAccessoryProps) {
+  const {scale}=useWindowLayout();
   return <View accessible={false} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" pointerEvents="none"
-    style={{width:foundation.control.accessory,height:foundation.control.glyphSlot,flexShrink:0,alignItems:'center',justifyContent:'center'}}>
+    style={{width:foundation.control.accessory*scale,height:foundation.control.glyphSlot*scale,flexShrink:0,alignItems:'center',justifyContent:'center'}}>
     {state!=='unselected'&&<Decoration symbol={state==='locked'?'lock.fill':'checkmark.circle.fill'}
-      tone={state==='locked'||disabled?'secondary':'green'} fontPointSize={foundation.control.glyph} fontWeight="regular"
-      accessible={false} accessibilityElementsHidden style={{width:foundation.control.glyphSlot,height:foundation.control.glyphSlot}}/>}
+      tone={state==='locked'||disabled?'secondary':'green'} fontPointSize={foundation.control.glyph*scale} fontWeight="regular"
+      accessible={false} accessibilityElementsHidden style={{width:foundation.control.glyphSlot*scale,height:foundation.control.glyphSlot*scale}}/>}
   </View>;
 }
 
@@ -48,14 +50,18 @@ export function LavaText({children, role = 'rowTitle', tone, testID}: LavaTextPr
 }
 
 export function LavaCard({children, background, role = 'card', testID, borderColor}: LavaCardProps & {borderColor?:ColorValue}) {
+  const {insetScale}=useWindowLayout();
   return <LavaSurface testID={testID} role={role} borderColor={borderColor} style={{alignSelf:'stretch'}}
-    contentStyle={role==='panel'?{paddingHorizontal:lavaTokens.spacing.infoPanelHorizontalInset,paddingVertical:lavaTokens.spacing.infoPanelVerticalInset}:{padding:lavaTokens.spacing.lg}}>
+    contentStyle={role==='panel'?{paddingHorizontal:lavaTokens.spacing.infoPanelHorizontalInset*insetScale,paddingVertical:lavaTokens.spacing.infoPanelVerticalInset*insetScale}:{padding:lavaTokens.spacing.lg*insetScale}}>
     {background&&<View pointerEvents="none" accessible={false} accessibilityElementsHidden style={StyleSheet.absoluteFill}>{background}</View>}
     {children}
   </LavaSurface>;
 }
 
 export function LavaActionButton({title, role = 'primary', tone='affirmative', onPress, disabled = false, accessibilityHint, subtitle, icon, busy=false, onLongPress, accessibilityActions, onAccessibilityAction, testID,stablePill=false,whiteOutline=false,outlineTransitionDuration=0,labelRole='actionLabel'}: LavaActionButtonProps) {
+  const styles=useWindowStyles(windowBase_styles);
+  const windowScale=useWindowLayout().scale;
+  const outlineRadius=stablePill?foundation.radius.circle:foundation.radius.control*windowScale;
   const hold=useHeldActionScrollLock(!!onLongPress&&!disabled);
   const fill=useRef(new Animated.Value(whiteOutline?0:1)).current;
   const [outlineAnimating,setOutlineAnimating]=useState(false);
@@ -94,14 +100,14 @@ export function LavaActionButton({title, role = 'primary', tone='affirmative', o
           : pressed ? colors.pressedSurface : colors.cardBackground,
     }]}
   >{({pressed}) => <>
-    {outlineAnimating&&!disabled&&<Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill,{borderRadius:foundation.radius.control,borderCurve:'continuous',backgroundColor:colors.safeControlGreen,opacity:fill}]}/>}
-    {outlineAnimating&&!disabled&&<Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill,{borderRadius:foundation.radius.control,borderCurve:'continuous',overflow:'hidden',borderColor:'white',borderWidth:1.5,opacity:fill.interpolate({inputRange:[0,1],outputRange:[1,0]})}]}/>}
-    {!outlineAnimating&&whiteOutline&&!disabled&&<View pointerEvents="none" style={[StyleSheet.absoluteFill,{borderRadius:foundation.radius.control,borderCurve:'continuous',overflow:'hidden',borderColor:'white',borderWidth:1.5}]}/>}
+    {outlineAnimating&&!disabled&&<Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill,{borderRadius:outlineRadius,borderCurve:'continuous',backgroundColor:colors.safeControlGreen,opacity:fill}]}/>}
+    {outlineAnimating&&!disabled&&<Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill,{borderRadius:outlineRadius,borderCurve:'continuous',overflow:'hidden',borderColor:'white',borderWidth:1.5,opacity:fill.interpolate({inputRange:[0,1],outputRange:[1,0]})}]}/>}
+    {!outlineAnimating&&whiteOutline&&!disabled&&<View pointerEvents="none" style={[StyleSheet.absoluteFill,{borderRadius:outlineRadius,borderCurve:'continuous',overflow:'hidden',borderColor:'white',borderWidth:1.5}]}/>}
     {pressed && <View pointerEvents="none" style={[styles.pressOverlay, {
       backgroundColor: colors.pressedSurface, opacity: 0.15,
     }]} />}
-    <View style={[styles.actionContent,labelRole==='rowTitle'&&{gap:7}]}>
-      {(busy||icon)&&<View style={[styles.actionAccessory,labelRole==='rowTitle'&&{width:16,height:16}]}>{busy?<ActivityIndicator color={foreground} accessible={false}/>:icon?<Decoration symbol={actionSymbols[icon]} tone={disabled?'secondary':role==='primary'?'white':'green'} fontPointSize={labelRole==='rowTitle'?13:foundation.control.glyph} fontWeight={labelRole==='rowTitle'?'semibold':'regular'} accessible={false} style={[styles.actionAccessory,labelRole==='rowTitle'&&{width:16,height:16}]}/>:null}</View>}
+    <View style={[styles.actionContent,labelRole==='rowTitle'&&{gap:7*windowScale}]}>
+      {(busy||icon)&&<View style={[styles.actionAccessory,labelRole==='rowTitle'&&{width:16*windowScale,height:16*windowScale}]}>{busy?<ActivityIndicator color={foreground} accessible={false}/>:icon?<Decoration symbol={actionSymbols[icon]} tone={disabled?'secondary':role==='primary'?'white':'green'} fontPointSize={(labelRole==='rowTitle'?13:foundation.control.glyph)*windowScale} fontWeight={labelRole==='rowTitle'?'semibold':'regular'} accessible={false} style={[styles.actionAccessory,labelRole==='rowTitle'&&{width:16*windowScale,height:16*windowScale}]}/>:null}</View>}
       <Text accessible={false} allowFontScaling dynamicTypeRamp={lavaTokens.typography[labelRole].dynamicTypeRamp}
         style={[styles.actionLabel,{fontSize:lavaTokens.typography[labelRole].fontSize,fontWeight:lavaTokens.typography[labelRole].fontWeight,color: foreground, textAlign: 'center'}]}>{title}</Text>
     </View>
@@ -120,14 +126,15 @@ const iconPointSizes: Partial<Record<LavaIconAction,number>> = {
   delete:lavaTokens.toolbar.wideIconPointSize,
 };
 export function LavaIconButton({title, icon, onPress, role='neutral', surface='filled', shape='circle', selected=false, prominent=false, disabled=false, item, onLongPress, longPressDelayMs, testID}: LavaIconButtonProps) {
+  const {scale}=useWindowLayout();
   const colorScheme = useLavaColorScheme();
   const filled=(selected||prominent)&&!disabled;
   return <Pressable testID={testID} accessibilityRole="button" accessibilityLabel={localized(title)}
     accessibilityValue={item?{text:item}:undefined} accessibilityState={{disabled,selected}} disabled={disabled} onLongPress={disabled?undefined:onLongPress} delayLongPress={longPressDelayMs} onPress={event=>{event?.stopPropagation();onPress();}}
-    style={({pressed})=>({width:foundation.control.target,height:foundation.control.target,borderRadius:shape==='rounded'?foundation.radius.control:foundation.radius.circle,alignItems:'center',justifyContent:'center',
+    style={({pressed})=>({width:foundation.control.target*scale,height:foundation.control.target*scale,borderRadius:shape==='rounded'?foundation.radius.control*scale:foundation.radius.circle,alignItems:'center',justifyContent:'center',
       backgroundColor:surface==='plain'?'transparent':colorForScheme(filled?'safeControlGreen':pressed?'pressedSurface':'cardBackground',colorScheme),opacity:surface==='plain'&&pressed?0.55:1})}>
-    <Decoration symbol={actionSymbols[icon]} colorScheme={colorScheme} tone={disabled?'tertiary':filled?(surface==='plain'?'green':'white'):role==='destructive'?'error':role==='accent'?'green':'primary'} fontPointSize={iconPointSizes[icon]??lavaTokens.toolbar.framedIconPointSize} fontWeight="semibold"
-      accessible={false} accessibilityElementsHidden style={{width:foundation.control.glyphSlot,height:foundation.control.glyphSlot,transform:[{translateY:icon==='edit'?lavaTokens.toolbar.framedIconVerticalOffset:0}]}} />
+    <Decoration symbol={actionSymbols[icon]} colorScheme={colorScheme} tone={disabled?'tertiary':filled?(surface==='plain'?'green':'white'):role==='destructive'?'error':role==='accent'?'green':'primary'} fontPointSize={(iconPointSizes[icon]??lavaTokens.toolbar.framedIconPointSize)*scale} fontWeight="semibold"
+      accessible={false} accessibilityElementsHidden style={{width:foundation.control.glyphSlot*scale,height:foundation.control.glyphSlot*scale,transform:[{translateY:icon==='edit'?lavaTokens.toolbar.framedIconVerticalOffset:0}]}} />
   </Pressable>;
 }
 
@@ -156,3 +163,5 @@ const styles = StyleSheet.create({
     borderRadius: lavaTokens.surface.controlCornerRadius, borderCurve: 'continuous',
   },
 });
+
+const windowBase_styles=styles;

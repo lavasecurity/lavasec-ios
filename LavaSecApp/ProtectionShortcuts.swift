@@ -119,10 +119,11 @@ enum LavaProtectionStatusReader {
                 } == true
                 return .resolve(lifecycle: lifecycle, awaitingOnDemandReconnect: armed && !terminalRefusal)
             }
-            guard let session = manager.connection as? NETunnelProviderSession,
-                  let data = await query(session),
+            guard let session = manager.connection as? NETunnelProviderSession else { return .unavailable }
+            let connectedAt = session.connectedDate
+            guard let data = await query(session),
                   let evidence = try? JSONDecoder().decode(ProtectionStatusEvidence.self, from: data),
-                  manager.connection.status == .connected
+                  manager.connection.status == .connected, manager.connection.connectedDate == connectedAt
             else { return .unavailable }
             // The provider's fail-closed DNS-only fallback is no longer a chained tunnel.
             // Read the same durable failure marker as Guard before labeling it Protected.
@@ -146,6 +147,23 @@ enum LavaProtectionStatusReader {
                 chainedFailure = configuration.chainedUpstreamEnabled
             } else {
                 chainedFailure = false
+            }
+            if evidence.isChained, let publication = evidence.statusPublication {
+                var reader = ProtectionStatusPublicationReader()
+                let clock = ProtectionStatusPublicationClock.capture()
+                // The exact live session and connected epoch were fenced across query(). Its
+                // incarnation proof survives wall-clock edits and never waits on securityd.
+                let providerID = evidence.providerLifecycleID
+                guard let connectedAt else { return chainedFailure ? .chainingFailed : .unavailable }
+                let proof = ProtectionStatusPublicationConnectionProof(publication: publication, connectedAt: connectedAt, verifiedAt: clock)
+                guard reader.admit(publication, clock: clock, providerLifecycleID: providerID,
+                    connectedAt: connectedAt, connectionProof: proof) else {
+                    return chainedFailure ? .chainingFailed : .unavailable
+                }
+                let status = reader.status(clock: clock, providerLifecycleID: providerID,
+                    connectedAt: connectedAt, connectionProof: proof)
+                if chainedFailure, status != .connected(.networkUnavailable) { return .chainingFailed }
+                return status
             }
             return evidence.status(now: Date(), chainedFailure: chainedFailure)
         } catch { return .unavailable }

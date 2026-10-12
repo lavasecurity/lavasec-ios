@@ -39,7 +39,7 @@ public enum ControlPlaneProtectionMigration {
 
     /// The existing control-plane files under `containerURL` that must carry
     /// Class-None (INV-PERSIST-2): the shared config/library pair, tunnel
-    /// health, the protection lifecycle state + required locks, the legacy root artifact trio,
+    /// health and status publication, the protection lifecycle state + required locks, the legacy root artifact trio,
     /// and every file under the versioned artifact area (`filter-artifacts/`, including the
     /// publish pointer) and the tunnel's retained in-extension compile
     /// (`catalog-cache/tunnel-compiled-artifact/`).
@@ -62,13 +62,14 @@ public enum ControlPlaneProtectionMigration {
         containerURL: URL,
         fileManager: FileManager = .default
     ) -> ControlPlaneTargetScan {
-        // Root singles: the pair + tunnel health + lifecycle coordination, plus the legacy
+        // Root singles: the pair + tunnel health/status + lifecycle coordination, plus the legacy
         // pre-pointer root trio (still read by the tunnel's readableStore fallback before the
         // first versioned publish and after a rollback).
         let rootFilenames = [
             "app-configuration.json",
             "filter-library.json",
             "tunnel-health.json",
+            "protection-status-publication.json",
             "filter-snapshot.json",
             "filter-snapshot.compact",
             "filter-artifact-manifest.json",

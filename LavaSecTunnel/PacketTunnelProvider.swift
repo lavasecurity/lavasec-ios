@@ -773,6 +773,11 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     // bit additionally prevents any stale timer/work item from creating a new
     // smoke owner after invalidation and before final queue cleanup.
     var tunnelLifecycleIsActive = false
+    // INV-QUEUE-1: the provider owns both proof and renewal. App visibility never reaches this state.
+    var protectionStatusPublisher = ProtectionStatusPublisher()
+    var protectionStatusPublication: ProtectionStatusPublication?
+    var protectionStatusLastWriteAttempt: ProtectionStatusPublication?
+    lazy var protectionStatusHeartbeat = QueueConfinedRepeatingTimer(queue: dnsStateQueue)
     var lastObservedPathKind: TunnelNetworkKind?
     var lastObservedPathIsSatisfied: Bool?
     // Freshest path-satisfied state the monitor has delivered, stamped SYNCHRONOUSLY

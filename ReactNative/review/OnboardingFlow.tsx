@@ -1,3 +1,4 @@
+import {windowLayout} from '../src/window-layout';
 import {animationNow} from '../src/animation-clock';
 import {useEffect,useLayoutEffect,useRef,useState,type ReactNode} from 'react';
 import {Animated,AppState,Easing,Pressable,StyleSheet,View} from 'react-native';
@@ -6,7 +7,7 @@ import {useIsFocused,usePreventRemove} from '@react-navigation/native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import type {AppCommand,OnboardingSetup} from '../app/contract';
 import {mayInteractWithPresentation} from '../app/read-cache';
-import {usePresentationNativeLayout,usePresentationReadiness} from '../app/use-presentation-readiness';
+import {usePresentationAuthority,usePresentationNativeLayout,usePresentationReadiness} from '../app/use-presentation-readiness';
 import {Alert,localized} from '../app/presentation';
 import {LavaActionButton} from '../src';
 import {lavaTokens} from '../src/generated/tokens';
@@ -27,9 +28,15 @@ export function OnboardingFlow(){
   // This hook belongs to the visible modal's independent navigator. The
   // hidden Guard viewport cannot admit setup while its drawings have zero size.
   const focused=useIsFocused();const currentVisit=!!setup&&(!app||live?.onboardingSetup?.id===setup.id);
+  const presentationAuthority=usePresentationAuthority(app);
+  const readEpoch=app?.getReadEpoch?.();
+  const entryScope=JSON.stringify([setup?.id,live?.security.readRevision,readEpoch]);
+  const entryRequest=useRef<{app:typeof app;scope:string}|undefined>(undefined);
+  const [entryReady,setEntryReady]=useState<{app:typeof app;scope:string}>();
   const onLayout=usePresentationNativeLayout(currentVisit);
   usePresentationReadiness(app,!!app&&focused&&currentVisit,size.width>0&&size.height>0,`onboarding-size:${setup?.id}`);
-  const mascotSize=lavaTokens.guard.mascotSize;
+  usePresentationReadiness(app,!!app&&focused&&currentVisit,entryReady?.app===app&&entryReady?.scope===entryScope,`onboarding-entry:${entryScope}`);
+  const windowScale=windowLayout(size).scale;const mascotSize=lavaTokens.guard.mascotSize*windowScale;
   const reduced=useReducedMotionPreference();const crossFade=useCrossFadePreference();const header=useHeaderHeight();const insets=useSafeAreaInsets();
   const [elapsed,setElapsed]=useState(0);const [openingElapsed,setOpeningElapsed]=useState(0);const [retry,setRetry]=useState(0);const [failed,setFailed]=useState(false);
   const [permissionSmile,setPermissionSmile]=useState(false);const previousRequest=useRef(setup?.busy);const smileTimer=useRef<ReturnType<typeof setTimeout>|undefined>(undefined);
@@ -84,7 +91,25 @@ export function OnboardingFlow(){
     returnOffset.setValue({x:previousPosition.current.x-sourceFrame.x-sourceFrame.width/2,y:previousPosition.current.y-sourceFrame.y-sourceFrame.height/2});
     const motion=Animated.timing(returnOffset,{toValue:{x:0,y:0},duration:400,easing:easeInOut,useNativeDriver:true});motion.start();return()=>motion.stop();
   },[setup?.id,setup?.page]);
-  useEffect(()=>{if(!setup)return;const enter=()=>{if(AppState.currentState==='active')void command({type:'onboarding.enter',id:setup.id},true);};enter();const listener=AppState.addEventListener('change',state=>{if(state==='active')enter();});return()=>listener.remove();},[setup?.id,live?.security.readRevision]);
+  useLayoutEffect(()=>{
+    if(!app||!setup)return;
+    // A system permission reply in shared onboarding (#861) may finish while
+    // UIKit is inactive. Refresh when foreground authority returns, even if the
+    // security revision is unchanged or React batches the pause and resume.
+    // Preparation holds the resume cover until the updated snapshot commits.
+    // One entry per read turn prevents duplicate active events without swallowing
+    // a fresh entry queued behind an interrupted request from the previous turn.
+    const enter=()=>{
+      if(AppState.currentState!=='active'||app.getSnapshot&&!app.getSnapshot().snapshot
+        ||app.getReadEpoch&&app.getReadEpoch()!==readEpoch)return;
+      if(entryRequest.current?.app===app&&entryRequest.current.scope===entryScope)return;
+      const request={app,scope:entryScope};entryRequest.current=request;
+      void app.command({type:'onboarding.enter',id:setup.id}).catch(()=>{}).finally(()=>{
+        if(alive.current&&entryRequest.current===request)setEntryReady(request);
+      });
+    };
+    enter();const listener=AppState.addEventListener('change',state=>{if(state==='active')enter();});return()=>listener.remove();
+  },[app,setup?.id,entryScope,presentationAuthority,readEpoch]);
   useEffect(()=>{
     if(!setup)return;
     if(returningWelcome&&!returnReady)return;
@@ -129,7 +154,7 @@ export function OnboardingFlow(){
   },[setup?.id,setup?.page,setup?.phase,frames,retry,live?.security.readRevision]);
   const close=()=>{if(setup?.mock)void command({type:'onboarding.dismiss',id:setup.id});};
   const landscape=size.width>size.height;
-  const sourceInset=landscape&&size.height<foundation.layout.expandedSceneMinHeight?128:0;
+  const sourceInset=landscape?128*windowScale:0;
   useToolbar({title:setup&&landscape?onboardingPageTitle(setup.page):'',headerTitleStyle:landscape&&setup?.page===0?{color:'white'}:undefined,headerBackVisible:false,
     unstable_headerLeftItems:()=>setup?.history.length&&!['opening','released'].includes(setup.phase)?[toolbarButton('Back','chevron.left',()=>void command({type:'onboarding.back',id:setup.id}),!!setup.busy)]:[],
     unstable_headerRightItems:()=>setup?.mock?[toolbarButton('Close','xmark',close,!!setup.busy)]:[]},[setup?.id,setup?.page,setup?.history.length,setup?.busy,setup?.phase,landscape]);

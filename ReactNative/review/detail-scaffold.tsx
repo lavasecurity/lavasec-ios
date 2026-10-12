@@ -1,3 +1,4 @@
+import {useScaffoldStyles,useWindowLayout} from '../src/window-layout';
 import {useState,type PropsWithChildren,type ReactNode} from 'react';
 import {activityBranches} from './activity-model';
 import {Pressable, StyleSheet, TextInput, View, type TextInputProps} from 'react-native';
@@ -25,6 +26,7 @@ export function ProportionBar({allowed,blocked}:{allowed:number;blocked:number})
 
 // Both densities share square inner ends and one clipped, rounded outer contour.
 export function ActivityFlowBar({allowed,blocked,compact=false}:{allowed:number;blocked:number;compact?:boolean}) {
+  const detailStyles=useScaffoldStyles(windowBase_detailStyles);
   const [width,setWidth]=useState(0);const branches=activityBranches(width,allowed,blocked);
   return <View testID="activity.flow-bar" accessible={false} onLayout={event=>setWidth(event.nativeEvent.layout.width)} style={[detailStyles.flowBar,compact&&{height:8},{gap:branches.gap}]}>
     {blocked>0&&<View testID="activity.flow.blocked" style={[detailStyles.blockedBar,{width:branches.blocked}]}/>}
@@ -40,6 +42,7 @@ export function DetailNotice({title,description,icon,children}:PropsWithChildren
 }
 
 export function DetailSteps({titles,current,furthest,onSelect,disabled=false}:{titles:readonly string[];current:number;furthest:number;onSelect:(step:number)=>void;disabled?:boolean}) {
+  const detailStyles=useScaffoldStyles(windowBase_detailStyles);
   return <View style={detailStyles.actions}>{titles.map((title,index)=><Pressable key={title} accessibilityRole="button"
     accessibilityLabel={`${index+1}. ${localized(title)}`} accessibilityState={{selected:current===index,disabled:disabled||index>furthest}}
     disabled={disabled||index>furthest} onPress={()=>onSelect(index)} style={({pressed})=>[detailStyles.step,current===index&&detailStyles.stepSelected,(disabled||index>furthest)&&detailStyles.disabled,pressed&&detailStyles.pressed]}>
@@ -48,15 +51,18 @@ export function DetailSteps({titles,current,furthest,onSelect,disabled=false}:{t
 }
 
 export function DetailField({title,compactMultiline=false,...props}:TextInputProps&{title:string;compactMultiline?:boolean}) {
+  const detailStyles=useScaffoldStyles(windowBase_detailStyles);
   const scale=useTextScale();
+  const target=foundation.control.target*useWindowLayout().scale;
   const lineHeight=foundation.type.body.fontSize*1.4*scale;
-  const minHeight=props.multiline?(compactMultiline?lineHeight:Math.max(foundation.control.target*3,lineHeight)):Math.max(foundation.control.target,lineHeight);
+  const minHeight=props.multiline?(compactMultiline?lineHeight:Math.max(target*3,lineHeight)):Math.max(target,lineHeight);
   return <InputRow title={title}><TextInput {...props} allowFontScaling={false} accessibilityLabel={localized(title)}
     placeholder={props.placeholder?localized(props.placeholder):undefined} placeholderTextColor={colors.tertiaryText}
     style={[detailStyles.input,{fontSize:foundation.type.body.fontSize*scale,minHeight}]}/></InputRow>;
 }
 
 export function DetailValues({rows,metadata=false,pending=false}:{rows:readonly (readonly string[])[];metadata?:boolean;pending?:boolean}) {
+  const detailStyles=useScaffoldStyles(windowBase_detailStyles);
   return <View style={detailStyles.stack}>{rows.map(([label,value],index)=><View key={label} style={detailStyles.stack}>
     {index>0&&<View style={detailStyles.divider}/>}
     <View accessible accessibilityRole="text" testID={`diagnostic.${label}`} accessibilityState={{busy:pending}}
@@ -69,6 +75,7 @@ export function DetailValues({rows,metadata=false,pending=false}:{rows:readonly 
 }
 
 export function DetailReviewValue({label,children,divider=false}:{label:string;children:ReactNode;divider?:boolean}) {
+  const detailStyles=useScaffoldStyles(windowBase_detailStyles);
   return <View style={detailStyles.tightStack}>{divider&&<View style={detailStyles.divider}/>}<InputRow title={label}><Copy role="body">{children}</Copy></InputRow></View>;
 }
 
@@ -102,3 +109,5 @@ export const detailStyles=StyleSheet.create({
   allowedBar:{height:14,backgroundColor:colors.safeGreen},
   blockedBar:{height:14,backgroundColor:colors.lavaOrange},
 });
+
+const windowBase_detailStyles=detailStyles;

@@ -1,6 +1,6 @@
 import Foundation
 
-public enum ProtectionConnectivitySeverity: Equatable, Sendable {
+public enum ProtectionConnectivitySeverity: Codable, Equatable, Sendable {
     case healthy
     case recovering
     case usingDeviceDNSFallback

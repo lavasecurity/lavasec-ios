@@ -37,6 +37,12 @@ final class ProtectionShortcutWiringSourceTests: XCTestCase {
         XCTAssertTrue(reader.contains("AppConfiguration.self, from: configurationURL"))
         XCTAssertTrue(reader.contains("chainedFailure = configuration.chainedUpstreamEnabled"))
         XCTAssertTrue(reader.contains("evidence.status(now: Date(), chainedFailure: chainedFailure)"))
+        XCTAssertTrue(reader.contains("evidence.statusPublication"))
+        XCTAssertTrue(reader.contains("ProtectionStatusPublicationReader()"))
+        XCTAssertTrue(reader.contains("let providerID = evidence.providerLifecycleID"))
+        XCTAssertTrue(reader.contains("manager.connection.connectedDate == connectedAt"))
+        XCTAssertTrue(reader.contains("connectionProof: proof"))
+        XCTAssertFalse(reader.contains("protectionStatusIdentityWork.read()"))
     }
 
     func testProviderStatusMessageOnlyCopiesCurrentObservations() throws {
@@ -49,6 +55,62 @@ final class ProtectionShortcutWiringSourceTests: XCTestCase {
         XCTAssertTrue(read.contains("snapshotStatusEvidence()"))
         XCTAssertTrue(read.contains("self.health"))
         XCTAssertTrue(read.contains("cachedTemporaryProtectionPauseUntil"))
+        XCTAssertTrue(read.contains("sampleProtectionStatusPublication(evidence: evidence)"))
+    }
+
+    func testCanonicalPublicationPrecedesForegroundRenderingAndHealthNudges() throws {
+        let app = sourceCodeOnly(try readSource(.appViewModelChainedConnectLifecycle))
+        let signals = sourceCodeOnly(try readSource(.appViewModelLiveActivity))
+        let diagnostics = sourceCodeOnly(try readSource(.packetTunnelProviderDiagnostics))
+        let lifecycle = sourceCodeOnly(try readSource(.packetTunnelProviderLifecycle))
+        XCTAssertTrue(app.contains("readProtectionStatusPublication()"))
+        XCTAssertTrue(app.contains("reader.admit(candidate"))
+        XCTAssertTrue(app.contains("publication.remainingLease(clock: clock, connectionProof: providerStatusConnectionProof)"))
+        XCTAssertTrue(app.contains("if (providerStatusOwnsPresentation || providerStatusIdentityVerifiedAt != nil)"))
+        XCTAssertTrue(app.contains("let admitted = reader.admit(candidate"))
+        XCTAssertTrue(app.contains("if admitted { providerStatusOwnsPresentation = true }"))
+        XCTAssertTrue(app.contains("let observation = ChainedRuntimeObservation.fromTunnelReply(reply)"))
+        XCTAssertTrue(app.contains("if observation == .dnsOnly"))
+        XCTAssertTrue(app.contains("observation == .inactive && reply.statusPublication?.status == .unavailable"))
+        XCTAssertTrue(app.contains("guard publication.providerLifecycleID == providerID"))
+        let bridge = sourceCodeOnly(try readSource(.reactNativeAppBridge))
+        XCTAssertTrue(bridge.contains("self?.model.refreshProtectionStatusForForegroundPresentation()"))
+        let foreground = try sourceBlock(in: app, startingAt: "func refreshProtectionStatusForForegroundPresentation()",
+            endingBefore: "private func logChainedEstablishmentGate(")
+        let active = try XCTUnwrap(foreground.range(of: "setChainedObservationActive(true)"))
+        let refresh = try XCTUnwrap(foreground.range(of: "refreshProviderStatusPublication(revalidateIdentity: true)"))
+        XCTAssertLessThan(active.lowerBound, refresh.lowerBound)
+        XCTAssertTrue(app.contains("!admitted, !providerStatusIdentityIsUncertain, next == .unavailable"))
+        XCTAssertTrue(app.contains("UIApplication.shared.applicationState != .active"))
+        XCTAssertTrue(app.contains("await LavaSecAppGroup.protectionStatusIdentityWork.read()"))
+        XCTAssertFalse(app.contains("currentProtectionStatusProviderID()"))
+        XCTAssertTrue(app.contains("providerStatusIdentityGeneration == generation"))
+        XCTAssertTrue(app.contains("began.isAtOrAfter(requestedAt)"))
+        XCTAssertTrue(app.contains("guard case .observed(let id?, let began) = outcome, !id.isEmpty"))
+        XCTAssertFalse(app.contains("began.date >= connectedAt"))
+        XCTAssertTrue(app.contains("providerStatusConnectionProof = nil"))
+        XCTAssertTrue(app.contains("if case .paused? = next { loadTemporaryProtectionPause() }"))
+        XCTAssertTrue(signals.contains("func handleTunnelHealthNudge() {\n        refreshProviderStatusPublication()"))
+        XCTAssertTrue(diagnostics.contains("SharedStateFileProtection.atomicControlPlaneWritingOptions"))
+        XCTAssertTrue(diagnostics.contains("ProtectionStatusPublication.heartbeatSeconds"))
+        XCTAssertTrue(diagnostics.contains("guard tunnelLifecycleIsActive, latchedChainedLifecycleEvidenceID != nil else"))
+        XCTAssertTrue(diagnostics.contains("refreshProtectionPauseStateOnly(reason: \"status-heartbeat\")"))
+        XCTAssertTrue(lifecycle.contains("self?.protectionStatusHeartbeat.assumeIsolated { $0.stop() }"))
+        XCTAssertTrue(lifecycle.contains("self.tunnelLifecycleIsActive = false"))
+        XCTAssertTrue(lifecycle.contains("self.publishProtectionStatus()"))
+    }
+
+    func testPausePresentationAndResumeGuardShareTheAdmittedDeadline() throws {
+        let app = sourceCodeOnly(try readSource(.appViewModelCore))
+        let pause = try sourceBlock(in: app, startingAt: "var presentedTemporaryProtectionPauseUntil: Date?",
+            endingBefore: "var guardDNSFlowStepStatus:")
+        XCTAssertTrue(pause.contains("if let status = canonicalProviderStatus"))
+        XCTAssertTrue(pause.contains("if case .paused(let until) = status { return until }"))
+        XCTAssertTrue(pause.contains("vpnStatus == .connected && presentedTemporaryProtectionPauseUntil != nil"))
+        XCTAssertTrue(pause.contains("guard let until = presentedTemporaryProtectionPauseUntil"))
+        let commands = sourceCodeOnly(try readSource(.appViewModelProtectionPause))
+        XCTAssertTrue(commands.contains("func resumeProtectionNow() {\n        guard isProtectionTemporarilyPaused"))
+        XCTAssertTrue(commands.contains("let pauseWasAccepted = vpnStatus == .connected && temporaryProtectionPauseUntil != nil"))
     }
 
     func testCommandsUseExistingAuthenticationAndLifecycleBoundaries() throws {

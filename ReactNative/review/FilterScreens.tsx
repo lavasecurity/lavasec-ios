@@ -88,7 +88,7 @@ export function LibraryScreen() {
       else if(action==='share')share(filter);
     }).catch(error=>Alert.alert('Lava',error.message));
   };
-  return <Screen><SettingsIntro summary="Choose a filter to use, view or edit." />
+  return <Screen showsVerticalScrollIndicator><SettingsIntro summary="Choose a filter to use, view or edit." />
     <Group footer={editing&&<View style={{padding:16}}><AddAction title="Add a filter" onPress={create}/></View>}>{filters.map(filter=>{
       const active=live?live.session.activeFilterID===filter.id:session.activeFilter===filter.name;
       const deleting=staged.includes(filter.id);const disabled=busy||editing&&deleting;
@@ -154,7 +154,7 @@ export function FilterScreen() {
   const domainRow=(decision:'blocked'|'allowed',row:{id:string;pending:boolean;undo:boolean})=><ListRow testID={`filter.rule.${decision}.${row.id}`} verbatimTitle key={row.id} title={row.id} outcome={decision} pending={row.pending} trailing={<AccessorySlot>{editing&&changeButton(row.id,row.undo,()=>{if(app&&row.undo)run({type:'filter.undoDomain',id:id!,decision,domain:row.id});else remove(decision,row.id);})}</AccessorySlot>}/>;
   if(!ready)return <Screen><Info title="Loading filter…" description="Restoring the filter you opened." /></Screen>;
   if(!filter)return <Screen><Info title="Filter unavailable" description="This filter is no longer saved on this device." /></Screen>;
-  return <Screen onRefresh={app&&id===live?.session.activeFilterID?()=>app.command({type:'filter.refresh',id:id!}):undefined}><FilterIdentity emoji={'emoji' in filter?filter.emoji:undefined} onRename={editing&&app?()=>run({type:'filter.renameForm',id:id!}):undefined} name={filter.name} rules={localizedFormat('%@ rules',filter.count)} status={live?.filterStatus.title??'Filter up to date'} icon={live?.filterStatus.icon??'checkmark.circle.fill'} warning={live?.filterStatus.warning} inactive={app?id!==live?.session.activeFilterID:filter.name!==session.activeFilter}/>
+  return <Screen showsVerticalScrollIndicator onRefresh={app&&id===live?.session.activeFilterID?()=>app.command({type:'filter.refresh',id:id!}):undefined}><FilterIdentity emoji={'emoji' in filter?filter.emoji:undefined} onRename={editing&&app?()=>run({type:'filter.renameForm',id:id!}):undefined} name={filter.name} rules={localizedFormat('%@ rules',filter.count)} status={live?.filterStatus.title??'Filter up to date'} icon={live?.filterStatus.icon??'checkmark.circle.fill'} warning={live?.filterStatus.warning} inactive={app?id!==live?.session.activeFilterID:filter.name!==session.activeFilter}/>
     <Section title="Lava blocks these"><Group footer={editing&&<View style={{padding:16,gap:8}}><AddAction title="Add a blocklist" onPress={()=>nav.navigate('AddBlocklist',{id})}/><AddAction title="Block a domain" onPress={()=>nav.navigate('AddDomain',{decision:'blocked',id})}/></View>}>
       {lists.map(row=><ListRow testID={`filter.rule.list.${row.id}`} verbatimTitle key={row.id} title={live?.blocklistNames[row.id]??row.id} outcome="blocked" pending={row.pending} metadata={live?.blocklistMetadata[row.id]??localizedFormat('%@ rules',localizedNumber(catalogFixture[row.id]?.count??0))} trailing={<AccessorySlot>{editing&&changeButton(row.id,row.undo,()=>{if(app&&live)run({type:row.undo?'filter.undoList':'filter.removeList',id:id!,sourceID:row.id});else setSession({...session,blocklists:session.blocklists.filter(x=>x!==row.id)});})}</AccessorySlot>} />)}
       {blocked.map(row=>domainRow('blocked',row))}
@@ -288,7 +288,7 @@ export function ReviewScreen() {
   const rows=[...diff.blockedAdded.map(title=>({title,kind:'Blocked domain added'})),...diff.blockedRemoved.map(title=>({title,kind:'Blocked domain removed'})),...diff.allowedAdded.map(title=>({title,kind:'Allowed domain added'})),...diff.allowedRemoved.map(title=>({title,kind:'Allowed domain removed'}))];
   const lists=[...session.blocklists.filter(x=>!session.savedBlocklists.includes(x)).map(title=>({title,kind:'Added'})),...session.savedBlocklists.filter(x=>!session.blocklists.includes(x)).map(title=>({title,kind:'Removed'}))];
   const count=rows.length+lists.length;
-  return <Sheet footer={live?.filterEditing?.upgradeReason?<LavaActionButton title="Upgrade" disabled={!ready} onPress={()=>upgrade(live.filterEditing!.upgradeReason! as import('./plus-intents').PlusReason)}/>:<LavaActionButton title="Confirm changes" disabled={!ready||!app||!review||busy||live?.filterEditing?.reviewCanConfirm===false} onPress={apply} />}>
+  return <Sheet showsVerticalScrollIndicator footer={live?.filterEditing?.upgradeReason?<LavaActionButton title="Upgrade" disabled={!ready} onPress={()=>upgrade(live.filterEditing!.upgradeReason! as import('./plus-intents').PlusReason)}/>:<LavaActionButton title="Confirm changes" disabled={!ready||!app||!review||busy||live?.filterEditing?.reviewCanConfirm===false} onPress={apply} />}>
     {(live?.filterEditing?.validation||error)&&<Info warning title="Review cannot continue" description={live?.filterEditing?.validation||error}/>}
     <Copy color={colors.secondaryText}>{localizedFormat('%@ will be saved locally.',localizedFormat(count===1?'%d change':'%d changes',count))}</Copy>
     {!!diff.allowedAdded.length&&<Info warning icon="exclamationmark.triangle.fill" title="Be extra careful" description="Allowed exceptions let a site through even when a blocklist would catch it." />}
@@ -301,7 +301,7 @@ export function ReviewScreen() {
 export function ShareScreen() {
   const nav=useReviewNavigation();const {session,setSession,live}=useReview();
   const filters=live?.filters??filterFixtures.map(filter=>({...filter,id:filter.name,shareable:true,shareSummary:localizedFormat('%@ rules',filter.count)}));
-  return <Screen><Section title="Your filters"><Group>{filters.map(filter=><ListRow action icon="line.3.horizontal.decrease.circle" verbatimTitle key={filter.id} title={filter.name} metadata={filter.shareSummary} disabled={!filter.shareable} onPress={()=>{setSession({...session,shareFilter:filter.name});nav.navigate('ShareDetail',{id:filter.id});}} />)}</Group></Section></Screen>;
+  return <Screen showsVerticalScrollIndicator><Section title="Your filters"><Group>{filters.map(filter=><ListRow action icon="line.3.horizontal.decrease.circle" verbatimTitle key={filter.id} title={filter.name} metadata={filter.shareSummary} disabled={!filter.shareable} onPress={()=>{setSession({...session,shareFilter:filter.name});nav.navigate('ShareDetail',{id:filter.id});}} />)}</Group></Section></Screen>;
 }
 export function ShareDetailScreen() {
   const {session,app,live}=useReview();const [revealed,setRevealed]=useState(false);const [copied,setCopied]=useState(false);

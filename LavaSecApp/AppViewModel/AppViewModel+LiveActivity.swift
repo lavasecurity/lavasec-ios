@@ -19,7 +19,7 @@ extension AppViewModel {
     func reconcileLiveActivity() {
         guard canUseProtectedPreferences else { return }
         loadTemporaryProtectionPause()
-        if isProtectionTemporarilyPaused {
+        if vpnStatus == .connected && temporaryProtectionPauseUntil != nil {
             scheduleTemporaryProtectionResume()
         }
 
@@ -59,6 +59,7 @@ extension AppViewModel {
     /// `refreshTunnelHealth` reconcile the Live Activity if the derived Dynamic
     /// Island state changed (UR-6).
     func handleTunnelHealthNudge() {
+        refreshProviderStatusPublication()
         // A chained surrender writes its terminal marker immediately before cancelling the
         // provider. Reconcile the cached NetworkExtension state first so a foreground app can
         // disarm Connect-On-Demand without waiting for the next periodic status refresh.
@@ -77,6 +78,15 @@ extension AppViewModel {
                 return
             }
 
+            if self.chainedObservationActive {
+                let activity = self.chainedObservationLifetime.activityGeneration
+                let result = await self.queryChainedHandshakeObservation()
+                if self.chainedObservationActive, self.chainedObservationLifetime.activityGeneration == activity,
+                   let reply = result.reply {
+                    // IPC also carries current truth when the publication file's write was unavailable.
+                    self.admitProviderStatusReply(reply)
+                }
+            }
             await self.requestTunnelHealthFlush()
             self.refreshTunnelHealth(force: true)
         }
@@ -136,7 +146,9 @@ extension AppViewModel {
             return nil
         }
 
-        if isProtectionTemporarilyPaused {
+        // INV-STATUS-1: this steady surface reflects the session-bound pause intent.
+        // Guard's observation lease must not revoke its pause state or resume deadline.
+        if temporaryProtectionPauseUntil != nil {
             return .paused
         }
 

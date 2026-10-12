@@ -6,6 +6,41 @@ final class ChainedConnectLifecyclePolicyTests: XCTestCase {
     private typealias Policy = ChainedConnectLifecyclePolicy
     private typealias Observation = ChainedRuntimeObservation
 
+    func testInitialModeAcquisitionRemainsStartingUntilDNSOnlyIsConfirmed() {
+        var state = Policy.State()
+        _ = reduce(&state, .statusChanged(.connected, onDemandConfirmed: true, userInitiated: true, now: 0))
+        XCTAssertFalse(state.projection.hasRuntimeObservation)
+        XCTAssertTrue(state.projection.awaitingInitialRuntime)
+        _ = reduce(&state, .observed(connection: 1, observation: nil, now: 1))
+        XCTAssertTrue(state.projection.awaitingInitialRuntime)
+        _ = reduce(&state, .observed(connection: 1, observation: .dnsOnly, now: 2))
+        XCTAssertTrue(state.projection.hasRuntimeObservation)
+        XCTAssertFalse(state.projection.awaitingInitialRuntime)
+        XCTAssertEqual(state.claim, .confirmed)
+        _ = reduce(&state, .statusChanged(.disconnected, onDemandConfirmed: true, userInitiated: false, now: 3))
+        _ = reduce(&state, .statusChanged(.connected, onDemandConfirmed: true, userInitiated: true, now: 4))
+        XCTAssertTrue(state.projection.awaitingInitialRuntime, "a successor must learn its own live mode")
+        _ = reduce(&state, .observed(connection: 1, observation: .dnsOnly, now: 5))
+        XCTAssertTrue(state.projection.awaitingInitialRuntime, "a retired reply cannot settle startup")
+    }
+
+    func testInitialModeAcquisitionIsBoundedAndExplicitMissingRuntimeInterruptsIt() {
+        var state = Policy.State()
+        _ = reduce(&state, .statusChanged(.connected, onDemandConfirmed: true, userInitiated: true, now: 0))
+        _ = reduce(&state, .observed(connection: 1, observation: nil, now: Policy.establishmentTimeoutSeconds))
+        XCTAssertFalse(state.projection.awaitingInitialRuntime)
+        XCTAssertFalse(state.projection.hasRuntimeObservation)
+        XCTAssertEqual(state.claim, .unconfirmed)
+        for observation in [Observation.inactive, .chained(session: nil)] {
+            var missing = Policy.State()
+            _ = reduce(&missing, .statusChanged(.connected, onDemandConfirmed: true, userInitiated: true, now: 0))
+            _ = reduce(&missing, .observed(connection: 1, observation: observation, now: 0.1))
+            XCTAssertTrue(missing.projection.hasRuntimeObservation)
+            XCTAssertFalse(missing.projection.awaitingInitialRuntime)
+            XCTAssertEqual(missing.projection.runtimeCondition, .retired)
+        }
+    }
+
     func testForegroundRepairRetriesAStableConfirmedConnectionOnce() {
         var state = Policy.State()
         _ = reduce(&state, .statusChanged(.connected, onDemandConfirmed: false, userInitiated: false, now: 0))

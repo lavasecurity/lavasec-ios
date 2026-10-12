@@ -5,7 +5,7 @@ import {useMascotTapInteraction,MascotDownwardScroll,useMascotDownwardScroll} fr
 import type {PropsWithChildren} from 'react';
 let mockObserve:((sample?:{offset:number;windowHeight:number})=>void)|undefined;
 jest.mock('../review/primitives',()=>({usePageScrollObservation:(observe:typeof mockObserve)=>{mockObserve=observe;}}));
-jest.mock('@react-navigation/native',()=>({useIsFocused:()=>true}));
+jest.mock('@react-navigation/native',()=>({useNavigation:()=>({}),useIsFocused:()=>true}));
 jest.mock('../review/navigation-scaffold',()=>({useReducedMotionPreference:()=>false}));
 beforeEach(()=>{jest.useFakeTimers();Object.defineProperty(AppState,'currentState',{configurable:true,value:'active'});});
 afterEach(()=>{jest.useRealTimers();jest.restoreAllMocks();});

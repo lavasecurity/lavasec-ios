@@ -85,7 +85,7 @@ export function ExploreScreen(){
         {dnsPatchAvailable&&<StoryLink testID="explore.dns-patch" title="DNS patch for iOS 27" attention={dnsPatchUnseen} onPress={()=>nav.navigate('DNSPatch')}/>}</>
       : <StoryLink testID="explore.configure" title={part.id==='filter'?'Open Filters':'Open VPN chaining'} onPress={openSettings}/>
     : !part&&!inDemo?<LavaToggleRow title="Narration" value={narration} onValueChange={setNarration}/>:undefined;
-  return <Screen wide>
+  return <Screen wide="compact">
     <ExplorePlayground scene={<ConnectionScene stages={stages} selected={part?.id} attention={inDemo?scenes[frame]!.parts:undefined}
       discoveryAttention={dnsPatchUnseen&&part?.id!=='dns'?['dns']:undefined}
       onSelect={stage=>selectPart(stage.id,true)} onInspect={stage=>selectPart(stage.id,false)}/>}

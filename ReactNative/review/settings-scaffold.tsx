@@ -1,3 +1,4 @@
+import {useScaffoldStyles} from '../src/window-layout';
 import {useMascotTapInteraction,useMascotDownwardScroll} from './mascot-interaction';
 import type {PropsWithChildren} from 'react';
 import {useRef,useState} from 'react';
@@ -32,19 +33,22 @@ export function useSettingsEditToolbar({editing,busy,canEdit=true,saveDisabled=f
 // surface, with the same inset dividers as every repeated utility group. Helpers
 // stay outside that surface, flush with section headings; row metadata stays inside.
 export function SettingsSurface({children,testID,footer,tone='neutral'}:PropsWithChildren<{testID?:string;footer?:string;tone?:'neutral'|'green'}>) {
+  const settingsStyles=useScaffoldStyles(windowBase_settingsStyles);
   const surface=<Group testID={testID} tone={tone}>{children}</Group>;
   return footer?<View style={settingsStyles.section}>{surface}<Quiet>{footer}</Quiet></View>:surface;
 }
 export function SettingsGroup({title,children,footer,testID}:PropsWithChildren<{title:string;footer?:string;testID?:string}>) {
   return <Section title={title} footer={footer}><SettingsSurface testID={testID}>{children}</SettingsSurface></Section>;
 }
-export function SettingsInset({children}:PropsWithChildren) { return <View style={settingsStyles.inset}>{children}</View>; }
+export function SettingsInset({children}:PropsWithChildren) {
+  const settingsStyles=useScaffoldStyles(windowBase_settingsStyles); return <View style={settingsStyles.inset}>{children}</View>; }
 // The ordered DNS/VPN panel has one footer slot: Add until full, then Swap.
 export function OrderedListAction({count,addTitle,onAdd,onSwap,disabled=false}:{count:number;addTitle:string;onAdd:()=>void;onSwap:()=>void;disabled?:boolean}) {
   return <SettingsInset>{count===2?<SwapOrderAction disabled={disabled} onPress={onSwap}/>
     :<AddAction title={addTitle} disabled={disabled} onPress={onAdd}/>}</SettingsInset>;
 }
-export function SettingsStack({children}:PropsWithChildren) { return <View style={settingsStyles.stack}>{children}</View>; }
+export function SettingsStack({children}:PropsWithChildren) {
+  const settingsStyles=useScaffoldStyles(windowBase_settingsStyles); return <View style={settingsStyles.stack}>{children}</View>; }
 export function SettingsControl({children,title}:PropsWithChildren<{title?:string}>) {
   return <LavaControlContent title={title}>{children}</LavaControlContent>;
 }
@@ -66,12 +70,15 @@ export function SettingsStatus({title,description,icon,leading,busy=false}: {tit
     leading={leading??<SettingsGlyph name={icon} busy={busy}/>}/>;
 }
 export function SettingsMessage({children,warning=false}:PropsWithChildren<{warning?:boolean}>) {
+  const settingsStyles=useScaffoldStyles(windowBase_settingsStyles);
   return <View accessibilityLiveRegion="polite" style={settingsStyles.message}>{warning&&<Symbol name="exclamationmark.circle" tone="orange"/>}<View style={settingsStyles.flex}><Copy role="supporting" color={warning?colors.errorText:colors.secondaryText}>{children}</Copy></View></View>;
 }
 export function SettingsGlyph({name,busy=false}: {name:string;busy?:boolean}) {
+  const settingsStyles=useScaffoldStyles(windowBase_settingsStyles);
   return <View style={settingsStyles.glyph}>{busy?<ActivityIndicator/>:<Symbol name={name} tone="primary" size={foundation.control.glyphSlot} pointSize={foundation.control.glyph}/>}</View>;
 }
 export function SettingsDisclosure({title,icon,expanded,onChange,children,testID}:PropsWithChildren<{title:string;icon?:string;expanded:boolean;onChange:(expanded:boolean)=>void;testID?:string}>) {
+  const settingsStyles=useScaffoldStyles(windowBase_settingsStyles);
   return <View style={settingsStyles.section}><SettingsSurface testID={testID}><DisclosureRow title={title} icon={icon} expanded={expanded} onChange={onChange}/></SettingsSurface>
     {expanded&&<SettingsStack>{children}</SettingsStack>}
   </View>;
@@ -104,6 +111,7 @@ export function SettingsGuardPreview({look,title,subtitle,onPress}: {look:string
     navigation testID="Choose Lava Guard" onPress={onPress}/></GuardOutline>;
 }
 export function SettingsGuardSpotlight({look,variants}: {look:string;variants:readonly {id:string;title:string;description:string;tip:string}[]}) {
+  const settingsStyles=useScaffoldStyles(windowBase_settingsStyles);
   const {compact,onLayout}=useCompactSettingsScene();
   const guard=variants.find(variant=>variant.id===look)??variants[0];
   if(!guard)return null;
@@ -115,6 +123,7 @@ export function SettingsGuardSpotlight({look,variants}: {look:string;variants:re
   </View></GuardOutline>;
 }
 export function SettingsGuardPortrait({look='original',locked=false}: {look?:string;locked?:boolean}) {
+  const settingsStyles=useScaffoldStyles(windowBase_settingsStyles);
   return <View style={settingsStyles.portrait}><Guardian look={look} mood={locked?'locked':'awake'} size={foundation.control.target}/></View>;
 }
 export function SettingsTextPreview() {
@@ -123,6 +132,7 @@ export function SettingsTextPreview() {
   </SettingsInset></View>;
 }
 export function SettingsTextSlider({value,disabled,onChange}:{value:number;disabled:boolean;onChange:(value:number)=>void}) {
+  const settingsStyles=useScaffoldStyles(windowBase_settingsStyles);
   return <View style={[settingsStyles.control,disabled&&settingsStyles.disabled]}>
     <Symbol name="textformat.size.smaller" size={foundation.control.glyph} tone="secondary"/>
     <Slider label={localized('Text Size')} value={value} maximum={6} disabled={disabled} tintColor={colors.safeGreen}
@@ -131,6 +141,7 @@ export function SettingsTextSlider({value,disabled,onChange}:{value:number;disab
   </View>;
 }
 export function SettingsSubscriptionStatus({look,expiration}: {look:string;expiration?:string}) {
+  const settingsStyles=useScaffoldStyles(windowBase_settingsStyles);
   const interaction=useMascotTapInteraction();
   const downwardScroll=useMascotDownwardScroll(interaction.active,interaction.scrollDown);
   return <SettingsSurface><View style={settingsStyles.subscription}>
@@ -139,9 +150,11 @@ export function SettingsSubscriptionStatus({look,expiration}: {look:string;expir
   </View></SettingsSurface>;
 }
 export function SettingsLoading({title}: {title:string}) {
+  const settingsStyles=useScaffoldStyles(windowBase_settingsStyles);
   return <SettingsSurface><View style={settingsStyles.subscription}><ActivityIndicator size="large"/><Copy role="body" center>{title}</Copy></View></SettingsSurface>;
 }
 export function SettingsPrice({price,commitment}: {price:string;commitment?:string}) {
+  const settingsStyles=useScaffoldStyles(windowBase_settingsStyles);
   return <View style={settingsStyles.price}><Copy role="row" color={colors.safeGreen}>{price}</Copy>{!!commitment&&<Copy role="caption" color={colors.secondaryText}>{commitment}</Copy>}</View>;
 }
 export const settingsStyles=StyleSheet.create({
@@ -165,3 +178,5 @@ export const settingsStyles=StyleSheet.create({
   pressed:{opacity:foundation.interaction.pressedOpacity},
   disabled:{opacity:0.45},
 });
+
+const windowBase_settingsStyles=settingsStyles;

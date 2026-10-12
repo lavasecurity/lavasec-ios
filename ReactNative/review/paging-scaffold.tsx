@@ -1,3 +1,4 @@
+import {useWindowStyles} from '../src/window-layout';
 import {useEffect,useRef,useState,type ReactNode} from 'react';
 import {AppState,I18nManager,ScrollView,StyleSheet,View,type ScrollViewInstance} from 'react-native';
 import {LavaChoice} from '../src';
@@ -9,6 +10,7 @@ import {usePageInspectionLock} from './primitives';
 // UIScrollView supplies paging physics; UIPageControl supplies native dots and
 // accessibility adjustment. All pages remain mounted to retain in-card state.
 export function PagedCards({label,pages}:{label:string;pages:readonly {id:string;title:string;content:ReactNode}[]}){
+  const styles=useWindowStyles(windowBase_styles);
   const [width,setWidth]=useState(0);const [selected,setSelected]=useState(pages[0]?.id??'');
   const scroll=useRef<ScrollViewInstance>(null);const lock=usePageInspectionLock();
   const ordered=I18nManager.isRTL?[...pages].reverse():pages;
@@ -39,3 +41,5 @@ const styles=StyleSheet.create({
   surface:{backgroundColor:colors.cardBackground,borderRadius:foundation.radius.surface,borderCurve:'continuous',overflow:'hidden'},
   indicator:{paddingHorizontal:foundation.space.lg,paddingBottom:foundation.space.lg},
 });
+
+const windowBase_styles=styles;

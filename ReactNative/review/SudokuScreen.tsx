@@ -1,3 +1,4 @@
+import {useWindowLayout,useWindowStyles} from '../src/window-layout';
 import {mayInteractWithPresentation,presentationOwnerScope} from '../app/read-cache';
 import {useRouteViewState} from '../app/use-route-view-state';
 import {usePresentationAuthority,usePresentationNativeLayout} from '../app/use-presentation-readiness';
@@ -28,6 +29,8 @@ export function SudokuScreen() {
   return <SafeAreaProvider><SudokuContent /></SafeAreaProvider>;
 }
 function SudokuContent() {
+  const styles=useWindowStyles(windowBase_styles);
+  const layout=useWindowLayout();
   const {session,setSession,app} = useReview();
   const authoritative=usePresentationAuthority(app);
   const readEpoch=app?.getReadEpoch?.();
@@ -124,7 +127,7 @@ function SudokuContent() {
   const twoPlayerActive = landscape && twoPlayer;
   // Reserve the same width for either left rail. Their artwork shares the
   // leading edge, and a cross-fade cannot resize or move the centered board.
-  const chromeWidth = sudokuMetrics.keypadHeight;
+  const chromeWidth = sudokuMetrics.keypadHeight*layout.scale;
   useEffect(()=>{
     if(!twoPlayerActive){twoPlayerMix.setValue(0);setShowsMenuRail(true);return;}
     const animation=Animated.timing(twoPlayerMix,{toValue:1,duration:TWO_PLAYER_CROSS_FADE_MS,useNativeDriver:true});
@@ -137,10 +140,13 @@ function SudokuContent() {
   const topPadding = landscape ? Math.max(insets.top,insets.bottom,foundation.space.md)+foundation.space.md : insets.top+foundation.space.md;
   const bottomPadding = landscape ? topPadding : insets.bottom;
   const band = frame.height-topPadding-bottomPadding;
-  const portraitBand = Math.max(0,band-foundation.control.target);
+  const portraitBand = Math.max(0,band-foundation.control.target*layout.scale);
+  // The horizontal keypad keeps measured phone geometry. Feedback and the
+  // scaffold's bottom clearance grow with the shared window baseline.
+  const portraitChrome = sudokuMetrics.keypadHeight+(sudokuMetrics.verticalChrome-sudokuMetrics.keypadHeight)*layout.scale;
   const scrollRef=useRef<ScrollViewInstance>(null);
-  const width = Math.min(frame.width-insets.left-insets.right,foundation.layout.readingWidth)-foundation.space.screenHorizontal*2;
-  const portraitSide = Math.min(Math.max(Math.min(width,portraitBand-sudokuMetrics.verticalChrome),sudokuMetrics.minimumSide),width);
+  const width = Math.min(frame.width-insets.left-insets.right,layout.readingWidth)-foundation.space.screenHorizontal*2*layout.scale;
+  const portraitSide = Math.min(Math.max(Math.min(width,portraitBand-portraitChrome),sudokuMetrics.minimumSide),width);
   // Landscape is the same composition with the axes swapped, so the board's
   // budget mirrors the portrait one: the safe area gives the height, and the
   // transposed rails and feedback gutters take space along the width. Both
@@ -149,7 +155,7 @@ function SudokuContent() {
   const landscapeHeight = band-sudokuMetrics.landscapePadding*2;
   const landscapeWidth = frame.width-insets.left-insets.right-2*chromeWidth-sudokuMetrics.feedbackHeight*2-sudokuMetrics.landscapePadding*2;
   const side = landscape ? Math.max(0,Math.min(landscapeHeight,landscapeWidth,sudokuMetrics.landscapeMaximumSide)) : portraitSide;
-  const scrollController=useScrollInteractionController(scrollRef,!landscape&&side+sudokuMetrics.verticalChrome>portraitBand);
+  const scrollController=useScrollInteractionController(scrollRef,!landscape&&side+portraitChrome>portraitBand);
   const lockScroll=useScrollInteractionLock(scrollController);
   const board = useMemo(()=>workingBoard(game),[game]);
   const locked = useMemo(()=>isSolved(game),[game]);
@@ -253,7 +259,7 @@ function SudokuContent() {
   // tracked preview is per-pad, so scrubbing one pad never paints the magnifier
   // on the other. The left pad is digits-only: erase stays P1's.
   const trackKeyInto=(trackedRef:{current:number|undefined},setTracked:(key?:number)=>void)=>(x:number,y:number)=>{
-    const key = canEnter ? landscape ? keyAtColumn(x,y,sudokuMetrics.keyHeight,side) : keyAt(x,y,width) : undefined;
+    const key = canEnter ? landscape ? keyAtColumn(x,y,sudokuMetrics.keyHeight*layout.scale,side) : keyAt(x,y,width) : undefined;
     if(key===trackedRef.current)return;
     if(key!==undefined)feedback.emit({semantic:'selected',controlID:'sudoku.key',value:String(key)});
     trackedRef.current=key;setTracked(key);
@@ -530,7 +536,7 @@ function SudokuContent() {
     </View>
     : <>
       <SudokuRail tools={tools} onClose={()=>navigation.goBack()} flash={{id:'sudoku-refresh',opacity:challengeFlash}}/>
-      <ScrollView ref={scrollRef} bounces={side+sudokuMetrics.verticalChrome>portraitBand} scrollEnabled={side+sudokuMetrics.verticalChrome>portraitBand}
+      <ScrollView ref={scrollRef} showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false} bounces={side+portraitChrome>portraitBand} scrollEnabled={side+portraitChrome>portraitBand}
         contentInsetAdjustmentBehavior="never" automaticallyAdjustKeyboardInsets={false}
         contentContainerStyle={[styles.content,{minHeight:portraitBand}]}>
         <SudokuFeedback loading={loading} error={generationError} outcome={outcome} onRetry={()=>setGeneration(generation+1)}/>
@@ -551,3 +557,5 @@ function SudokuContent() {
     </>}
   </View>;
 }
+
+const windowBase_styles=styles;

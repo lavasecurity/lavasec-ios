@@ -1,7 +1,7 @@
 import Foundation
 
 /// The protection state shared by the Guard screen and external status readers.
-public enum ProtectionStatus: Equatable, Sendable {
+public enum ProtectionStatus: Codable, Equatable, Sendable {
     /// Protection is deliberately off.
     case off
     /// The profile has not yet been installed.
@@ -42,6 +42,7 @@ public enum ProtectionStatus: Equatable, Sendable {
         lifecycle: ProtectionLifecycleStatus,
         pauseUntil: Date? = nil,
         chainedEstablishing: Bool = false,
+        awaitingInitialRuntime: Bool = false,
         observationUnavailable: Bool = false,
         forwardingUnconfirmed: Bool = false,
         chainedFailure: Bool = false,
@@ -73,6 +74,9 @@ public enum ProtectionStatus: Equatable, Sendable {
             }
         }
         if lifecycle == .connected, observationUnavailable { return .unavailable }
+        // Initial identity/mode acquisition is still startup, never proof of a chained path.
+        // Known negative evidence above and the caller's bounded timeout always take priority.
+        if lifecycle == .connected, awaitingInitialRuntime { return .turningOn }
         if lifecycle == .connected, setupReady {
             guard let connectivity else { return .unavailable }
             return connectivity.yieldsToUnconfirmedChainedForwarding ? .tunnelReady : .connected(connectivity)
@@ -117,13 +121,16 @@ public struct ProtectionStatusEvidence: Codable, Sendable {
     public let verificationEpoch: UInt64?
     public let forwardingBaseline: UInt64?
     public let runtimeCondition: ChainedRuntimeCondition?
+    /// Provider-owned projection, independent of this observer's query lifetime. Absent on older providers.
+    public var statusPublication: ProtectionStatusPublication?
 
     /// Creates an observation on the provider's state queue.
     public init(sampledAt: Date, lifecycleIsActive: Bool, health: TunnelHealthSnapshot,
                 pauseUntil: Date?, isChained: Bool, sessionGeneration: UInt64?, forwardedBytes: UInt64?,
                 transportGeneration: UInt64? = nil, setupReady: Bool? = nil,
                 providerLifecycleID: String? = nil, verificationEpoch: UInt64? = nil,
-                forwardingBaseline: UInt64 = 0, runtimeCondition: ChainedRuntimeCondition = .normal) {
+                forwardingBaseline: UInt64 = 0, runtimeCondition: ChainedRuntimeCondition = .normal,
+                statusPublication: ProtectionStatusPublication? = nil) {
         self.sampledAt = sampledAt
         self.lifecycleIsActive = lifecycleIsActive
         self.health = health
@@ -137,6 +144,7 @@ public struct ProtectionStatusEvidence: Codable, Sendable {
         self.verificationEpoch = verificationEpoch
         self.forwardingBaseline = forwardingBaseline
         self.runtimeCondition = runtimeCondition
+        self.statusPublication = statusPublication
     }
 
     /// Rejects stale replies, then evaluates the same health and chained-forwarding policies as Guard.

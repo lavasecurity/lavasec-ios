@@ -282,8 +282,10 @@ extension PacketTunnelProvider {
         // its handler, and a strong capture here would keep the engine alive past
         // retirement (the wiring obligation `ChainedEngineQueueTimers` documents).
         let timerDriverBox = ChainedWeakDriverBox()
-        let timers = ChainedEngineQueueTimers(engineQueue: engineQueue) {
+        let timers = ChainedEngineQueueTimers(engineQueue: engineQueue) { [weak self] in
             timerDriverBox.driver?.tick()
+            // Asynchronous engine -> DNS hop only (INV-QUEUE-1); never hold the engine during publication.
+            self?.dnsStateQueue.async { [weak self] in self?.publishProtectionStatus(fromDriverTick: true) }
         }
         let lifecycleEvidenceID = currentChainedLifecycleEvidenceID()
         let deviceStateAccessGroup = LavaSecAppGroup.chainedUpstreamKeychainAccessGroup
@@ -363,6 +365,7 @@ extension PacketTunnelProvider {
                 guard let self else { return }
                 self.dnsStateQueue.async { [weak self] in
                     self?.mirrorChainedHealthCountersIfChanged()
+                    self?.publishProtectionStatus()
                 }
             })
         timerDriverBox.driver = driver

@@ -1,5 +1,5 @@
 import {useLayoutEffect,useState,useSyncExternalStore,type ComponentRef,type PropsWithChildren} from 'react';
-import {AccessibilityInfo,Alert,Animated,AppState,PanResponder,Pressable,StyleSheet,Text,View} from 'react-native';
+import {AccessibilityInfo,Alert,Animated,AppState,PanResponder,Pressable,ScrollView,StyleSheet,Text,View} from 'react-native';
 import {act,fireEvent,render,screen} from '@testing-library/react-native';
 import {SudokuScreen} from '../review/SudokuScreen';
 import {GuardScreen} from '../review/screens';
@@ -895,6 +895,25 @@ test('the portrait board budget includes the shared rail on a short screen',()=>
     expect(screen.getByTestId('sudoku-screen')).toHaveStyle({paddingTop:59+foundation.space.md,paddingBottom:34});
     expect(screen.getByTestId('sudoku-rail')).toHaveStyle({height:foundation.control.target});
     expect(screen.getByTestId('sudoku-board')).toHaveStyle({width:side,height:side});
+  } finally {dimensions.mockRestore();}
+});
+
+test.each([[660,true],[666,false]])('near-square tablet height %i fits its scaled feedback or enables scrolling',(height,scrolls)=>{
+  const dimensions=jest.spyOn(require('react-native'),'useWindowDimensions').mockReturnValue({width:600,height,scale:3,fontScale:1});
+  try {
+    render(<Provider><SudokuScreen/></Provider>);
+    const root=StyleSheet.flatten(screen.getByTestId('sudoku-screen').props.style);
+    const rail=StyleSheet.flatten(screen.getByTestId('sudoku-rail').props.style);
+    const scroll=screen.UNSAFE_getByType(ScrollView);
+    const content=StyleSheet.flatten(scroll.props.contentContainerStyle);
+    const board=StyleSheet.flatten(screen.getByTestId('sudoku-board').props.style);
+    const feedback=StyleSheet.flatten(screen.getByTestId('sudoku-feedback-band').props.style);
+    const keypad=StyleSheet.flatten(screen.getByTestId('sudoku-digit-group').parent!.parent!.props.style);
+    const available=height-root.paddingTop-root.paddingBottom-rail.height;
+    const natural=board.height+feedback.minHeight+keypad.height+content.paddingBottom;
+    expect(Number.isFinite(natural)).toBe(true);
+    expect(scroll.props.scrollEnabled).toBe(scrolls);
+    if(!scrolls)expect(natural).toBeLessThanOrEqual(available+0.1);
   } finally {dimensions.mockRestore();}
 });
 

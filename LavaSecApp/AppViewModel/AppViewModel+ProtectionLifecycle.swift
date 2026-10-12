@@ -1190,6 +1190,7 @@ extension AppViewModel {
         let previousStatus = vpnStatus
         let isInstalled = manager != nil
         let installedStateChanged = isVPNConfigurationInstalled != isInstalled
+        refreshProviderStatusPublication(from: manager)
 
         // Seed upgrades from the installed profile, then clear a stale confirmation if the live
         // manager is no longer armed. This reconciliation runs before the lifecycle reduction so

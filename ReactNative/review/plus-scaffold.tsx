@@ -1,9 +1,10 @@
+import {useWindowLayout,useWindowStyles,useScaffoldStyles} from '../src/window-layout';
 import {connectionParts} from './connection-model';
 import {useState,type PropsWithChildren,type ReactNode} from 'react';
-import {View,StyleSheet,useWindowDimensions} from 'react-native';
+import {View,StyleSheet} from 'react-native';
 import {foundation} from '../src/foundation';
 import {colors} from '../src/colors.ios';
-import {useTextScale} from '../app/text-metrics';
+import {useAccessibilityTextScale} from '../app/text-metrics';
 import {Copy,DisclosureRow,Guardian,Symbol} from './primitives';
 import {PagedCards} from './paging-scaffold';
 import {Group,ListRow} from './scaffold';
@@ -15,15 +16,17 @@ import {Group,ListRow} from './scaffold';
 function BenefitScene({title,description,art,testID,children}:PropsWithChildren<{
   title:string;description:string;art:ReactNode;testID?:string;
 }>){
-  const {width}=useWindowDimensions();const scale=useTextScale();
-  const usable=Math.min(width,foundation.layout.readingWidth)-foundation.space.screenHorizontal*2-foundation.space.lg*2;
-  const paired=usable/scale>=foundation.layout.readingWidth-foundation.space.xl*4;
+  const s=useScaffoldStyles(windowBase_s);
+  const {width,landscape,readingWidth,gutter,insetScale}=useWindowLayout();const scale=useAccessibilityTextScale();
+  const usable=Math.min(width,readingWidth)-gutter*2-foundation.space.lg*2*insetScale;
+  const paired=landscape&&usable/scale>=foundation.layout.readingWidth-foundation.space.xl*4;
   return <View testID={testID} style={[s.scene,paired&&s.paired]}>
     <View accessible={false} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={[s.art,paired&&s.pairedPart]}>{art}</View>
     <View style={[s.copy,paired&&s.pairedPart]}><Copy role="body" weight="700">{title}</Copy><Copy role="body" color={colors.secondaryText}>{description}</Copy>{children}</View>
   </View>;
 }
 function RoutineCard({title,icon,selected=false}:{title:string;icon:string;selected?:boolean}){
+  const s=useWindowStyles(windowBase_s);
   return <View style={[s.routineCard,selected?s.routineSelected:s.routineQuiet]}>
     <Symbol name={icon} size={foundation.control.target} tone={selected?'white':'secondary'}/>
     <Copy role="section" center color={selected?colors.actionForeground:colors.secondaryText}>{title}</Copy>
@@ -31,7 +34,8 @@ function RoutineCard({title,icon,selected=false}:{title:string;icon:string;selec
   </View>;
 }
 function RoutineScene(){
-  const scale=useTextScale();
+  const s=useWindowStyles(windowBase_s);
+  const scale=useAccessibilityTextScale();
   // Larger text keeps the foreground illustration; the actual benefit and
   // capacity stay fully readable in the content, without shrinking to fit art.
   return <View style={s.routines}>
@@ -41,12 +45,14 @@ function RoutineScene(){
   </View>;
 }
 function DNSChoice({custom=false}:{custom?:boolean}){
+  const s=useWindowStyles(windowBase_s);
   return <View style={[s.dnsChoice,custom?s.dnsSelected:s.dnsQuiet]}>
     <Symbol name={custom?'checkmark.circle.fill':connectionParts.dns.symbol} size={foundation.control.glyphSlot} tone={custom?'white':'secondary'}/>
     <View style={s.choiceText}><Copy role="supporting" weight="600" color={custom?colors.actionForeground:colors.secondaryText}>{custom?'Custom DNS':'Device DNS'}</Copy></View>
   </View>;
 }
 function ConnectionChoiceScene(){
+  const s=useWindowStyles(windowBase_s);
   return <View style={s.connectionChoice}>
     <View style={s.filterDisc}><Symbol name="line.3.horizontal.decrease.circle" size={foundation.control.target}/></View>
     <View style={s.choiceStem}/>
@@ -57,7 +63,8 @@ function ConnectionChoiceScene(){
   </View>;
 }
 function GuardScene(){
-  const scale=useTextScale();
+  const s=useWindowStyles(windowBase_s);
+  const scale=useAccessibilityTextScale();
   return <View style={s.guardPortraits}>
     {scale<=1.3&&<View style={s.guardCompanion}><Guardian look="kiwiCreme" mood="awake" size={foundation.control.target*2}/></View>}
     <View style={s.guardPortrait}><Guardian look="aquamarine" mood="awake" size={foundation.control.target*3}/></View>
@@ -65,6 +72,7 @@ function GuardScene(){
   </View>;
 }
 export function LavaPlusStory(){
+  const s=useScaffoldStyles(windowBase_s);
   const [details,setDetails]=useState(false);
   return <View style={s.stack}>
     <View style={s.intro}><Copy role="body" color={colors.secondaryText}>More ways to make Lava your own</Copy></View>
@@ -102,3 +110,5 @@ const s=StyleSheet.create({
   guardPortrait:{alignItems:'center',justifyContent:'center',width:foundation.control.target*3.5,minHeight:foundation.control.target*3.5,zIndex:1},
   guardCompanion:{flex:1,minWidth:0,alignItems:'center',justifyContent:'center',marginHorizontal:-foundation.space.sm,opacity:0.45},
 });
+
+const windowBase_s=s;

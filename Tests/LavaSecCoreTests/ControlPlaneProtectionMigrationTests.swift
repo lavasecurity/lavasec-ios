@@ -29,6 +29,7 @@ final class ControlPlaneProtectionMigrationTests: XCTestCase {
         try place("app-configuration.json", isControlPlane: true)
         try place("filter-library.json", isControlPlane: true)
         try place("tunnel-health.json", isControlPlane: true)
+        try place("protection-status-publication.json", isControlPlane: true)
         // The legacy root artifact trio (pre-pointer layout, still the readableStore fallback).
         try place("filter-snapshot.json", isControlPlane: true)
         try place("filter-snapshot.compact", isControlPlane: true)

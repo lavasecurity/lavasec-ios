@@ -1210,7 +1210,7 @@ Only app-main-actor writers update it; missing or unreadable state cannot author
 actions. Credential creation requires successful conservative publication first.
 The boot-needed CONTROL-PLANE files in the shared App Group — the
 `app-configuration.json`/`filter-library.json` pair, the explicit restore-intent sidecar
-`protection-restore-intent.json`, `tunnel-health.json`, the versioned artifact area
+`protection-restore-intent.json`, `tunnel-health.json`, `protection-status-publication.json`, the versioned artifact area
 (`filter-artifacts/`, token trios + the `current.json` pointer), the legacy root artifact trio,
 and the tunnel's retained compile
 (`catalog-cache/tunnel-compiled-artifact/`) — carry `NSFileProtectionNone`. A DNS filter
@@ -1437,3 +1437,60 @@ contract and never run a DNS-only substitute. Keys and privacy logs retain Class
   `ChainedBootRecoverySourceTests` (provider wiring);
   physical reboot/first-unlock forwarding criteria in infra's
   `docs/engineering/reboot-first-unlock-qa-protocol.md`.
+
+### INV-STATUS-1 — Provider-owned operational status has a bounded observation lease
+
+The running provider retains setup and forwarding milestones and publishes one semantic
+status for Guard and read-only Shortcuts. A five-second heartbeat samples existing runtime
+and health evidence without network probes; only actual provider observations renew the
+ten-second lease. Foreground entry reads the atomic publication before rendering and
+refreshes silently. App visibility, missing IPC, and retries cannot extend that deadline.
+Expiry presents unavailable and never requests a reconnect. The headline, material, mascot,
+control and flow projection use the same admitted status.
+
+Unlock/foreground entry stages one bounded live IPC reply while inactive, including its
+canonical publication. Activation admits that reply before evaluating the old file's expiry;
+both hosts use that same synchronous owner regardless of notification observer order. A wake
+epoch change is current evidence, not a reason to discard the reply: the shared reducer still
+requires post-wake proof. Inactive presentation stays frozen across an expired-file read;
+activation always evaluates the absolute lease when no fresh reply was staged. This neither
+extends the lease nor delays observed negatives. Foreground entry starts a fresh read and may
+retain a same-connection canonical backup until its original absolute publication deadline;
+a newer reply replaces it. Activation validates that deadline before reducing the backup's raw
+observation. Requests expire after two seconds, legacy samples after 500 ms, and all replies
+are fenced to the exact NE session, connected date and mutation identity.
+
+Admission requires the live device-local provider incarnation in the current NetworkExtension
+connection, the same boot domain, and an unexpired continuous clock age that includes sleep.
+A reply fenced to the exact session and connected date supplies boot-scoped identity proof,
+retained only within that connection; wall-clock edits cannot revoke it or extend the lease.
+That live proof also pairs the provider and observer's cached clock domains when a clock
+edit changes the public boot-time fallback between process launches. The bridge is scoped
+to this incarnation and connected epoch, checks the observer's original boot, and never
+changes the publication's continuous-clock deadline or admits a different writer.
+Before live proof arrives, file-only admission conservatively requires a publication after
+the connection's wall-clock date. Metadata work begun before its monotonic request barrier
+cannot establish identity. Revision ordering rejects replies older than an admitted
+publication. Known failures, sleep, recovery and retirement replace positive status; runner,
+transport, verification-epoch and counter changes invalidate old proof through the shared
+reducer. Status reads cannot execute that reducer's app effects, flush, probe or repair.
+The existing app lifecycle remains the owner of on-demand mutation fences and explicit-start
+feedback. This observes the existing recovery policy; its heartbeat does not independently
+prove end-to-end reachability. Live Activity retains its separate steady on/off contract.
+
+Keychain identity reads run in one coalesced background physical slot with a two-second
+client deadline. Expiry/cancellation never frees a wedged physical read or blocks foreground
+rendering. The app caches identity within the exact connected epoch; fenced live IPC can
+supersede a metadata descendant immediately. A newer foreign publication removes optimism
+until identity is revalidated; an older retired writer cannot replace newer live proof.
+An absent/unreadable metadata identity cannot revoke live proof or renew its status lease.
+An exact-session inactive reply may pair its unavailable terminal publication through the
+retained writer ID, even after the runtime ID was cleared; its revision fences out old healthy files.
+Pause subtitles, RN pause state and the resume guard derive the deadline from that same
+admitted status. The session-bound pause store continues to own commands and expiry timers.
+
+- Home: `Sources/LavaSecKit/ProtectionStatusPublication.swift`;
+  `LavaSecTunnel/Provider/PacketTunnelProvider+Diagnostics.swift`;
+  `LavaSecApp/AppViewModel/AppViewModel+ChainedConnectLifecycle.swift`.
+- Enforcement: `ProtectionStatusPublicationTests`, `ChainedStatusContinuityTests`,
+  `ProtectionShortcutWiringSourceTests`.

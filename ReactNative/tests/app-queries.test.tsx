@@ -10,7 +10,7 @@ import {clearAppReadCache, mayCacheRead} from '../app/read-cache';
 import {initialSession} from '../review/session';
 
 let mockFocused=true;
-jest.mock('@react-navigation/native',()=>({useIsFocused:()=>mockFocused}));
+jest.mock('@react-navigation/native',()=>({useNavigation:()=>({}),useIsFocused:()=>mockFocused}));
 const originalState=AppState.currentState;
 beforeAll(()=>Object.defineProperty(AppState,'currentState',{configurable:true,value:'active'}));
 afterAll(()=>Object.defineProperty(AppState,'currentState',{configurable:true,value:originalState}));

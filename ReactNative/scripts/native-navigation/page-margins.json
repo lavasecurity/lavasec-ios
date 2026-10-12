@@ -1,0 +1,117 @@
+[
+  {
+    "path": "node_modules/@react-navigation/native-stack/src/types.tsx",
+    "before": "8c12c66bfe38977749f5e713995911e8264cae97dc2a24ee7c285f61bd4cff84",
+    "after": "d7c97d0947d24b024cab24d03453e68f7a1d0205dbe54855508f07a07d98d5b5",
+    "replacements": [
+      [
+        "export type NativeStackNavigationOptions = {\n",
+        "export type NativeStackNavigationOptions = {\n  /** Lava: shared RN page edge, or -1 for the system margin. */\n  lavaHeaderContentInset?: number;\n"
+      ]
+    ]
+  },
+  {
+    "path": "node_modules/@react-navigation/native-stack/lib/typescript/src/types.d.ts",
+    "before": "98cbcda5c6d5b41d55ea6c0a4d5f1d69040dbe05302a8c0c947b887f23c24642",
+    "after": "50602f8220a69bb6a7fbed52cada5aaabd2032a32f2a2d958506fc1eb84338e7",
+    "replacements": [
+      [
+        "export type NativeStackNavigationOptions = {\n",
+        "export type NativeStackNavigationOptions = {\n  /** Lava: shared RN page edge, or -1 for the system margin. */\n  lavaHeaderContentInset?: number;\n"
+      ]
+    ]
+  },
+  {
+    "path": "node_modules/@react-navigation/native-stack/src/views/useHeaderConfigProps.tsx",
+    "before": "c3fd145e94f1c1c2835c906f3e502e9388aea62c2a5372e5e4fca89044dbdb73",
+    "after": "c03e83f610c1f6e1dbfd3444abd6d85f5d2edcaa0c221b74ef4ff0a0f186b444",
+    "replacements": [
+      [
+        "  headerLargeTitleShadowVisible,\n  headerLargeTitleStyle,\n",
+        "  headerLargeTitleShadowVisible,\n  headerLargeTitleStyle,\n  lavaHeaderContentInset,\n"
+      ],
+      [
+        "    largeTitle: headerLargeTitleEnabled,\n",
+        "    largeTitle: headerLargeTitleEnabled,\n    lavaContentInset: lavaHeaderContentInset,\n"
+      ]
+    ]
+  },
+  {
+    "path": "node_modules/@react-navigation/native-stack/lib/module/views/useHeaderConfigProps.js",
+    "before": "9d8964aae7cf181d55d7236735cc36f5591a929537336b4053dc6b70f220764f",
+    "after": "2233618e0475f86e71f1efb1af8ea41a265a4d695bed5d63d14343c6f2a194c8",
+    "replacements": [
+      [
+        "  headerLargeTitleShadowVisible,\n  headerLargeTitleStyle,\n",
+        "  headerLargeTitleShadowVisible,\n  headerLargeTitleStyle,\n  lavaHeaderContentInset,\n"
+      ],
+      [
+        "    largeTitle: headerLargeTitleEnabled,\n",
+        "    largeTitle: headerLargeTitleEnabled,\n    lavaContentInset: lavaHeaderContentInset,\n"
+      ]
+    ]
+  },
+  {
+    "path": "node_modules/react-native-screens/src/types.tsx",
+    "before": "de12276d9407b4d9e7abcfe51bbeaa95abae8424f5c39e13cd1a19fb13081971",
+    "after": "902a4ced27331c77c0dcb046eafc72a475b8cb65837a3983106b4d5e9f8dfb87",
+    "replacements": [
+      [
+        "export interface ScreenStackHeaderConfigProps extends ViewProps {\n",
+        "export interface ScreenStackHeaderConfigProps extends ViewProps {\n  lavaContentInset?: number;\n"
+      ]
+    ]
+  },
+  {
+    "path": "node_modules/react-native-screens/src/fabric/ScreenStackHeaderConfigNativeComponent.ts",
+    "before": "8173b41729b551301be9e70ab7c4a931acf4305b95bb0a080cb181f1e724a469",
+    "after": "a9edd9cbd3e27bbaa886b0e852fab6ef3b0e79ab4a3d00bc64cb9e380ddc56aa",
+    "replacements": [
+      [
+        "  largeTitle?: boolean | undefined;\n",
+        "  largeTitle?: boolean | undefined;\n  lavaContentInset?: CT.WithDefault<CT.Float, -1>;\n"
+      ]
+    ]
+  },
+  {
+    "path": "node_modules/react-native-screens/ios/RNSScreenStackHeaderConfig.h",
+    "before": "817ef9ad3082f3c5608f9b85b13b45826f302a398912598727c5f46a8681b1aa",
+    "after": "1b206708f963f343570367bb5b77809f928ed3eb6ba559cbfdd714a88d49f404",
+    "replacements": [
+      [
+        "@property (nonatomic) BOOL largeTitle;\n",
+        "@property (nonatomic) BOOL largeTitle;\n@property (nonatomic) CGFloat lavaContentInset;\n"
+      ]
+    ]
+  },
+  {
+    "path": "node_modules/react-native-screens/ios/RNSScreenStackHeaderConfig.mm",
+    "before": "2dedf6da1837a142eec45c51a118c282d818b595007669a546f685c24bb7a8a0",
+    "after": "7167e395dc43c30eac691e51592f1f108d4eacaf653ce25aace8e29b1e86f5b4",
+    "replacements": [
+      [
+        "  _blurEffect = RNSBlurEffectStyleNone;\n",
+        "  _blurEffect = RNSBlurEffectStyleNone;\n  _lavaContentInset = -1;\n"
+      ],
+      [
+        "  _largeTitle = newScreenProps.largeTitle;\n",
+        "  _largeTitle = newScreenProps.largeTitle;\n  if (_lavaContentInset != newScreenProps.lavaContentInset) {\n    _lavaContentInset = newScreenProps.lavaContentInset;\n    needsNavigationControllerLayout = YES;\n  }\n"
+      ]
+    ]
+  },
+  {
+    "path": "node_modules/react-native-screens/ios/RNSScreenStack.mm",
+    "before": "8cd24a14c1da7472d2241c575496e7b3fe61f8b388e1ba176387a35fc7def284",
+    "after": "30161c66533b34d7db6438f3807cd714e13f2bfe4432096f17913a0420d5cbf1",
+    "replacements": [
+      [
+        "@implementation RNSNavigationController\n",
+        "@implementation RNSNavigationController {\n  BOOL _lavaContentMarginsApplied;\n  NSDirectionalEdgeInsets _lavaOriginalContentMargins;\n}\n"
+      ],
+      [
+        "  [super viewDidLayoutSubviews];\n",
+        "  [super viewDidLayoutSubviews];\n  // Lava: native page margins. The current route supplies its public geometry;\n  // UIKit keeps title collapse, bar items and scroll-edge ownership.\n  RNSScreenStackHeaderConfig *config = [self.topViewController isKindOfClass:RNSScreen.class]\n      ? ((RNSScreen *)self.topViewController).screenView.findHeaderConfig : nil;\n  if (config != nil && config.largeTitle && config.lavaContentInset >= 0) {\n    if (!_lavaContentMarginsApplied) {\n      _lavaOriginalContentMargins = self.navigationBar.directionalLayoutMargins;\n      _lavaContentMarginsApplied = YES;\n    }\n    NSDirectionalEdgeInsets margins = self.navigationBar.directionalLayoutMargins;\n    CGFloat inset = MIN(config.lavaContentInset, MAX(0, (self.navigationBar.bounds.size.width - 44) / 2));\n    if (fabs(margins.leading - inset) > 0.1 || fabs(margins.trailing - inset) > 0.1) {\n      margins.leading = inset;\n      margins.trailing = inset;\n      self.navigationBar.directionalLayoutMargins = margins;\n    }\n  } else if (_lavaContentMarginsApplied) {\n    self.navigationBar.directionalLayoutMargins = _lavaOriginalContentMargins;\n    _lavaContentMarginsApplied = NO;\n  }\n  // Lava: end native page margins.\n"
+      ]
+    ]
+  }
+]

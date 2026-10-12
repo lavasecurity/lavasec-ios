@@ -1152,7 +1152,7 @@ export const translations: Record<string, Record<string,string>> = {
     "Play a demo of how Lava works, or tap a step to learn more.": "Sieh in einer Demo, wie Lava funktioniert, oder tippe auf einen Schritt, um mehr zu erfahren.",
     "Explore": "Entdecken",
     "Learn more about how Lava works": "So funktioniert Lava",
-    "Checking VPN": "VPN-Verkettung wird gestartet",
+    "Checking VPN": "VPN-Verbindung wird überprüft",
     "No domains saved yet": "Noch keine Domains gespeichert",
     "Long-press a domain": "Domain lange drücken",
     "All": "Alle",
@@ -1745,7 +1745,10 @@ export const translations: Record<string, Record<string,string>> = {
     "Your VPN connection is still running the configuration it started with. Turn protection off and on to switch to the one you just saved.": "Deine VPN-Verbindung verwendet noch die Konfiguration vom Start. Schalte den Schutz aus und wieder ein, um zur gerade gespeicherten Konfiguration zu wechseln.",
     "Your VPN connection is still running the configuration you removed, and will until protection stops. Turn protection off, or import a configuration to replace it.": "Deine VPN-Verbindung verwendet die entfernte Konfiguration weiter, bis der Schutz stoppt. Schalte den Schutz aus oder importiere eine andere Konfiguration.",
     "Restart to use the new configuration": "Schutz neu starten, um die neue Konfiguration zu verwenden",
-    "Still using the configuration you removed": "Die entfernte Konfiguration wird noch verwendet"
+    "Still using the configuration you removed": "Die entfernte Konfiguration wird noch verwendet",
+    "Protection limits": "Schutzgrenzen",
+    "Protection limits & terms": "Schutzgrenzen und Bedingungen",
+    "Lava cannot block every harmful site. An accessible site is not verified safe. Keep using normal precautions, even when protection is on.": "Lava kann nicht jede schädliche Website blockieren. Eine erreichbare Website ist nicht als sicher bestätigt. Bleibe auch bei aktiviertem Schutz wie gewohnt vorsichtig."
   },
   "en": {
     "%@ list wasn’t imported because it’s no longer available.": "%@ list wasn’t imported because it’s no longer available.",
@@ -2899,7 +2902,7 @@ export const translations: Record<string, Record<string,string>> = {
     "Play a demo of how Lava works, or tap a step to learn more.": "Play a demo of how Lava works, or tap a step to learn more.",
     "Explore": "Explore",
     "Learn more about how Lava works": "Learn more about how Lava works",
-    "Checking VPN": "Starting VPN chaining",
+    "Checking VPN": "Verifying VPN connection",
     "No domains saved yet": "No domains saved yet",
     "Long-press a domain": "Long-press a domain",
     "All": "All",
@@ -3492,7 +3495,10 @@ export const translations: Record<string, Record<string,string>> = {
     "Your VPN connection is still running the configuration it started with. Turn protection off and on to switch to the one you just saved.": "Your VPN connection is still running the configuration it started with. Turn protection off and on to switch to the one you just saved.",
     "Your VPN connection is still running the configuration you removed, and will until protection stops. Turn protection off, or import a configuration to replace it.": "Your VPN connection is still running the configuration you removed, and will until protection stops. Turn protection off, or import a configuration to replace it.",
     "Restart to use the new configuration": "Restart protection to use the new configuration",
-    "Still using the configuration you removed": "Still using the configuration you removed"
+    "Still using the configuration you removed": "Still using the configuration you removed",
+    "Protection limits": "Protection limits",
+    "Protection limits & terms": "Protection limits & terms",
+    "Lava cannot block every harmful site. An accessible site is not verified safe. Keep using normal precautions, even when protection is on.": "Lava cannot block every harmful site. An accessible site is not verified safe. Keep using normal precautions, even when protection is on."
   },
   "fr": {
     "%@ list wasn’t imported because it’s no longer available.": "%@ liste n’a pas été importée, car elle n’est plus disponible.",
@@ -4646,7 +4652,7 @@ export const translations: Record<string, Record<string,string>> = {
     "Play a demo of how Lava works, or tap a step to learn more.": "Lancez une démo du fonctionnement de Lava ou touchez une étape pour en savoir plus.",
     "Explore": "Découvrir",
     "Learn more about how Lava works": "Découvrez comment fonctionne Lava",
-    "Checking VPN": "Démarrage du chaînage VPN",
+    "Checking VPN": "Vérification de la connexion VPN",
     "No domains saved yet": "Aucun domaine enregistré",
     "Long-press a domain": "Appuyez longuement sur un domaine",
     "All": "Tous",
@@ -5239,7 +5245,10 @@ export const translations: Record<string, Record<string,string>> = {
     "Your VPN connection is still running the configuration it started with. Turn protection off and on to switch to the one you just saved.": "Votre connexion VPN utilise encore la configuration avec laquelle elle a démarré. Désactivez puis réactivez la protection pour utiliser celle que vous venez d’enregistrer.",
     "Your VPN connection is still running the configuration you removed, and will until protection stops. Turn protection off, or import a configuration to replace it.": "Votre connexion VPN continue d’utiliser la configuration supprimée jusqu’à l’arrêt de la protection. Désactivez la protection ou importez une configuration pour la remplacer.",
     "Restart to use the new configuration": "Relancez la protection pour utiliser la nouvelle configuration",
-    "Still using the configuration you removed": "La configuration supprimée est toujours utilisée"
+    "Still using the configuration you removed": "La configuration supprimée est toujours utilisée",
+    "Protection limits": "Limites de protection",
+    "Protection limits & terms": "Limites de protection et conditions",
+    "Lava cannot block every harmful site. An accessible site is not verified safe. Keep using normal precautions, even when protection is on.": "Lava ne peut pas bloquer tous les sites dangereux. Un site accessible n'est pas confirmé comme sûr. Gardez vos précautions habituelles, même lorsque la protection est activée."
   },
   "ja": {
     "%@ list wasn’t imported because it’s no longer available.": "%@件のリストは提供が終了したため、インポートされませんでした。",
@@ -6393,7 +6402,7 @@ export const translations: Record<string, Record<string,string>> = {
     "Play a demo of how Lava works, or tap a step to learn more.": "デモでLavaのしくみを見るか、各ステップをタップして詳しく確認できます。",
     "Explore": "しくみを知る",
     "Learn more about how Lava works": "Lava のしくみを知る",
-    "Checking VPN": "VPNチェーンを開始中",
+    "Checking VPN": "VPN接続を確認中",
     "No domains saved yet": "保存されたドメインはありません",
     "Long-press a domain": "ドメインを長押し",
     "All": "すべて",
@@ -6986,7 +6995,10 @@ export const translations: Record<string, Record<string,string>> = {
     "Your VPN connection is still running the configuration it started with. Turn protection off and on to switch to the one you just saved.": "VPN 接続は開始時の設定を引き続き使用しています。保存した設定に切り替えるには、保護を一度オフにしてからオンにしてください。",
     "Your VPN connection is still running the configuration you removed, and will until protection stops. Turn protection off, or import a configuration to replace it.": "保護を停止するまで、VPN 接続は削除した設定を使用し続けます。保護をオフにするか、別の設定をインポートして置き換えてください。",
     "Restart to use the new configuration": "保護を再開して新しい設定を使用",
-    "Still using the configuration you removed": "削除した設定を使用しています"
+    "Still using the configuration you removed": "削除した設定を使用しています",
+    "Protection limits": "保護の限界",
+    "Protection limits & terms": "保護の限界と利用条件",
+    "Lava cannot block every harmful site. An accessible site is not verified safe. Keep using normal precautions, even when protection is on.": "Lava はすべての有害なサイトをブロックできるわけではありません。アクセスできるサイトの安全性が確認されたという意味ではありません。保護が有効な場合も、通常の注意を払ってください。"
   },
   "zh-Hans": {
     "%@ list wasn’t imported because it’s no longer available.": "%@ 个列表已不再提供，因此未导入。",
@@ -8140,7 +8152,7 @@ export const translations: Record<string, Record<string,string>> = {
     "Play a demo of how Lava works, or tap a step to learn more.": "播放演示，了解 Lava 如何运作，或轻点任一步骤查看详情。",
     "Explore": "探索",
     "Learn more about how Lava works": "了解 Lava 的工作原理",
-    "Checking VPN": "正在启动 VPN 串联",
+    "Checking VPN": "正在验证 VPN 连接",
     "No domains saved yet": "尚未保存域名",
     "Long-press a domain": "长按域名",
     "All": "全部",
@@ -8733,7 +8745,10 @@ export const translations: Record<string, Record<string,string>> = {
     "Your VPN connection is still running the configuration it started with. Turn protection off and on to switch to the one you just saved.": "VPN 连接仍在使用启动时的配置。请先关闭防护再开启，以切换到刚保存的配置。",
     "Your VPN connection is still running the configuration you removed, and will until protection stops. Turn protection off, or import a configuration to replace it.": "VPN 连接仍在使用你已移除的配置，直到防护停止。请关闭防护，或导入配置来替换它。",
     "Restart to use the new configuration": "重新开启防护以使用新配置",
-    "Still using the configuration you removed": "仍在使用已移除的配置"
+    "Still using the configuration you removed": "仍在使用已移除的配置",
+    "Protection limits": "防护限制",
+    "Protection limits & terms": "防护限制与条款",
+    "Lava cannot block every harmful site. An accessible site is not verified safe. Keep using normal precautions, even when protection is on.": "Lava 无法拦截所有有害网站。能够访问的网站不代表已确认安全。即使防护已开启，也请保持平常的警惕。"
   },
   "zh-Hant": {
     "%@ list wasn’t imported because it’s no longer available.": "%@ 個清單已不再提供，因此未匯入。",
@@ -9887,7 +9902,7 @@ export const translations: Record<string, Record<string,string>> = {
     "Play a demo of how Lava works, or tap a step to learn more.": "播放範例，了解 Lava 如何運作，或點選任一步驟查看詳情。",
     "Explore": "探索",
     "Learn more about how Lava works": "了解 Lava 的運作方式",
-    "Checking VPN": "正在啟動 VPN 串接",
+    "Checking VPN": "正在驗證 VPN 連線",
     "No domains saved yet": "尚未儲存網域",
     "Long-press a domain": "長按網域",
     "All": "全部",
@@ -10480,7 +10495,10 @@ export const translations: Record<string, Record<string,string>> = {
     "Your VPN connection is still running the configuration it started with. Turn protection off and on to switch to the one you just saved.": "VPN 連線仍在使用啟動時的設定。請先關閉防護再開啟，以切換至剛儲存的設定。",
     "Your VPN connection is still running the configuration you removed, and will until protection stops. Turn protection off, or import a configuration to replace it.": "VPN 連線仍在使用你已移除的設定，直到防護停止。請關閉防護，或匯入設定來取代它。",
     "Restart to use the new configuration": "重新開啟防護以使用新設定",
-    "Still using the configuration you removed": "仍在使用已移除的設定"
+    "Still using the configuration you removed": "仍在使用已移除的設定",
+    "Protection limits": "防護限制",
+    "Protection limits & terms": "防護限制與條款",
+    "Lava cannot block every harmful site. An accessible site is not verified safe. Keep using normal precautions, even when protection is on.": "Lava 無法封鎖所有有害網站。能夠開啟的網站不代表已確認安全。即使防護已開啟，也請保持平常的警覺。"
   },
   "es": {
     "%@ list wasn’t imported because it’s no longer available.": "No se importó %@ lista porque ya no está disponible.",
@@ -11634,7 +11652,7 @@ export const translations: Record<string, Record<string,string>> = {
     "Play a demo of how Lava works, or tap a step to learn more.": "Reproduce una demo de cómo funciona Lava o toca un paso para saber más.",
     "Explore": "Explorar",
     "Learn more about how Lava works": "Descubre cómo funciona Lava",
-    "Checking VPN": "Iniciando el encadenamiento VPN",
+    "Checking VPN": "Verificando la conexión VPN",
     "No domains saved yet": "Aún no hay dominios guardados",
     "Long-press a domain": "Mantén pulsado un dominio",
     "All": "Todos",
@@ -12227,7 +12245,10 @@ export const translations: Record<string, Record<string,string>> = {
     "Your VPN connection is still running the configuration it started with. Turn protection off and on to switch to the one you just saved.": "Tu conexión VPN sigue usando la configuración con la que se inició. Desactiva y vuelve a activar la protección para usar la que acabas de guardar.",
     "Your VPN connection is still running the configuration you removed, and will until protection stops. Turn protection off, or import a configuration to replace it.": "Tu conexión VPN sigue usando la configuración que eliminaste hasta que se detenga la protección. Desactiva la protección o importa otra configuración para reemplazarla.",
     "Restart to use the new configuration": "Reinicia la protección para usar la nueva configuración",
-    "Still using the configuration you removed": "Se sigue usando la configuración que eliminaste"
+    "Still using the configuration you removed": "Se sigue usando la configuración que eliminaste",
+    "Protection limits": "Límites de protección",
+    "Protection limits & terms": "Límites de protección y condiciones",
+    "Lava cannot block every harmful site. An accessible site is not verified safe. Keep using normal precautions, even when protection is on.": "Lava no puede bloquear todos los sitios dañinos. Un sitio accesible no está verificado como seguro. Mantén las precauciones habituales, incluso con la protección activada."
   },
   "ko": {
     "%@ list wasn’t imported because it’s no longer available.": "%@개 목록은 더 이상 제공되지 않아 가져오지 않았습니다.",
@@ -13381,7 +13402,7 @@ export const translations: Record<string, Record<string,string>> = {
     "Play a demo of how Lava works, or tap a step to learn more.": "데모를 재생해 Lava의 작동 방식을 보거나, 단계를 탭해 자세히 알아보세요.",
     "Explore": "둘러보기",
     "Learn more about how Lava works": "Lava 작동 방식 알아보기",
-    "Checking VPN": "VPN 체이닝 시작 중",
+    "Checking VPN": "VPN 연결 확인 중",
     "No domains saved yet": "아직 저장된 도메인이 없습니다",
     "Long-press a domain": "도메인을 길게 누르세요",
     "All": "전체",
@@ -13974,7 +13995,10 @@ export const translations: Record<string, Record<string,string>> = {
     "Your VPN connection is still running the configuration it started with. Turn protection off and on to switch to the one you just saved.": "VPN 연결이 시작할 때의 구성을 계속 사용하고 있습니다. 방금 저장한 구성으로 바꾸려면 보호를 껐다가 다시 켜세요.",
     "Your VPN connection is still running the configuration you removed, and will until protection stops. Turn protection off, or import a configuration to replace it.": "보호가 중지될 때까지 VPN 연결은 삭제한 구성을 계속 사용합니다. 보호를 끄거나 대체할 구성을 가져오세요.",
     "Restart to use the new configuration": "새 구성을 사용하려면 보호를 다시 시작하세요",
-    "Still using the configuration you removed": "삭제한 구성을 계속 사용 중"
+    "Still using the configuration you removed": "삭제한 구성을 계속 사용 중",
+    "Protection limits": "보호 한계",
+    "Protection limits & terms": "보호 한계 및 약관",
+    "Lava cannot block every harmful site. An accessible site is not verified safe. Keep using normal precautions, even when protection is on.": "Lava는 모든 유해 사이트를 차단할 수 없습니다. 접속 가능한 사이트가 안전하다고 확인된 것은 아닙니다. 보호가 켜져 있어도 평소처럼 주의하세요."
   },
   "pt-BR": {
     "%@ list wasn’t imported because it’s no longer available.": "%@ lista não foi importada porque não está mais disponível.",
@@ -15128,7 +15152,7 @@ export const translations: Record<string, Record<string,string>> = {
     "Play a demo of how Lava works, or tap a step to learn more.": "Reproduza uma demonstração de como o Lava funciona ou toque em uma etapa para saber mais.",
     "Explore": "Explorar",
     "Learn more about how Lava works": "Saiba como o Lava funciona",
-    "Checking VPN": "Iniciando o encadeamento de VPN",
+    "Checking VPN": "Verificando a conexão VPN",
     "No domains saved yet": "Nenhum domínio salvo ainda",
     "Long-press a domain": "Pressione um domínio por mais tempo",
     "All": "Todos",
@@ -15721,7 +15745,10 @@ export const translations: Record<string, Record<string,string>> = {
     "Your VPN connection is still running the configuration it started with. Turn protection off and on to switch to the one you just saved.": "Sua conexão VPN ainda usa a configuração com a qual foi iniciada. Desative e reative a proteção para usar a configuração que você acabou de salvar.",
     "Your VPN connection is still running the configuration you removed, and will until protection stops. Turn protection off, or import a configuration to replace it.": "Sua conexão VPN continuará usando a configuração removida até a proteção parar. Desative a proteção ou importe outra configuração para substituí-la.",
     "Restart to use the new configuration": "Reinicie a proteção para usar a nova configuração",
-    "Still using the configuration you removed": "Ainda usando a configuração removida"
+    "Still using the configuration you removed": "Ainda usando a configuração removida",
+    "Protection limits": "Limites da proteção",
+    "Protection limits & terms": "Limites da proteção e termos",
+    "Lava cannot block every harmful site. An accessible site is not verified safe. Keep using normal precautions, even when protection is on.": "O Lava não pode bloquear todos os sites nocivos. Um site acessível não foi verificado como seguro. Mantenha os cuidados habituais, mesmo com a proteção ativada."
   },
   "it": {
     "%@ list wasn’t imported because it’s no longer available.": "%@ lista non è stata importata perché non è più disponibile.",
@@ -16875,7 +16902,7 @@ export const translations: Record<string, Record<string,string>> = {
     "Play a demo of how Lava works, or tap a step to learn more.": "Avvia una demo di come funziona Lava o tocca un passaggio per saperne di più.",
     "Explore": "Esplora",
     "Learn more about how Lava works": "Scopri come funziona Lava",
-    "Checking VPN": "Avvio del concatenamento VPN",
+    "Checking VPN": "Verifica della connessione VPN",
     "No domains saved yet": "Nessun dominio salvato",
     "Long-press a domain": "Tieni premuto un dominio",
     "All": "Tutti",
@@ -17468,6 +17495,9 @@ export const translations: Record<string, Record<string,string>> = {
     "Your VPN connection is still running the configuration it started with. Turn protection off and on to switch to the one you just saved.": "La connessione VPN usa ancora la configurazione con cui è stata avviata. Disattiva e riattiva la protezione per passare a quella appena salvata.",
     "Your VPN connection is still running the configuration you removed, and will until protection stops. Turn protection off, or import a configuration to replace it.": "La connessione VPN continua a usare la configurazione rimossa finché la protezione non si arresta. Disattiva la protezione o importa una configurazione per sostituirla.",
     "Restart to use the new configuration": "Riavvia la protezione per usare la nuova configurazione",
-    "Still using the configuration you removed": "La configurazione rimossa è ancora in uso"
+    "Still using the configuration you removed": "La configurazione rimossa è ancora in uso",
+    "Protection limits": "Limiti della protezione",
+    "Protection limits & terms": "Limiti della protezione e condizioni",
+    "Lava cannot block every harmful site. An accessible site is not verified safe. Keep using normal precautions, even when protection is on.": "Lava non può bloccare tutti i siti dannosi. Un sito accessibile non è verificato come sicuro. Mantieni le normali precauzioni, anche quando la protezione è attiva."
   }
 };
