@@ -68,8 +68,8 @@ test.each([false,true])('sheet content owns asymmetric safe edges without narrow
   expect(bodyStyle()).toMatchObject(expected(59,44));
   expect(StyleSheet.flatten(scroll.props.style)).toEqual({flex:1,backgroundColor:expect.anything()});
   expect(scroll.props.automaticallyAdjustKeyboardInsets).toBe(true);
-  expect(scroll.props.contentInsetAdjustmentBehavior).toBe('never');
-  expect(scroll.props.contentInset).toEqual({top:54});
+  expect(scroll.props.contentInsetAdjustmentBehavior).toBe(pinned?'never':'automatic');
+  expect(scroll.props.contentInset).toEqual(pinned?{top:54}:undefined);
   if(pinned){
     expect(headerStyle()).toMatchObject({
       paddingLeft:foundation.space.screenHorizontal+59,paddingRight:foundation.space.screenHorizontal+44});
@@ -84,7 +84,7 @@ test.each([false,true])('sheet content owns asymmetric safe edges without narrow
   expect(bodyStyle().paddingLeft).toBeUndefined();expect(bodyStyle().paddingRight).toBeUndefined();
   if(pinned){const style=headerStyle();
     expect(style.paddingLeft).toBeUndefined();expect(style.paddingRight).toBeUndefined();}
-  expect(scroll.props.contentInset).toEqual({top:54});
+  expect(scroll.props.contentInset).toEqual(pinned?{top:54}:undefined);
 });
 test('pinned controls follow the measured native bar through height changes',()=>{
   render(<HeaderHeightContext.Provider value={70}><Contents heading="Choose Blocklists" pinned/></HeaderHeightContext.Provider>);
@@ -289,7 +289,7 @@ test.each([false,true])('short and empty content preserves the inset without inv
     expect(scroll.props.contentInset).toBeUndefined();
     expect(scroll.props.contentOffset).toBeUndefined();
     expect(scroll.props.stickyHeaderIndices).toBeUndefined();
-  }else expect(scroll.props).toMatchObject({automaticallyAdjustContentInsets:false,contentInsetAdjustmentBehavior:'never',contentInset:{top:56},contentOffset:{x:0,y:-56}});
+  }else expect(scroll.props).toMatchObject({automaticallyAdjustContentInsets:true,contentInsetAdjustmentBehavior:'automatic',contentInset:undefined,contentOffset:undefined});
   expect(StyleSheet.flatten(scroll.props.contentContainerStyle).minHeight).toBe(pinned?undefined:644);
   expect(scroll.props.bounces).toBe(pinned?false:undefined);
   expect(scroll.props.alwaysBounceVertical).toBe(pinned?false:undefined);

@@ -34,7 +34,7 @@ const Stack = createNativeStackNavigator<Screens.ReviewRoutes>();
 
 const destinations = [
   ['Filters', Screens.FiltersScreen, 'Filters'], ['Activity', Screens.ActivityScreen, 'Activity'],
-  ['Explore', Screens.ExploreScreen, 'Explore'],
+  ['Explore', Screens.ExploreScreen, 'Explore'], ['DomainCheck', Screens.DomainCheckScreen, 'Check a domain'],
   ['Library', Screens.LibraryScreen, 'Your filters'], ['Filter', Screens.FilterScreen, 'Example filter'],
   ['Review', Screens.ReviewScreen, 'Review'], ['Share', Screens.ShareScreen, 'Choose a filter to share'],
   ['Import', Screens.ImportScreen, 'Import a filter'], ['TopDomains', Screens.DomainListScreen, 'Top Domains'],
@@ -170,7 +170,7 @@ function LavaPresentation({app, onboardingPreview, fullApp, activityExample, rev
     const pending=pendingNavigation.current,current=app?.getSnapshot().snapshot;
     const state=navigation.getRootState();
     if(!pending||!current||AppState.currentState!=='active'||app?.getPresentationHydration().epoch!==pending.epoch
-      ||current.navigation?.serial!==pending.request.serial||!state||!nativeRedirectMatches(state,pending.request.tab,pending.request.screen))return;
+      ||current.navigation?.serial!==pending.request.serial||!state||!nativeRedirectMatches(state,pending.request.tab,pending.request.screen,pending.request.serial))return;
     // Dispatch is not readiness. The new focused viewport/read hooks register
     // during its commit before this navigation handoff ticket can settle.
     lastNavigation.current=pending.request.serial;pendingNavigation.current=undefined;app?.settlePresentationRead(pending.ticket);
@@ -183,9 +183,9 @@ function LavaPresentation({app, onboardingPreview, fullApp, activityExample, rev
     if(!pending||pending.request.serial!==request.serial||pending.epoch!==app?.getPresentationHydration().epoch)return;
     const state=navigation.getRootState();
     if(!state)return;
-    if(nativeRedirectMatches(state,request.tab,request.screen)){acceptNativeNavigation();return;}
+    if(nativeRedirectMatches(state,request.tab,request.screen,request.serial)){acceptNativeNavigation();return;}
     if(pending.dispatched)return;
-    const action=nativeRedirectAction(state,request.tab,request.screen);
+    const action=nativeRedirectAction(state,request.tab,request.screen,request.serial);
     if(!action){pendingNavigation.current=undefined;app?.settlePresentationRead(pending.ticket);return;}
     pending.dispatched=true;
     navigationTurn.current.markExternalRequest();

@@ -173,25 +173,22 @@ test('Explore taps work without layout or asynchronous native measurements',()=>
   expect(filter.findAllByProps({pointerEvents:'none'}).length).toBeGreaterThan(0);
 });
 
-test('Explore invitation uses the canonical faceless Lava mark and keeps its whole tile actionable',()=>{
+test('Explore uses a neutral compass glyph and keeps its whole row actionable',()=>{
   const onPress=jest.fn();render(<ExploreInvitation onPress={onPress}/>);
   const invitation=screen.getByTestId('guard.explore');
-  expect(invitation.findByProps({symbol:'lava.shield.fill'}).props).toMatchObject({accessible:false,accessibilityElementsHidden:true});
-  expect(invitation.findAllByProps({symbol:'shield.fill'})).toHaveLength(0);
+  expect(invitation.findAllByProps({symbol:'safari'}).length).toBeGreaterThan(0);
+  expect(invitation.findAllByProps({symbol:'lava.shield.fill'})).toHaveLength(0);
   fireEvent.press(invitation);expect(onPress).toHaveBeenCalledTimes(1);
 });
 
-test('Explore leads with its shared Guard heading and navigation accessory before its decorative path and summary',()=>{
-  render(<ExploreInvitation onPress={()=>{}}/>);
+test('Explore shares the settings row scaffold and preserves its discovery indicator',()=>{
+  render(<ExploreInvitation attention onPress={()=>{}}/>);
   const invitation=screen.getByTestId('guard.explore');
-  const heading=screen.UNSAFE_getByType(StoryNavigationLine);
-  expect(heading.findByType(RowAccessory).props.intent).toBe('page');
-  expect(screen.getByTestId('guard.explore.accessory')).toHaveStyle({width:foundation.row.disclosureWidth});
-  expect(screen.getByText('Explore')).toHaveStyle({fontSize:foundation.type.caption.fontSize,fontWeight:foundation.type.caption.fontWeight});
-  expect(screen.getByText('Explore').props.dynamicTypeRamp).toBe(foundation.type.caption.dynamicTypeRamp);
-  const children=invitation.children;
-  expect(children[0]).toBe(heading);
-  expect(children[1].findAllByProps({symbol:'lava.shield.fill'}).length).toBeGreaterThan(0);
+  expect(invitation.findByType(RowAccessory).props.intent).toBe('page');
+  expect(invitation.props.accessibilityHint).toBe('New');
+  expect(screen.getByTestId('guard.explore.new',{includeHiddenElements:true})).toBeTruthy();
+  expect(invitation.findAllByProps({symbol:'chevron.right'}).length).toBeGreaterThan(0);
+  expect(invitation.findAllByProps({symbol:'iphone'})).toHaveLength(0);
   expect(screen.getAllByRole('button')).toHaveLength(1);
 });
 
@@ -325,12 +322,10 @@ test('Off Guard hero uses an outline and retains its shared action',async()=>{
   await act(async()=>{});
 });
 
-test('Guard Explore summary uses the same regular metadata role as its rule count',()=>{
-  render(<><ExploreInvitation onPress={()=>{}}/><GuardSummaries today={{value:'0% blocked',allowed:0,blocked:0}} filter={{name:'Home',count:'12 rules'}} onActivity={()=>{}} onFilters={()=>{}}/></>);
-  const summary=screen.getByText('Learn more about how Lava works');
-  const count=screen.getByText('12 rules');
-  expect(summary).toHaveStyle({fontSize:15,fontWeight:'400'});
-  expect(summary.props.dynamicTypeRamp).toBe(count.props.dynamicTypeRamp);
+test('Guard Explore consolidates the invitation into its heading',()=>{
+  render(<ExploreInvitation onPress={()=>{}}/>);
+  expect(screen.getByRole('button',{name:'Explore how Lava works'})).toBeOnTheScreen();
+  expect(screen.queryByText('Learn more about how Lava works')).toBeNull();
 });
 
 test('Ready and Off share the actual Guard material, slots and accessible status',async()=>{

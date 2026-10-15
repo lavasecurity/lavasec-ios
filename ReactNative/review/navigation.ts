@@ -7,7 +7,7 @@ import {mayInteractWithPresentation} from '../app/read-cache';
 
 export type ReviewRoutes = {
   Foreground:{id:string};
-  Guard: undefined; Settings: undefined; Filters: undefined; Activity: undefined;
+  Guard: undefined; DomainCheck: undefined; Settings: undefined; Filters: undefined; Activity: undefined;
   Explore: {part?:import('./connection-model').ConnectionPart;returnTo?:'DNS'|'Filters';returnKey?:string}|undefined;
   Library: undefined; Filter: {id?:string}|undefined; Review: {id?:string;standaloneReview?:string}|undefined; Share: undefined; ShareDetail: {id?:string}|undefined;
   Import: undefined; TopDomains: {start?: number; end?: number} | undefined; History: undefined; Customization: undefined;

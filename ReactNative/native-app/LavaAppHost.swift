@@ -161,6 +161,7 @@ private final class LavaAppViewController: UIViewController {
         let delegate = LavaAppReactDelegate()
         delegate.dependencyProvider = LavaAppDependencyProvider()
         let factory = RCTReactNativeFactory(delegate: delegate)
+        LavaInstallScrollScaffold()
         LavaInstallAppComponentProvider()
         self.factoryDelegate = delegate
         self.factory = factory

@@ -1,7 +1,8 @@
 import type {PropsWithChildren} from 'react';
 import {AppState} from 'react-native';
 import {act,fireEvent,render,screen} from '@testing-library/react-native';
-import {AutoSwitchScreen,VPNChainingScreen,DNSPatchScreen,CustomEntryScreen} from '../review/NativePageScreen';
+import {AutoSwitchScreen,DNSPatchScreen,CustomEntryScreen} from '../review/NativePageScreen';
+import {VPNChainingScreen} from '../review/VPNChainingScreen';
 import {CustomEntryRoute} from '../review/CustomEntryScreen';
 import {DNSScreen} from '../review/DNSScreen';
 import {useDNSEditor} from '../review/dns-editor';

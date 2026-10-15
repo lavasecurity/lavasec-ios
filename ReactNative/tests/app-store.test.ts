@@ -888,3 +888,17 @@ test.each(['inactive','background','owner','policy','clear'] as const)('a shared
   await expect(store.command(input)).resolves.toEqual({allowed:1});
   disconnect();events.restore();
 });
+
+
+test('domain checks accept result-only replies and cancelled visits retire while concealed',async()=>{
+  const native={getSnapshot:()=>new Promise<string>(()=>{}),onSnapshot:()=>({remove(){}}),
+    command:jest.fn(async(request:string)=>JSON.stringify({result:JSON.parse(request).type==='domainCheck.query'?{domain:'example.com'}:null}))} as unknown as Spec;
+  const store=new AppStore(native,JSON.parse(snapshot(1))),disconnect=store.connect();
+  try {
+    await expect(store.command({type:'domainCheck.query',visit:'visit',input:'example.com'})).resolves.toEqual({domain:'example.com'});
+    Object.defineProperty(AppState,'currentState',{configurable:true,value:'background'});
+    await expect(store.command({type:'domainCheck.cancel',visit:'visit'})).resolves.toBeNull();
+    await expect(store.command({type:'domainCheck.query',visit:'visit',input:'example.com'})).rejects.toThrow('Read access changed.');
+    expect(native.command).toHaveBeenCalledTimes(2);
+  } finally {Object.defineProperty(AppState,'currentState',{configurable:true,value:'active'});disconnect();}
+});

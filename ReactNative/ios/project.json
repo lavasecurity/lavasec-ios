@@ -181,6 +181,12 @@
           "path": "LavaSecUIReview/ReviewReferenceContent.swift"
         },
         {
+          "path": "LavaSecUIReview/LavaScrollView.h"
+        },
+        {
+          "path": "LavaSecUIReview/LavaScrollView.mm"
+        },
+        {
           "path": "Assets.xcassets",
           "buildPhase": "resources"
         },

@@ -1,6 +1,6 @@
 import {usePlusEntry} from '../review/plus-entry';
 import {PlusIntents} from '../review/plus-intents';
-import {VPNChainingScreen} from '../review/NativePageScreen';
+import {VPNChainingScreen} from '../review/VPNChainingScreen';
 import {usePreventRemove} from '@react-navigation/native';
 import {LegalScreen} from '../review/DiagnosticScreens';
 import {clearAppReadCache} from '../app/read-cache';
@@ -22,6 +22,7 @@ import {addPreviewDomain, initialPreviewDraft, previewDiff} from '../review/prev
 import type {AppCommand, AppSnapshot, DNSChoice} from '../app/contract';
 import {useDNSEditor} from '../review/dns-editor';
 import type {AppStore} from '../app/store';
+import {PresentationHydration} from '../app/presentation-hydration';
 
 const expectedNumber = new Intl.NumberFormat();
 const backupEnablement=(value:boolean|null,signedIn=true,overrides:Partial<NonNullable<AppSnapshot['backup']['enablement']>>={})=>({
@@ -190,20 +191,22 @@ test('chained forwarding failure uses the neutral Guard material and orange retr
   expect(JSON.stringify(result.toJSON())).not.toContain('exclamationmark.triangle.fill');
 });
 
-test('Slow DNS offers the authenticated provider settings route',()=>{
-  const live={protection:{rules:12,title:'DNS is slow',subtitle:'Reconnect or change your DNS provider.',
-    action:'Reconnect',mood:'concerned',needsDNSProviderChange:true}} as unknown as AppSnapshot;
-  render(<Provider live={live}><GuardScreen /></Provider>);
-  fireEvent.press(screen.getByRole('link',{name:'Change DNS provider'}));
-  expect(mockNavigate).toHaveBeenCalledWith('DNS');
-});
-
-test('Guard configuration recovery navigates to the native VPN page',()=>{
-  const live={protection:{rules:12,title:'Protection Off',subtitle:'Configuration needed',
-    action:'Turn on',mood:'sleeping',needsVPNSetup:true}} as AppSnapshot;
-  render(<Provider live={live}><GuardScreen /></Provider>);
-  fireEvent.press(screen.getByRole('link',{name:'Review VPN chaining'}));
-  expect(mockNavigate).toHaveBeenCalledWith('VPNChaining');
+test.each([
+  {title:'DNS is slow',subtitle:'Reconnect or change your DNS provider.',action:'Reconnect',needsDNSProviderChange:true},
+  {title:'Protection Off',subtitle:'Configuration needed',action:'Turn on',needsVPNSetup:true},
+  {title:'Protection Off',subtitle:'Configuration needed',action:'Turn on',needsDNSProviderChange:true,needsVPNSetup:true},
+])('Guard recovery keeps $title as plain status text with its primary action',async protection=>{
+  const command=jest.fn().mockResolvedValue(null);
+  const app={command} as unknown as AppStore;
+  const live={protection:{rules:12,mood:'concerned',...protection}} as unknown as AppSnapshot;
+  render(<Provider live={live} app={app}><GuardScreen /></Provider>);
+  await act(async()=>{});
+  expect(screen.getAllByText(protection.subtitle)).toHaveLength(1);
+  expect(screen.getByLabelText('Protection status')).toHaveAccessibilityValue({text:`${localized(protection.title)}. ${localized(protection.subtitle)}`});
+  expect(screen.queryAllByRole('link')).toHaveLength(0);
+  fireEvent.press(screen.getByRole('button',{name:protection.action}));
+  expect(command).toHaveBeenCalledWith({type:'protection.toggle'});
+  expect(mockNavigate).not.toHaveBeenCalled();
 });
 
 test.each([['de','1.234 Regeln'],['ja','1,234 件のルール']])('Guard rules summary uses the native %s format in text and accessibility', (locale,expected) => {
@@ -456,12 +459,12 @@ test('a user filter named Cancel stays verbatim in German rows, accessibility, m
     expect(screen.getAllByText('Cancel').length).toBeGreaterThan(0);
   } finally {alert.mockRestore();configurePresentation();}
 });
-test.each(['de','ja'])('blocklist budget and review summaries use native %s formats',locale=>{
+test.each(['de','ja'])('blocklist budget uses native %s formats and review has no redundant summary',locale=>{
   configurePresentation({locale,textScales:null});
   try {
     render(<Provider><AddBlocklistScreen/><ReviewScreen/></Provider>);
     expect(screen.getByText(localizedFormat('About %1$@ of %2$@ rules','156K','500K'))).toBeOnTheScreen();
-    expect(screen.getByText(localizedFormat('%@ will be saved locally.',localizedFormat('%d changes',0)))).toBeOnTheScreen();
+    expect(screen.queryByText(localizedFormat('%@ will be saved locally.',localizedFormat('%d changes',0)))).toBeNull();
   } finally {configurePresentation();}
 });
 test.each([
@@ -686,6 +689,61 @@ function editingSnapshot(): AppSnapshot {
     filterStatus:{title:'Filter up to date',icon:'checkmark.circle.fill',label:'rules in effect',warning:false},
     limits:{maxBlockedDomains:25,maxAllowedDomains:25}} as unknown as AppSnapshot;
 }
+
+test('domain review begins with its allowance warning and shows only the changes and confirmation',async()=>{
+  mockStandaloneReview='owned-domain-review';
+  // Retained navigation entries may still carry the removed scope metadata.
+  mockExploreParams={domainCheck:{domain:'abc.com',filterName:'Balanced'}};
+  const live=editingSnapshot();
+  live.session.blocklists=[];live.session.savedBlocklists=[];
+  live.savedDraft={blocked:['abc.com'],allowed:[]};live.draft={blocked:[],allowed:['abc.com']};
+  const command=jest.fn(async()=> 'review-token');
+  try{
+    render(<Provider live={live} app={{command} as unknown as AppStore}><ReviewScreen/></Provider>);
+    await waitFor(()=>expect(screen.getByRole('button',{name:'Confirm changes'})).toBeEnabled());
+    expect(screen.queryByText('Domain rule scope')).toBeNull();
+    expect(screen.queryByText('This change applies to the domain and its subdomains, including every page on those hosts.')).toBeNull();
+    expect(screen.queryByText('2 changes will be saved locally.')).toBeNull();
+    expect(screen.getByText('Be extra careful')).toBeOnTheScreen();
+    expect(screen.getAllByText('abc.com')).toHaveLength(2);
+    const copy=screen.UNSAFE_getAllByType(require('react-native').Text).map(node=>node.props.children);
+    expect(copy[0]).toBe('Be extra careful');
+    fireEvent.press(screen.getByRole('button',{name:'Confirm changes'}));
+    await waitFor(()=>expect(command).toHaveBeenCalledWith({type:'filter.apply',id:'active',review:'review-token',standaloneReview:'owned-domain-review'}));
+  }finally{mockStandaloneReview=undefined;}
+});
+
+test.each(['Read access changed.','Authentication cancelled.'])('cancelled review validation stays quiet and renews on the next read grant (%s)',async message=>{
+  let reviews=0;let reject!:(error:Error)=>void;
+  const pending=new Promise((_resolve,no)=>{reject=no;});
+  const command=jest.fn(async(request:AppCommand)=>request.type==='filter.review'&&++reviews===1?pending:'renewed-review');
+  const live=editingSnapshot();live.security={ownerRevision:'owner',readRevision:1} as AppSnapshot['security'];
+  const hydration=new PresentationHydration(()=>{});hydration.beginBoundary();
+  const app={command,subscribe:()=>()=>{},getSnapshot:()=>({snapshot:live}),getPresentationHydration:hydration.getSnapshot,
+    registerPresentationRead:()=>hydration.registerRead(),settlePresentationRead:(ticket:Parameters<PresentationHydration['settleRead']>[0])=>hydration.settleRead(ticket)} as unknown as AppStore;
+  const previousAppState=AppState.currentState;Object.defineProperty(AppState,'currentState',{configurable:true,value:'active'});
+  try{
+    const view=render(<Provider live={live} app={app}><ReviewScreen/></Provider>);
+    await act(async()=>hydration.completeLayout(hydration.getSnapshot().epoch));
+    expect(hydration.getSnapshot().required).toBe(true);
+    await act(async()=>reject(Error(message)));
+    expect(hydration.getSnapshot().required).toBe(false);
+    expect(screen.queryByText(message)).toBeNull();
+    expect(screen.queryByText('Review cannot continue')).toBeNull();
+    expect(screen.getByRole('button',{name:'Confirm changes'})).toBeDisabled();
+    view.rerender(<Provider live={{...live,security:{...live.security,readRevision:2} as AppSnapshot['security']}} app={app}><ReviewScreen/></Provider>);
+    await waitFor(()=>expect(screen.getByRole('button',{name:'Confirm changes'})).toBeEnabled());
+  }finally{Object.defineProperty(AppState,'currentState',{configurable:true,value:previousAppState});}
+});
+
+test.each(['Read access changed.','Authentication cancelled.'])('cancelled review confirmation does not introduce another info panel (%s)',async message=>{
+  const command=jest.fn(async(request:AppCommand)=>{if(request.type==='filter.apply')throw Error(message);return 'review-token';});
+  render(<Provider live={editingSnapshot()} app={{command} as unknown as AppStore}><ReviewScreen/></Provider>);
+  await waitFor(()=>expect(screen.getByRole('button',{name:'Confirm changes'})).toBeEnabled());
+  await act(async()=>fireEvent.press(screen.getByRole('button',{name:'Confirm changes'})));
+  expect(screen.queryByText(message)).toBeNull();
+  expect(screen.queryByText('Review cannot continue')).toBeNull();
+});
 
 const toolbarItems=(side:'Left'|'Right'='Right')=>[...mockSetOptions.mock.calls].reverse().find(([options])=>options[`unstable_header${side}Items`])![0][`unstable_header${side}Items`]();
 

@@ -2,10 +2,10 @@ import {AppState,type AppStateStatus} from 'react-native';
 import {act,fireEvent,render,renderHook,screen} from '@testing-library/react-native';
 import type {PropsWithChildren} from 'react';
 import type {AppCommand,ForegroundFlow} from '../app/contract';
-import {ReviewContext,type ReviewState} from '../review/ReviewContext';
+import {LiveRenderBoundary,ReviewContext,type ReviewState} from '../review/ReviewContext';
 import {initialSession} from '../review/session';
 import {useVPNPageAdmission} from '../review/vpn-page-admission';
-import {VPNChainingScreen} from '../review/NativePageScreen';
+import {VPNChainingScreen} from '../review/VPNChainingScreen';
 
 let mockFocused=true;let mockRouteKey='vpn-visit';
 const mockGoBack=jest.fn();const mockSetOptions=jest.fn();
@@ -28,10 +28,15 @@ beforeEach(()=>{
 });
 afterEach(()=>{AppState.currentState=previousPhase;jest.restoreAllMocks();});
 function emit(value:AppStateStatus){AppState.currentState=value;act(()=>{for(const listener of lifecycle)listener(value);});}
-function parentCoverFence(){
-  let ancestor=screen.getByTestId('vpn-page-privacy-cover',{includeHiddenElements:true}).parent;
-  while(ancestor&&ancestor.props.importantForAccessibility!=='no-hide-descendants')ancestor=ancestor.parent;
-  return ancestor;
+// The page never paints its own cover; the route's shared boundary owns that.
+function expectNoPageCover(){
+  expect(screen.queryByTestId('vpn-page-privacy-cover',{includeHiddenElements:true})).toBeNull();
+  expect(screen.queryByText('Lava Security',{includeHiddenElements:true})).toBeNull();
+}
+// Without a current grant native withholds rows; React must not repaint a draft.
+function expectRowsWithheld(){
+  expect(screen.queryByTestId('vpn.setup-toggle',{includeHiddenElements:true})).toBeNull();
+  expect(screen.queryByTestId('vpn.configuration-panel',{includeHiddenElements:true})).toBeNull();
 }
 function setup(authorized=true){
   const listeners=new Set<()=>void>();let authoritative=true;let hydrated=true;let fieldsAvailable=true;let privacyCoverRequired:boolean|undefined=false;
@@ -39,7 +44,7 @@ function setup(authorized=true){
   const app={command,getSnapshot:()=>({snapshot:authoritative?live:null,privacyCoverRequired}),getPresentationHydration:()=>({epoch:1,required:!hydrated}),
     subscribe:(listener:()=>void)=>{listeners.add(listener);return()=>{listeners.delete(listener);};},
     registerPresentationRead:jest.fn(()=>({epoch:1,id:1})),settlePresentationRead:jest.fn()};
-  let live={foregroundFlow:undefined as ForegroundFlow|null|undefined,vpn:{authorized,setup:true,enabled:false,canEdit:true,canChangeFallback:true,needsPlus:false,rows:[],generation:'saved'},plus:{enabled:true},security:{ownerRevision:'native-owner',readRevision:1}};
+  let live={foregroundFlow:undefined as ForegroundFlow|null|undefined,vpn:{authorized,setup:true,enabled:false,canEdit:true,canChangeFallback:true,needsPlus:false,rows:[] as {name:string;mode:string;isEnabled?:boolean}[],generation:'saved'},plus:{enabled:true},security:{ownerRevision:'native-owner',readRevision:1}};
   const wrapper=({children}:PropsWithChildren)=><ReviewContext.Provider value={{app,live:fieldsAvailable?live:undefined,session:initialSession()} as unknown as ReviewState}>{children}</ReviewContext.Provider>;
   const notify=()=>act(()=>{for(const listener of listeners)listener();});
   return {app,command,wrapper,setAuthorized:(value:boolean,revision=live.security.readRevision)=>{live={...live,vpn:{...live.vpn,authorized:value},security:{...live.security,readRevision:revision}};},
@@ -47,30 +52,30 @@ function setup(authorized=true){
     setPrivacyPolicy:(value:boolean|undefined)=>{privacyCoverRequired=value;},
     replaceOwner:()=>{live={...live,security:{...live.security,ownerRevision:'replacement-owner'}};},
     setFieldsAvailable:(value:boolean)=>{fieldsAvailable=value;},
+    setLive:(value:Partial<typeof live>)=>{live={...live,...value} as typeof live;},
     setAuthority:(value:boolean)=>{authoritative=value;notify();},setHydrated:(value:boolean)=>{hydrated=value;notify();}};
 }
 
-test('a committed child return conceals controls and retains its actual native draft until native reauthorization',async()=>{
+test('a revoked return withholds rows and retains its actual native draft until native reauthorization',async()=>{
   const fixture=setup();const draft={id:'native-draft',revision:1,changed:false,containsFullTunnel:false,rows:[]};
   fixture.command.mockImplementation(async action=>action.type==='vpn.begin'?draft:null);
   const view=render(<VPNChainingScreen/>,{wrapper:fixture.wrapper});await act(async()=>{});
   expect(fixture.command).not.toHaveBeenCalled();
   act(()=>mockSetOptions.mock.calls.at(-1)![0].unstable_headerRightItems()[0].onPress());await act(async()=>{});
-  const panel=screen.getByTestId('vpn.configuration-panel');
+  expect(screen.getByTestId('vpn.configuration-panel')).toBeOnTheScreen();
   expect(fixture.command.mock.calls).toEqual([[{type:'vpn.begin',id:expect.any(String),generation:'saved'}]]);
   mockFocused=false;view.rerender(<VPNChainingScreen/>);await act(async()=>{});
   const staleSave=mockSetOptions.mock.calls.at(-1)![0].unstable_headerRightItems()[0];
   fixture.setAuthorized(false,2);mockFocused=true;
   const request=deferred();fixture.command.mockImplementation(async action=>action.type==='vpn.enter'?request.promise:null);
   view.rerender(<VPNChainingScreen/>);await act(async()=>{});
-  expect(screen.queryByTestId('vpn.setup-toggle')).toBeNull();
-  expect(screen.getByTestId('vpn-page-content',{includeHiddenElements:true}).props).toMatchObject({pointerEvents:'none',accessibilityElementsHidden:true,importantForAccessibility:'no-hide-descendants'});
+  expectRowsWithheld();expectNoPageCover();
   act(()=>staleSave.onPress());await act(async()=>{});
   expect(fixture.command.mock.calls.map(([action])=>action.type)).toEqual(['vpn.begin','vpn.enter']);
   await act(async()=>request.resolve());
-  expect(screen.queryByTestId('vpn.setup-toggle')).toBeNull();
+  expectRowsWithheld();
   fixture.setAuthorized(true);view.rerender(<VPNChainingScreen/>);await act(async()=>{});
-  expect(screen.getByTestId('vpn.configuration-panel')).toBe(panel);
+  expect(screen.getByTestId('vpn.configuration-panel')).toBeOnTheScreen();
   fireEvent.press(screen.getByRole('button',{name:'Add configuration'}));await act(async()=>{});
   expect(fixture.command.mock.calls.at(-1)).toEqual([{type:'vpn.edit',id:draft.id,index:0}]);
   expect(fixture.command.mock.calls.some(([action])=>action.type==='vpn.cancel')).toBe(false);
@@ -78,15 +83,15 @@ test('a committed child return conceals controls and retains its actual native d
   expect(fixture.command.mock.calls.at(-1)).toEqual([{type:'vpn.cancel',id:draft.id}]);
 });
 
-test('the native WireGuard modal owns resume authorization without retiring its obscured parent draft',async()=>{
+test('the native WireGuard modal owns resume authorization without retiring its painted parent draft',async()=>{
   const fixture=setup();const draft={id:'native-draft',revision:1,changed:false,containsFullTunnel:false,rows:[]};
   fixture.command.mockImplementation(async action=>action.type==='vpn.begin'?draft:null);
   const view=render(<VPNChainingScreen/>,{wrapper:fixture.wrapper});await act(async()=>{});
   act(()=>mockSetOptions.mock.calls.at(-1)![0].unstable_headerRightItems()[0].onPress());await act(async()=>{});
   fixture.setNativeChild('wireguard-child');view.rerender(<VPNChainingScreen/>);await act(async()=>{});
-  expect(screen.queryByTestId('vpn.setup-toggle')).toBeNull();
-  expect(screen.queryByTestId('vpn-page-privacy-cover',{includeHiddenElements:true})).toBeNull();
-  expect(screen.queryByText('Lava Security',{includeHiddenElements:true})).toBeNull();
+  // The modal owns input and accessibility above the parent, not its paint.
+  expect(screen.getByTestId('vpn.setup-toggle')).toBeOnTheScreen();
+  expectNoPageCover();
   const toolbar=mockSetOptions.mock.calls.at(-1)![0];
   const cancel=toolbar.unstable_headerLeftItems()[0];const save=toolbar.unstable_headerRightItems()[0];
   expect(cancel.disabled).toBe(false);expect(save.disabled).toBe(false);
@@ -100,54 +105,57 @@ test('the native WireGuard modal owns resume authorization without retiring its 
   view.rerender(<VPNChainingScreen/>);await act(async()=>{});
   expect(mockGoBack).not.toHaveBeenCalled();
   expect(fixture.command.mock.calls.some(([action])=>action.type==='vpn.cancel'||action.type==='vpn.enter')).toBe(false);
-  expect(screen.getByTestId('vpn-page-content',{includeHiddenElements:true}).props).toMatchObject({pointerEvents:'none',accessibilityElementsHidden:true,importantForAccessibility:'no-hide-descendants'});
+  expectRowsWithheld();expectNoPageCover();
 
   const request=deferred();fixture.command.mockImplementation(async action=>action.type==='vpn.enter'?request.promise:null);
   fixture.setNativeChild();view.rerender(<VPNChainingScreen/>);await act(async()=>{});
   expect(fixture.command.mock.calls.at(-1)).toEqual([{type:'vpn.enter'}]);
-  await act(async()=>request.resolve());expect(screen.queryByTestId('vpn.setup-toggle')).toBeNull();
+  await act(async()=>request.resolve());expectRowsWithheld();
   fixture.setAuthorized(true);view.rerender(<VPNChainingScreen/>);await act(async()=>{});
   fireEvent.press(screen.getByRole('button',{name:'Add configuration'}));await act(async()=>{});
   expect(fixture.command.mock.calls.at(-1)).toEqual([{type:'vpn.edit',id:draft.id,index:0}]);
   expect(fixture.command.mock.calls.some(([action])=>action.type==='vpn.cancel')).toBe(false);
 });
 
-test('an authorized all-off parent keeps its accepted paint below the native modal with no input or privacy accessibility',async()=>{
+test('an authorized parent below the native modal has no input admission through a read pause',async()=>{
   const fixture=setup();fixture.setNativeChild('wireguard-child');
   const {result,rerender}=renderHook(()=>useVPNPageAdmission(),{wrapper:fixture.wrapper});await act(async()=>{});
-  expect(result.current).toMatchObject({canInteract:false,coverRequired:false,coverAccessibilityHidden:true});
+  expect(result.current.canInteract).toBe(false);
   expect(result.current.isAdmitted()).toBe(false);expect(fixture.command).not.toHaveBeenCalled();
   emit('background');fixture.setAuthority(false);rerender(undefined);await act(async()=>{});
-  expect(result.current).toMatchObject({canInteract:false,coverRequired:false,coverAccessibilityHidden:true});
+  expect(result.current.canInteract).toBe(false);
   emit('active');fixture.setAuthority(true);rerender(undefined);await act(async()=>{});
-  expect(result.current).toMatchObject({canInteract:false,coverRequired:false,coverAccessibilityHidden:true});
+  expect(result.current.canInteract).toBe(false);
   expect(result.current.isAdmitted()).toBe(false);expect(fixture.command).not.toHaveBeenCalled();
 });
 
-test.each([true,undefined] as const)('a current grant paints the parent with %s policy; revocation conceals it while the native child owns accessibility',async policy=>{
+test.each([true,false,undefined] as const)('with %s policy a current grant paints the parent; revocation withholds rows without a page-owned cover',async policy=>{
   const fixture=setup();fixture.setPrivacyPolicy(policy);fixture.setNativeChild('wireguard-child');
   const view=render(<VPNChainingScreen/>,{wrapper:fixture.wrapper});await act(async()=>{});
-  expect(screen.queryByTestId('vpn-page-privacy-cover',{includeHiddenElements:true})).toBeNull();
-  expect(screen.getByTestId('vpn-page-content',{includeHiddenElements:true}).props).toMatchObject({pointerEvents:'none',accessibilityElementsHidden:true,importantForAccessibility:'no-hide-descendants'});
+  expect(screen.getByTestId('vpn.setup-toggle')).toBeOnTheScreen();expectNoPageCover();
   fixture.setAuthorized(false);view.rerender(<VPNChainingScreen/>);await act(async()=>{});
-  expect(screen.queryByTestId('vpn-page-privacy-cover')).toBeNull();
-  expect(parentCoverFence()?.props).toMatchObject({accessibilityElementsHidden:true,importantForAccessibility:'no-hide-descendants'});
-  expect(screen.queryByText('Lava Security')).toBeNull();
+  expectRowsWithheld();expectNoPageCover();
   fixture.setAuthorized(true);view.rerender(<VPNChainingScreen/>);await act(async()=>{});
-  expect(screen.queryByTestId('vpn-page-privacy-cover',{includeHiddenElements:true})).toBeNull();
+  expect(screen.getByTestId('vpn.setup-toggle')).toBeOnTheScreen();expectNoPageCover();
   fixture.setAuthority(false);view.rerender(<VPNChainingScreen/>);await act(async()=>{});
-  expect(screen.queryByTestId('vpn-page-privacy-cover')).toBeNull();
-  expect(parentCoverFence()?.props).toMatchObject({accessibilityElementsHidden:true,importantForAccessibility:'no-hide-descendants'});
-  expect(screen.queryByText('Lava Security')).toBeNull();
+  expectNoPageCover();
   expect(fixture.command).not.toHaveBeenCalled();expect(mockGoBack).not.toHaveBeenCalled();
 });
 
-test('an unauthorized parent retains opaque concealment even with explicit opt-out while the native child owns accessibility',async()=>{
+test('an unauthorized parent paints no rows even with explicit opt-out while the native child owns accessibility',async()=>{
   const fixture=setup(false);fixture.setNativeChild('wireguard-child');
   render(<VPNChainingScreen/>,{wrapper:fixture.wrapper});await act(async()=>{});
-  expect(screen.queryByTestId('vpn-page-privacy-cover')).toBeNull();
-  expect(parentCoverFence()?.props).toMatchObject({accessibilityElementsHidden:true,importantForAccessibility:'no-hide-descendants'});
-  expect(screen.queryByText('Lava Security')).toBeNull();expect(fixture.command).not.toHaveBeenCalled();
+  expectRowsWithheld();expectNoPageCover();expect(fixture.command).not.toHaveBeenCalled();
+});
+
+test('a failed admission offers Unlock inside the shared Screen and retries without granting',async()=>{
+  const fixture=setup(false);fixture.command.mockRejectedValueOnce(new Error('Read access changed.'));
+  const view=render(<VPNChainingScreen/>,{wrapper:fixture.wrapper});await act(async()=>{});
+  expect(view.toJSON()).toMatchObject({props:{testID:'screen.scroll'}});
+  expectRowsWithheld();expectNoPageCover();
+  fireEvent.press(screen.getByRole('button',{name:'Unlock Lava'}));await act(async()=>{});
+  expect(fixture.command.mock.calls).toEqual([[{type:'vpn.enter'}],[{type:'vpn.enter'}]]);
+  expectRowsWithheld();
 });
 
 test('a parent cancellation published after native child presentation cannot pop it, including before the React commit',async()=>{
@@ -278,4 +286,48 @@ test('an admission error remains concealed and can retry without granting or cha
   act(()=>result.current.retry());await act(async()=>{});
   expect(fixture.command.mock.calls).toEqual([[{type:'vpn.enter'}],[{type:'vpn.enter'}]]);
   expect(result.current.canInteract).toBe(false);
+});
+
+// The native-stack large title tracks the ScrollView it finds as the route's
+// direct child (primitives.tsx `Screen`). Any wrapper view breaks the header.
+test('the VPN page renders the shared Screen scroll view as its route root, like DNS',async()=>{
+  const fixture=setup();
+  const view=render(<VPNChainingScreen/>,{wrapper:fixture.wrapper});await act(async()=>{});
+  expect(view.toJSON()).toMatchObject({props:{testID:'screen.scroll'}});
+});
+
+// Concealment belongs to the route's shared LiveRenderBoundary and the native
+// security policy. Background alone never paints a page-owned cover.
+test('backgrounding an all-off VPN page keeps its painted body without a page-owned cover',async()=>{
+  const fixture=setup();
+  fixture.setLive({vpn:{authorized:true,setup:true,enabled:true,canEdit:true,canChangeFallback:true,needsPlus:false,rows:[{name:'Home VPN',mode:'Split tunnel',isEnabled:true}],generation:'saved'}});
+  const view=render(<VPNChainingScreen/>,{wrapper:fixture.wrapper});await act(async()=>{});
+  emit('background');fixture.setAuthority(false);view.rerender(<VPNChainingScreen/>);await act(async()=>{});
+  expect(screen.queryByTestId('vpn-page-privacy-cover',{includeHiddenElements:true})).toBeNull();
+  expect(screen.queryByText('Lava Security',{includeHiddenElements:true})).toBeNull();
+  expect(screen.getByText('Home VPN',{includeHiddenElements:true})).toBeTruthy();
+  expect(mockSetOptions.mock.calls.at(-1)![0].unstable_headerLeftItems()[0].disabled).toBe(false);
+  emit('active');fixture.setAuthority(true);view.rerender(<VPNChainingScreen/>);await act(async()=>{});
+  expect(screen.getByText('Home VPN')).toBeOnTheScreen();
+  expect(fixture.command).not.toHaveBeenCalled();
+});
+
+// The route composition from LavaUIReview.tsx `privateRoute`: the shared
+// boundary alone decides concealment, from the native security choice.
+test.each([[false,false],[true,true]] as const)('inside its route boundary, privacy policy %s shows the shared cover on background: %s',async(policy,covered)=>{
+  const fixture=setup();fixture.setPrivacyPolicy(policy);
+  fixture.setLive({vpn:{authorized:true,setup:true,enabled:true,canEdit:true,canChangeFallback:true,needsPlus:false,rows:[{name:'Home VPN',mode:'Split tunnel',isEnabled:true}],generation:'saved'}});
+  const route=()=><LiveRenderBoundary component={VPNChainingScreen} retainBody directScrollRoot retireOnPolicyChange/>;
+  const view=render(route(),{wrapper:fixture.wrapper});await act(async()=>{});
+  expect(screen.queryByTestId('lava-route-privacy-cover',{includeHiddenElements:true})).toBeNull();
+  expect(screen.getByText('Home VPN')).toBeOnTheScreen();
+  // An all-off app keeps its accepted display frame; protected policy has none.
+  emit('background');fixture.setAuthority(false);if(covered)fixture.setFieldsAvailable(false);view.rerender(route());await act(async()=>{});
+  expect(screen.queryByTestId('vpn-page-privacy-cover',{includeHiddenElements:true})).toBeNull();
+  if(covered)expect(screen.getByTestId('lava-route-privacy-cover')).toBeOnTheScreen();
+  else{
+    expectNoPageCover();
+    expect(screen.queryByTestId('lava-route-privacy-cover',{includeHiddenElements:true})).toBeNull();
+    expect(screen.getByText('Home VPN',{includeHiddenElements:true})).toBeTruthy();
+  }
 });

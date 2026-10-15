@@ -14,6 +14,7 @@ interface NativeProps extends ViewProps {
   lineHeight?: CodegenTypes.WithDefault<CodegenTypes.Float, 0>;
   editable?: CodegenTypes.WithDefault<boolean, true>;
   keyboardType?: string;
+  textContentType?: string;
   autoCapitalize?: string;
   autoCorrect?: CodegenTypes.WithDefault<boolean, false>;
   spellCheck?: CodegenTypes.WithDefault<boolean, false>;

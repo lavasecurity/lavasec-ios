@@ -1,6 +1,6 @@
 import {usePlusEntry} from './plus-entry';
 import {LavaPlusPage} from './SettingsScreens';
-import {Alert, localized, localizedFormat, localizedNumber} from '../app/presentation';
+import {Alert, isPresentationCancellation, localized, localizedFormat, localizedNumber} from '../app/presentation';
 import {useFilterRoute} from './filter-route';
 import {FilterShareCard,type ShareCardContent} from './FilterShareCard';
 import {SettingsSurface,SettingsIntro} from './settings-scaffold';
@@ -262,7 +262,7 @@ export function AddBlocklistScreen() {
 export function ReviewScreen() {
   const upgrade=usePlusEntry();
   const {id,ready}=useFilterRoute();
-  const {draft,savedDraft,session,app,live}=useReview();const nav=useReviewNavigation(); const [validation,setValidation]=useState<{identity:string;review?:string;error?:string}>();const [busy,setBusy]=useState(false);
+  const {draft,savedDraft,session,app,live}=useReview();const nav=useReviewNavigation(); const [validation,setValidation]=useState<{identity:string;review?:string;error?:string;cancelled?:boolean}>();const [busy,setBusy]=useState(false);
   const route=useRoute<RouteProp<ReviewRoutes,'Review'>>();const standaloneReview=route.params?.standaloneReview;
   useEffect(()=>()=>{if(app&&standaloneReview)void app.command({type:'domains.cancel',token:standaloneReview}).catch(()=>{});},[app,standaloneReview]);
   const authoritative=usePresentationAuthority(app);const focused=useIsFocused();
@@ -273,9 +273,12 @@ export function ReviewScreen() {
   const identity=JSON.stringify([authorization.current.epoch,live?.security?.readRevision,live?.security?.ownerRevision,live?.session.filterID,live?.session.activeFilterID,draft,savedDraft,session.blocklists,session.savedBlocklists,live?.filterEditing?.reviewCanConfirm,live?.filterEditing?.validation]);
   const review=authoritative&&validation?.identity===identity?validation.review:undefined;
   const error=validation?.identity===identity?validation.error:undefined;
+  const cancelled=validation?.identity===identity&&validation.cancelled;
   const setError=(message:string)=>setValidation(current=>({identity,review:current?.identity===identity?current.review:undefined,error:message}));
-  usePresentationReadiness(app,focused&&ready&&!!live?.session.editing&&!live?.filterPreparationPresented,!!review||!!error,identity);
-  useEffect(()=>{if(!authoritative||!focused||!ready||!app||!live||!live.session.editing||live.filterPreparationPresented)return;let current=true;setValidation(undefined);void app.command<string>({type:'filter.review',id:id!}).then(value=>{if(current)setValidation({identity,review:value});}).catch(error=>{if(current)setValidation({identity,error:error.message});});return()=>{current=false;};},[app,identity,live?.filterPreparationPresented,ready,id,authoritative,focused]);
+  // Cancellation settles the covered read without showing an error or granting
+  // a confirmation token. The close button remains usable after the cover lifts.
+  usePresentationReadiness(app,focused&&ready&&!!live?.session.editing&&!live?.filterPreparationPresented,!!review||!!error||!!cancelled,identity);
+  useEffect(()=>{if(!authoritative||!focused||!ready||!app||!live||!live.session.editing||live.filterPreparationPresented)return;let current=true;setValidation(undefined);void app.command<string>({type:'filter.review',id:id!}).then(value=>{if(current)setValidation({identity,review:value});}).catch(error=>{if(current)setValidation(isPresentationCancellation(error.message)?{identity,cancelled:true}:{identity,error:error.message});});return()=>{current=false;};},[app,identity,live?.filterPreparationPresented,ready,id,authoritative,focused]);
   const applying=useRef(false);const hadPreparation=useRef(false);
   useEffect(()=>{
     if(live?.filterPreparationPresented){hadPreparation.current=true;return;}
@@ -283,14 +286,13 @@ export function ReviewScreen() {
   },[live?.filterPreparationPresented,standaloneReview]);
   // The authoritative editing transition in useFilterRoute owns dismissal. A
   // second pop from the command response can also dismiss the saved filter detail.
-  const apply=()=>{if(applying.current||!ready||!app||!live||!review)return;applying.current=true;setBusy(true);void app.command({type:'filter.apply',id:id!,review,...(standaloneReview?{standaloneReview}:{})}).catch(error=>setError(error.message)).finally(()=>{applying.current=false;setBusy(false);});};
+  const apply=()=>{if(applying.current||!ready||!app||!live||!review)return;applying.current=true;setBusy(true);void app.command({type:'filter.apply',id:id!,review,...(standaloneReview?{standaloneReview}:{})}).catch(error=>{if(!isPresentationCancellation(error.message))setError(error.message);}).finally(()=>{applying.current=false;setBusy(false);});};
   const diff=previewDiff(savedDraft,draft);
   const rows=[...diff.blockedAdded.map(title=>({title,kind:'Blocked domain added'})),...diff.blockedRemoved.map(title=>({title,kind:'Blocked domain removed'})),...diff.allowedAdded.map(title=>({title,kind:'Allowed domain added'})),...diff.allowedRemoved.map(title=>({title,kind:'Allowed domain removed'}))];
   const lists=[...session.blocklists.filter(x=>!session.savedBlocklists.includes(x)).map(title=>({title,kind:'Added'})),...session.savedBlocklists.filter(x=>!session.blocklists.includes(x)).map(title=>({title,kind:'Removed'}))];
   const count=rows.length+lists.length;
   return <Sheet showsVerticalScrollIndicator footer={live?.filterEditing?.upgradeReason?<LavaActionButton title="Upgrade" disabled={!ready} onPress={()=>upgrade(live.filterEditing!.upgradeReason! as import('./plus-intents').PlusReason)}/>:<LavaActionButton title="Confirm changes" disabled={!ready||!app||!review||busy||live?.filterEditing?.reviewCanConfirm===false} onPress={apply} />}>
     {(live?.filterEditing?.validation||error)&&<Info warning title="Review cannot continue" description={live?.filterEditing?.validation||error}/>}
-    <Copy color={colors.secondaryText}>{localizedFormat('%@ will be saved locally.',localizedFormat(count===1?'%d change':'%d changes',count))}</Copy>
     {!!diff.allowedAdded.length&&<Info warning icon="exclamationmark.triangle.fill" title="Be extra careful" description="Allowed exceptions let a site through even when a blocklist would catch it." />}
     {[{title:'Blocklists',added:lists.filter(row=>row.kind==='Added').map(row=>live?.blocklistNames[row.title]??row.title),removed:lists.filter(row=>row.kind==='Removed').map(row=>live?.blocklistNames[row.title]??row.title)},
       {title:'Blocked Domains',added:diff.blockedAdded,removed:diff.blockedRemoved},{title:'Allowed Exceptions',added:diff.allowedAdded,removed:diff.allowedRemoved}].filter(group=>group.added.length||group.removed.length).map(group=><Section key={group.title} title={group.title}><Group>{[...group.added.map(title=>({title,added:true})),...group.removed.map(title=>({title,added:false}))].map(row=><View key={`${row.added}-${row.title}`} accessible accessibilityLabel={localized(row.added?'Added':'Removed')} accessibilityValue={{text:row.title}}><ListRow verbatimTitle title={row.title} leading={<Symbol name={row.added?'plus':'minus'} size={lavaTokens.toolbar.framedIconPointSize} tone={row.added?'green':'error'}/>} /></View>)}</Group></Section>)}

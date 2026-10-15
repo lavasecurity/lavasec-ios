@@ -95,6 +95,7 @@ public enum LavaSettingsDeepLink: Equatable, Sendable {
 public enum LavaAppDeepLink: Equatable, Sendable {
     case guardPanel
     case explore
+    case domainCheck
     case filters
     case activity
     case settings(LavaSettingsDeepLink?)
@@ -105,7 +106,7 @@ public enum LavaAppDeepLink: Equatable, Sendable {
     /// deeplink cannot compromise the hot path.
     package var effect: DeepLinkEffect {
         switch self {
-        case .guardPanel, .explore, .filters, .activity, .settings:
+        case .guardPanel, .explore, .domainCheck, .filters, .activity, .settings:
             return .navigate
         case .importFilters:
             return .stage
@@ -127,6 +128,9 @@ public enum LavaAppDeepLink: Equatable, Sendable {
         case "explore":
             guard components.count == 1 else { return nil }
             self = .explore
+        case "check-domain":
+            guard components.count == 1 else { return nil }
+            self = .domainCheck
         case "filters":
             guard components.count == 1 else {
                 return nil

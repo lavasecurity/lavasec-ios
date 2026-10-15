@@ -145,7 +145,8 @@ if [ "$mode" = --journeys ]; then
     RNFullAppUITests/testOnboardingJapaneseWelcomeWrapsAndWavesMoveInBothMotionModes \
     RNFullAppUITests/testGuardMascotHoldLocksPageScrollingThroughDrift
   run_phone_phase preferences-crossfade 1 RNMotionPreferenceUITests/testEnableCrossFade
-  run_phone_phase crossfade 3 \
+  run_phone_phase crossfade 4 \
+    RNFullAppUITests/testDomainEntryKeepsPageGeometryAcrossKeyboardAndForeground \
     RNFullAppUITests/testExplicitCrossFadeNavigation \
     RNFullAppUITests/testMockOnboardingRehearsesFreshSetupWithoutChangingGuard \
     RNFullAppUITests/testGuardMascotHoldLocksPageScrollingThroughDrift

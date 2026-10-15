@@ -2,8 +2,159 @@ import Foundation
 import UIKit
 import LavaSecKit
 import LavaSecAppServices
+import LavaSecFilterPipeline
 
 extension LavaAppBridge {
+    struct DomainCheckGrant {
+        let proof: String
+        let rulesRevision: String
+        let visit: String
+        let domain: String
+        let filterID: String
+        let configuration: AppConfiguration
+        let catalog: BlocklistCatalog?
+        let snapshot: LocalDomainCheckSnapshot
+    }
+
+    @objc func retireDomainCheck() {
+        domainCheckVisit = nil
+        domainCheckEpoch &+= 1
+        domainCheckGrant = nil
+    }
+
+    func domainCheckCommand(_ name: String, _ input: [String: Any]) async throws -> Any {
+        guard let visit = input["visit"] as? String, UUID(uuidString: visit) != nil else {
+            throw CommandError("Open Check a domain again.")
+        }
+        if name == "domainCheck.cancel" {
+            if domainCheckVisit == visit { retireDomainCheck() }
+            return NSNull()
+        }
+        guard ["domainCheck.query", "domainCheck.stage"].contains(name) else {
+            throw CommandError("Unknown query.")
+        }
+        let previousGrant = domainCheckGrant
+        // Own the pending read before authentication suspends. Dismissal, lock,
+        // background, or module retirement must cancel it before returning data.
+        if name != "domainCheck.stage" {
+            domainCheckVisit = visit
+            domainCheckEpoch &+= 1
+            domainCheckGrant = nil
+        }
+        let epoch = domainCheckEpoch
+        try await authorize(.filterEditing, name == "domainCheck.stage" ? "Update domains and lists" : "View filter",
+                            fresh: name == "domainCheck.stage")
+        guard domainCheckVisit == visit, domainCheckEpoch == epoch,
+              canReadPresentation(.filterEditing) else { throw CommandError("Open Check a domain again.") }
+        if input["refresh"] as? Bool != true {
+            // The shared UIKit field is outside RN TextInputState. End its
+            // editing turn for an explicit check/action so the footer is usable.
+            UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.keyWindow }
+                .first?.endEditing(true)
+        }
+        if name == "domainCheck.stage" {
+            guard let grant = previousGrant, grant.visit == visit, domainCheckVisit == visit,
+                  grant.proof == input["proof"] as? String, domainCheckGrant?.proof == grant.proof,
+                  grant.rulesRevision == domainCheckRulesRevision(), grant.filterID == model.activeFilterID,
+                  grant.snapshot.matches(configuration: model.configuration, catalog: model.currentCatalog ?? grant.catalog),
+                  let root = LavaSecAppGroup.containerURL,
+                  FilterArtifactStore(directoryURL: root).readableStore().directoryURL == grant.snapshot.directoryURL else {
+                throw CommandError("The filter changed. Check the domain again before changing its rules.")
+            }
+            guard let choice = input["decision"] as? String, ["allowed", "blocked"].contains(choice) else {
+                throw CommandError("Choose an allowed or blocked domain action.")
+            }
+            if choice == "blocked" {
+                var after = model.configuration
+                after.allowedDomains.remove(grant.domain)
+                guard !after.allowRuleSet.containsNormalized(grant.domain) else {
+                    throw CommandError("A broader allowed domain still lets this through. Change that rule in Filters first.")
+                }
+            } else if grant.snapshot.decision(for: try DomainCheckInput(grant.domain)).reason == .threatGuardrail {
+                throw CommandError("Some dangerous domains cannot be allowed.")
+            }
+            presentationSourceGeneration &+= 1
+            presentationCache.invalidate()
+            let result = model.stageDomainHistoryDomainAction(grant.domain, target: choice == "allowed" ? .allowed : .blocked)
+            guard result.isAccepted else {
+                return ["rejection": ["title": result.title, "message": result.message,
+                                      "limitReached": result.limitReached && !model.configuration.hasLavaSecurityPlus]]
+            }
+            guard let draft = model.filterEditDraft else { throw CommandError("Start editing this filter first.") }
+            let token = UUID().uuidString
+            standaloneDomainReviews[token] = StandaloneDomainReview(filterID: grant.filterID, draft: draft,
+                                                                    domainCheckBinding: grant)
+            return AuthorizedPresentationResult(value: ["id": grant.filterID, "standaloneReview": token]) { [self] in
+                guard canReadPresentation(.filterEditing),
+                      grant.snapshot.matches(configuration: model.configuration, catalog: model.currentCatalog ?? grant.catalog),
+                      model.activeFilterID == grant.filterID else {
+                    throw CommandError("The filter changed. Check the domain again before changing its rules.")
+                }
+            }
+        }
+        let authRevision = security.viewAuthenticationRevision
+        let configuration = model.configuration
+        let selection = PreparedFilterSnapshotIdentity.make(configuration: configuration, catalog: model.currentCatalog)
+        let filterID = model.activeFilterID
+        let validate: @MainActor @Sendable () throws -> Void = { [self] in
+            guard domainCheckVisit == visit, domainCheckEpoch == epoch,
+                  security.viewAuthenticationRevision == authRevision, canReadPresentation(.filterEditing),
+                  selection.hasSameConfiguration(as: model.configuration), model.activeFilterID == filterID else {
+                throw CommandError("The filter changed. Check the domain again.")
+            }
+        }
+        domainCheckGrant = nil
+        let parsed: DomainCheckInput
+        do { parsed = try DomainCheckInput(input["input"] as? String ?? "") }
+        catch { return ["status": "invalid", "message": error.localizedDescription] }
+        guard !model.sharedStateUnavailableAtLoad, !model.isFilterPreparationScreenPresented,
+              let root = LavaSecAppGroup.containerURL, let filter = model.library.filter(id: filterID) else {
+            return ["status": "unavailable", "domain": parsed.domain,
+                    "ignoredURLParts": parsed.ignoredURLParts, "repairedScheme": parsed.repairedScheme]
+        }
+        let catalog = model.currentCatalog
+        let cacheURL = model.catalogCacheURL
+        let reusable = previousGrant.flatMap { grant -> (LocalDomainCheckSnapshot, BlocklistCatalog?)? in
+            guard grant.filterID == filterID, grant.rulesRevision == domainCheckRulesRevision(),
+                  grant.snapshot.directoryURL != root,
+                  grant.snapshot.directoryURL == FilterArtifactStore(directoryURL: root).readableStore().directoryURL,
+                  grant.snapshot.matches(configuration: configuration, catalog: catalog ?? grant.catalog) else { return nil }
+            return (grant.snapshot, catalog ?? grant.catalog)
+        }
+        let loaded: (LocalDomainCheckSnapshot, BlocklistCatalog?)?
+        if let reusable { loaded = reusable } else {
+            // INV-MEM-1: retired reads wait behind the current decode, then fail their authority
+            // check before starting another large allocation. Only one decode can run.
+            loaded = try await domainCheckSnapshotLoadGate.run(validating: { try await validate() }) {
+                await Task.detached(priority: .userInitiated) { () -> (LocalDomainCheckSnapshot, BlocklistCatalog?)? in
+                    let cached = catalog ?? cacheURL.flatMap { try? BlocklistCatalogSynchronizer(cacheDirectoryURL: $0).loadCachedCatalogMetadata() }
+                    guard let snapshot = try? LocalDomainCheckSnapshot.load(configuration: configuration, catalog: cached,
+                                                                            store: FilterArtifactStore(directoryURL: root)) else { return nil }
+                    return (snapshot, cached)
+                }.value
+            }
+        }
+        try validate()
+        guard let (snapshot, effectiveCatalog) = loaded,
+              snapshot.directoryURL == FilterArtifactStore(directoryURL: root).readableStore().directoryURL,
+              snapshot.matches(configuration: model.configuration, catalog: model.currentCatalog ?? effectiveCatalog) else {
+            return ["status": "unavailable", "domain": parsed.domain,
+                    "ignoredURLParts": parsed.ignoredURLParts, "repairedScheme": parsed.repairedScheme]
+        }
+        let decision = snapshot.decision(for: parsed)
+        let proof = UUID().uuidString
+        domainCheckGrant = DomainCheckGrant(proof: proof, rulesRevision: domainCheckRulesRevision(), visit: visit, domain: parsed.domain, filterID: filterID,
+                                           configuration: configuration, catalog: effectiveCatalog, snapshot: snapshot)
+        var result: [String: Any] = ["status": "checked", "domain": parsed.domain, "decision": decision.action.rawValue,
+            "reason": decision.reason.rawValue, "filterID": filterID, "filterName": filter.name, "filterEmoji": filter.emoji, "proof": proof,
+            "ignoredURLParts": parsed.ignoredURLParts, "repairedScheme": parsed.repairedScheme,
+            "alreadyAllowed": configuration.allowedDomains.contains(parsed.domain),
+            "alreadyBlocked": configuration.blockedDomains.contains(parsed.domain)]
+        if let until = model.temporaryProtectionPauseUntil, until > Date() { result["protection"] = "paused" }
+        else if !model.configuration.protectionEnabled { result["protection"] = "off" }
+        return AuthorizedPresentationResult(value: result) { try validate() }
+    }
+
     func query(_ name: String, _ input: [String: Any]) async throws -> Any {
         SecurityController.tracePresentation("query.begin")
         defer { SecurityController.tracePresentation("query.end") }

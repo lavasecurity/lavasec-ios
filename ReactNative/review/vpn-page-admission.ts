@@ -7,7 +7,7 @@ import {useReview} from './ReviewContext';
 
 const noSubscribe=()=>()=>{};
 
-/** The native Settings grant admits this retained route; a promise never does. */
+/** The native Settings grant admits input on this retained route; a promise never does. */
 export function useVPNPageAdmission(){
   const {app,live}=useReview();const focused=useIsFocused();
   const route=useRoute();const navigation=useNavigation();
@@ -94,17 +94,13 @@ export function useVPNPageAdmission(){
     if(state&&state.routes[state.index]?.key===route.key)navigation.goBack();
   },[denied,requestScope,parentFocused,active,interactive,authorized,navigation,route.key]);
 
-  const parentPresentationAvailable=!!app&&focused&&active&&authoritative&&authorized&&interactive;
-  const canInteract=parentFocused&&parentPresentationAvailable;
+  // Admission gates input only. Paint and concealment belong to the route's
+  // shared LiveRenderBoundary and the native security choice; this hook never
+  // chooses a cover, so an all-off background keeps the ordinary page.
   // Native child ownership revokes parent input, not current authorized paint.
-  // During a read pause only an explicit opt-out may retain accepted paint;
-  // protected/unknown policy or absent grants conceal it. The independently
-  // presented child alone owns accessible privacy controls.
-  const coverAccessibilityHidden=!!childOwner.current.id;
-  const coverRequired=!parentPresentationAvailable&&!(coverAccessibilityHidden&&authorized
-    &&app?.getSnapshot?.().privacyCoverRequired===false);
+  const canInteract=parentFocused&&!!app&&active&&authoritative&&authorized&&interactive;
   const admitted=useRef(canInteract);admitted.current=canInteract;
-  return {canInteract,coverRequired,coverAccessibilityHidden,canRetry:failed===requestScope,
+  return {canInteract,canRetry:failed===requestScope,
     isAdmitted:()=>admitted.current&&current.current.app===app&&current.current.scope===scope&&AppState.currentState==='active'&&!hasPublishedNativeChild(),
     retry:()=>{setDenied(undefined);setFailed(undefined);setRetry(value=>value+1);}};
 }

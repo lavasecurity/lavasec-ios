@@ -81,6 +81,7 @@ void LavaInstallAppComponentProvider(void) {
 #ifdef LAVA_REACT_NATIVE
   if (_observerToken) [[LavaAppBridge shared] removeObserver:_observerToken];
   [[LavaAppBridge shared] retireShareCards];
+  [[LavaAppBridge shared] retireDomainCheck];
 #endif
   _observerToken = nil;
   _eventEmitterCallback = nullptr;

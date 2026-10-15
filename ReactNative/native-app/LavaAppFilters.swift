@@ -1,5 +1,6 @@
 import Foundation
 import LavaSecKit
+import LavaSecFilterPipeline
 
 extension LavaAppBridge {
     /// RN and native forms share one draft; confirmation is its only write boundary.
@@ -61,6 +62,7 @@ extension LavaAppBridge {
     struct StandaloneDomainReview {
         let filterID: String
         let draft: FilterEditDraft
+        var domainCheckBinding: DomainCheckGrant?
         var applying = false
         var cancelRequested = false
     }
@@ -251,6 +253,15 @@ extension LavaAppBridge {
             if let standaloneToken {
                 guard var owned = standaloneDomainReviews[standaloneToken], owned.filterID == id, owned.draft == review.draft else {
                     throw CommandError("The filter changed since review. Review the current changes before saving.")
+                }
+                if let binding = owned.domainCheckBinding {
+                    guard model.activeFilterID == owned.filterID,
+                          domainCheckRulesRevision() == binding.rulesRevision,
+                          binding.snapshot.matches(configuration: model.configuration, catalog: model.currentCatalog ?? binding.catalog),
+                          let root = LavaSecAppGroup.containerURL,
+                          FilterArtifactStore(directoryURL: root).readableStore().directoryURL == binding.snapshot.directoryURL else {
+                        throw CommandError("The filter changed. Check the domain again before changing its rules.")
+                    }
                 }
                 owned.applying = true
                 standaloneDomainReviews[standaloneToken] = owned
