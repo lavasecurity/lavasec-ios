@@ -1500,7 +1500,170 @@ final class RNFullAppUITests: XCTestCase {
         capture(app, "Context menu consumes holds and restores the next intentional tap")
     }
 
-    private func launch(delayedQueries: Bool = false, guardPicker: Bool = false, largeText: Bool = false, rageShake: Bool = false, paidPlan: Bool = false, retainShareCardEvidence: Bool = false, contentSizeCategory: String? = nil) -> XCUIApplication {
+    func testDomainEntryKeepsPageGeometryAcrossKeyboardAndForeground() throws {
+        let app = launch(domainCheckTrace: true, emptyDomainClipboard: true)
+        let entry = app.buttons["guard.check-domain"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 10))
+        for _ in 0..<5 where !entry.isHittable { app.swipeUp() }
+        entry.tap()
+        let header = app.navigationBars["Check a domain"]
+        let field = app.textFields["Domain or URL"].firstMatch
+        XCTAssertTrue(header.waitForExistence(timeout: 10))
+        XCTAssertTrue(field.waitForExistence(timeout: 10))
+        waitForSettledFrame(field)
+        let initialHeader = header.frame
+        let initialField = field.frame
+        let initialCheck = app.buttons["Check"].firstMatch.frame
+        func assertGeometry(_ transition: String) {
+            waitForSettledFrame(field)
+            XCTAssertEqual(header.frame.height, initialHeader.height, accuracy: 2, transition)
+            XCTAssertEqual(field.frame.minY, initialField.minY, accuracy: 2, transition)
+            XCTAssertEqual(app.buttons["Check"].firstMatch.frame.minY, initialCheck.minY, accuracy: 2, transition)
+            XCTAssertGreaterThan(field.frame.minY, header.frame.maxY, transition)
+        }
+        for cycle in 0..<3 {
+            field.tap()
+            XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+            assertGeometry("Focus cycle \(cycle) must preserve the large title and visible form")
+            for prediction in ["I", "The", "I’m"] {
+                XCTAssertFalse(app.keyboards.staticTexts[prediction].exists,
+                               "An empty domain field must not predict English prose.")
+            }
+            capture(app, "Stable URL keyboard focus \(cycle)")
+            XCUIDevice.shared.press(.home)
+            app.activate()
+            assertGeometry("Foreground cycle \(cycle) must preserve the form's position")
+            if !app.keyboards.firstMatch.exists { field.tap() }
+            let done = app.keyboards.buttons["Done"].firstMatch
+            XCTAssertTrue(done.waitForExistence(timeout: 5), app.debugDescription)
+            done.tap()
+            assertGeometry("Keyboard dismissal cycle \(cycle) must preserve the form's position")
+            XCUIDevice.shared.press(.home)
+            app.activate()
+            assertGeometry("Unfocused foreground cycle \(cycle) must preserve the form's position")
+        }
+        // Control Center resigns active without sending the app to background.
+        // Exercise the distinct interruption shown in the reported recording.
+        let system = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        for focused in [false, true] {
+            if focused { field.tap() }
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.96, dy: 0.01))
+                .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.96, dy: 0.65)))
+            let controlCenter = system.otherElements["cc-root-folder-view"].firstMatch
+            XCTAssertTrue(controlCenter.waitForExistence(timeout: 5), system.debugDescription)
+            capture(system, "Control Center interrupts domain entry focused=\(focused)")
+            system.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98))
+                .press(forDuration: 0.1, thenDragTo: system.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)))
+            XCTAssertTrue(field.waitForExistence(timeout: 5))
+            assertGeometry("Control Center return focused=\(focused) must preserve the form's position")
+        }
+        field.tap()
+        field.typeText("myhost")
+        let suffix = app.keyboards.keys[".com"].firstMatch
+        XCTAssertTrue(suffix.waitForExistence(timeout: 5), app.debugDescription)
+        suffix.tap()
+        XCTAssertEqual(field.value as? String, "myhost.com")
+        XCTAssertFalse(app.keyboards.staticTexts["I’m"].exists)
+        capture(app, "Domain suffix key inserts .com without prose predictions")
+        XCUIDevice.shared.press(.home)
+        app.activate()
+        XCTAssertEqual(field.value as? String, "myhost.com", "Foreground return preserves the native edit buffer.")
+        assertGeometry("Returning with an edited domain preserves the form's position")
+    }
+
+    func testGuardDomainCheckParsesAURLAndCancelsWithoutSaving() throws {
+        let app = launch(domainCheckTrace: true)
+        let entry = app.buttons["guard.check-domain"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 10), app.debugDescription)
+        for _ in 0..<5 where !entry.isHittable { app.swipeUp() }
+        capture(app, "Guard with one-line domain check row")
+        entry.tap()
+        let header = app.navigationBars["Check a domain"]
+        XCTAssertTrue(header.waitForExistence(timeout: 10), app.debugDescription)
+        waitForSettledFrame(header)
+        XCTAssertGreaterThan(header.frame.height, 70, "The checker uses the ordinary large-title page.")
+        XCTAssertFalse(app.buttons["Close"].exists)
+        XCTAssertFalse(app.buttons["Paste"].exists)
+        XCTAssertFalse(app.staticTexts["Allowed"].exists)
+        let field = app.textFields["Domain or URL"].firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 10))
+        capture(app, "Empty large-title domain checker")
+        field.tap()
+        capture(app, "Empty domain field with system keyboard suggestions")
+        field.typeText("https//sites.google.com/fixture?private=value")
+        XCTAssertFalse(app.staticTexts["Allowed"].exists, "Entering text never starts a check.")
+        capture(app, "Domain checker with native keyboard suggestions")
+        app.buttons["Check"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Domain checked: sites.google.com"].firstMatch.waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["Allowed"].firstMatch.waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertFalse(app.staticTexts["Only the domain is checked. The rest of the link is ignored."].firstMatch.exists)
+        XCTAssertFalse(app.buttons["Cancel"].exists)
+        capture(app, "Guard domain check with normalized hostname")
+        XCUIDevice.shared.press(.home)
+        app.activate()
+        XCTAssertTrue(app.staticTexts["Domain checked: sites.google.com"].firstMatch.waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["Allowed"].firstMatch.exists, app.debugDescription)
+        capture(app, "Domain check retained after background and resume")
+        let clear = field.buttons["Clear text"].firstMatch
+        XCTAssertTrue(clear.waitForExistence(timeout: 5), app.debugDescription)
+        clear.tap()
+        XCTAssertFalse(app.staticTexts["Allowed"].firstMatch.exists)
+        XCTAssertFalse(app.buttons["Allow this"].exists)
+        XCTAssertFalse(app.buttons["Block this"].exists)
+        XCTAssertFalse(app.buttons["Check"].firstMatch.isEnabled)
+        field.tap()
+        field.typeText("https//typed.example/path")
+        app.buttons["Check"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Domain checked: typed.example"].firstMatch.waitForExistence(timeout: 15), app.debugDescription)
+        clear.tap()
+        field.tap()
+        field.typeText("https://blocked.example/path")
+        app.buttons["Check"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Blocked"].firstMatch.waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertFalse(app.staticTexts["An allowed result does not guarantee the site is safe."].exists)
+        capture(app, "Blocked domain check with canonical verdict glyph")
+        clear.tap()
+        field.tap()
+        field.typeText("https://to-block.example/path")
+        app.buttons["Check"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Domain checked: to-block.example"].firstMatch.waitForExistence(timeout: 15))
+        app.buttons["Block this"].tap()
+        let reviewHeader = fullSheetHeader(app, title: "Review")
+        XCTAssertTrue(reviewHeader.waitForExistence(timeout: 10))
+        let groupTitle = app.staticTexts["Blocked domains"].firstMatch
+        XCTAssertTrue(groupTitle.waitForExistence(timeout: 10))
+        let initialGap = groupTitle.frame.minY - reviewHeader.frame.maxY
+        // Observe the content through the end of the sheet transition.
+        for _ in 0..<5 {
+            XCTAssertEqual(groupTitle.frame.minY - reviewHeader.frame.maxY, initialGap, accuracy: 2,
+                           "The shared sheet scaffold must not adjust its offset after opening.")
+        }
+        capture(app, "Stable Block this Review sheet")
+        reviewHeader.buttons["Close"].tap()
+        XCTAssertTrue(app.navigationBars["Check a domain"].waitForExistence(timeout: 10))
+        app.navigationBars["Check a domain"].buttons["Back"].firstMatch.tap()
+        XCTAssertTrue(entry.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertFalse(app.navigationBars["Check a domain"].exists)
+        XCUIDevice.shared.system.open(URL(string: "lavasecurity://check-domain?domain=private.example&action=block")!)
+        XCTAssertTrue(app.navigationBars["Check a domain"].waitForExistence(timeout: 10))
+        XCTAssertTrue(["", "example.com"].contains(app.textFields["Domain or URL"].firstMatch.value as? String ?? ""))
+        XCTAssertFalse(app.staticTexts["Blocked"].exists)
+        XCTAssertFalse(app.buttons["Block this"].exists)
+        capture(app, "Domain checker deep link opens an empty page above Guard")
+        let linkedField = app.textFields["Domain or URL"].firstMatch
+        linkedField.tap()
+        linkedField.typeText("repeat.example")
+        app.buttons["Check"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Domain checked: repeat.example"].firstMatch.waitForExistence(timeout: 15))
+        XCUIDevice.shared.system.open(URL(string: "lavasecurity://check-domain")!)
+        XCTAssertTrue(app.navigationBars["Check a domain"].waitForExistence(timeout: 10))
+        XCTAssertTrue(["", "example.com"].contains(app.textFields["Domain or URL"].firstMatch.value as? String ?? ""))
+        XCTAssertFalse(app.staticTexts["Allowed"].exists)
+        XCTAssertFalse(app.buttons["Allow this"].exists)
+        capture(app, "Repeated domain-check link replaces the previous visit")
+    }
+
+    private func launch(domainCheckTrace: Bool = false, emptyDomainClipboard: Bool = false, delayedQueries: Bool = false, guardPicker: Bool = false, largeText: Bool = false, rageShake: Bool = false, paidPlan: Bool = false, retainShareCardEvidence: Bool = false, contentSizeCategory: String? = nil) -> XCUIApplication {
         XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()
         // Skip onboarding only for this test process; retain real app controllers,
@@ -1513,6 +1676,11 @@ final class RNFullAppUITests: XCTestCase {
         } else if largeText { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
         app.launchEnvironment["LAVA_UI_TEST_RESET_SECURITY"] = "1"
         app.launchEnvironment["LAVA_UI_TEST_PLAN"] = paidPlan ? "paid" : "free"
+        if domainCheckTrace {
+            app.launchEnvironment["LAVA_UI_TEST_TRACE_PRESENTATION"] = "1"
+            app.launchEnvironment["LAVA_UI_TEST_DOMAIN_CLIPBOARD"] = emptyDomainClipboard ? "empty" : "1"
+            app.launchEnvironment["LAVA_UI_TEST_DOMAIN_FILTER"] = "1"
+        }
         if delayedQueries { app.launchEnvironment["LAVA_UI_TEST_DELAY_QUERIES"] = "1" }
         if guardPicker { app.launchEnvironment["LAVA_UI_TEST_GUARD_PICKER"] = "1" }
         if rageShake { app.launchArguments.append("-lava-trigger-rage-shake") }

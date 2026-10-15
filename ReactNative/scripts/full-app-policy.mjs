@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync} from 'node:fs';
 export const fullAppSources = [
-  ...['LavaNativePageView.mm','LavaSwitchView.mm','ActivityDateBridge.swift','LavaAppearanceModule.mm','LavaChoiceView.mm','LavaControlTrackingGuard.m','LavaContextMenuView.mm','LavaDecorationContent.swift','LavaSymbolPalette.swift','LavaNativeContainment.swift','LavaDecorationView.mm','LavaReviewModule.mm','BundledNarrationPlayer.swift','LavaSliderView.mm','LavaTextFieldView.mm','ReviewDomainValidator.swift','ReviewReferenceContent.swift','LavaShareCardSurfaceView.mm','LavaShareQrView.mm','LavaShareCardCapture.swift'].map(file=>`ios/LavaSecUIReview/${file}`),
+  ...['LavaScrollView.mm','LavaNativePageView.mm','LavaSwitchView.mm','ActivityDateBridge.swift','LavaAppearanceModule.mm','LavaChoiceView.mm','LavaControlTrackingGuard.m','LavaContextMenuView.mm','LavaDecorationContent.swift','LavaSymbolPalette.swift','LavaNativeContainment.swift','LavaDecorationView.mm','LavaReviewModule.mm','BundledNarrationPlayer.swift','LavaSliderView.mm','LavaTextFieldView.mm','ReviewDomainValidator.swift','ReviewReferenceContent.swift','LavaShareCardSurfaceView.mm','LavaShareQrView.mm','LavaShareCardCapture.swift'].map(file=>`ios/LavaSecUIReview/${file}`),
   ...['LavaNativePageContent.swift','AppearanceBridge.swift','LavaAppBridge.swift','LavaAppGuard.swift','LavaAppFilters.swift','LavaAppFlows.swift','LavaAppFeedback.swift','LavaAppWireGuardEditor.swift','LavaAppOnboarding.swift','LavaAppHost.swift','LavaAppModule.mm','LavaAppPresentation.swift','LavaAppQueries.swift','LavaAppSettings.swift','LavaAppShareCard.swift'].map(file=>`native-app/${file}`),
 ];
 const shareCardTestName='LavaRNShareCardTests';

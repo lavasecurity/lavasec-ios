@@ -1,9 +1,10 @@
 import {act, fireEvent, render, screen} from '@testing-library/react-native';
 import {ScrollView,StyleSheet,Text, TextInput, View,type ViewStyle} from 'react-native';
-import {useState} from 'react';
+import {createRef,useState} from 'react';
 import {SafeAreaInsetsContext} from 'react-native-safe-area-context';
+import {HeaderHeightContext} from '@react-navigation/elements';
 import {PresentationContext} from '../app/presentation';
-import {AccessorySlot,AdaptivePair,Control, DomainInput, Group, ListRow, StableVariants,Toggle} from '../review/scaffold';
+import {AccessorySlot,AdaptivePair,Control, DomainInput, Group, ListRow,Sheet, StableVariants,Toggle} from '../review/scaffold';
 import {DisclosureRow,Row,RowAccessory,RowContent,Screen} from '../review/primitives';
 import {StoryColumns,StoryLink} from '../review/story-scaffold';
 import {SettingsControl,SettingsDisclosure,SettingsGuardPreview,SettingsIntro,SettingsSurface} from '../review/settings-scaffold';
@@ -11,7 +12,8 @@ import {LavaControlContent,LavaRowLabel,LavaToggleRow} from '../src';
 import {foundation} from '../src/foundation';
 
 jest.mock('react-native-safe-area-context',()=>({SafeAreaProvider:require('react-native').View,SafeAreaView:require('react-native').View,SafeAreaInsetsContext:require('react').createContext(null)}));
-jest.mock('@react-navigation/native',()=>({useNavigation:()=>({}),useIsFocused:()=>true}));
+const mockNavigation={setOptions:jest.fn(),addListener:jest.fn()};
+jest.mock('@react-navigation/native',()=>({useNavigation:()=>mockNavigation,useIsFocused:()=>true}));
 jest.mock('../specs/LavaTextFieldNativeComponent',()=>({__esModule:true,default:require('react-native').View}));
 jest.mock('../specs/LavaDecorationNativeComponent',()=>({__esModule:true,default:require('react-native').View}));
 
@@ -333,4 +335,25 @@ test('the page scroll view is the screen root, so UIKit keeps driving the large 
   expect(Array.isArray(root)).toBe(false);
   expect((root as {type:string}|null)?.type).toBe('RCTScrollView');
   expect((root as {props:{testID?:string}}).props.testID).toBe('screen.scroll');
+});
+
+// Regression for Review's visible post-presentation jump: a sheet must not
+// issue a scroll correction when UIKit finishes its opening transition.
+test('ordinary forms leave opening and header changes to UIKit without a late scroll jump',()=>{
+  const listeners=new Map<string,(event:any)=>void>();
+  mockNavigation.addListener.mockImplementation((name,listener)=>{listeners.set(name,listener);return()=>listeners.delete(name);});
+  const ref=createRef<any>();
+  const content=(height:number)=><HeaderHeightContext.Provider value={height}><Sheet scrollRef={ref}><Text>Blocked domains</Text></Sheet></HeaderHeightContext.Provider>;
+  render(content(80));
+  const scroll=screen.UNSAFE_getByType(ScrollView);
+  const scrollTo=jest.spyOn(ref.current,'scrollTo');
+  act(()=>listeners.get('transitionEnd')?.({data:{closing:false}}));
+  expect(scrollTo).not.toHaveBeenCalled();
+  expect(scroll.props.contentInsetAdjustmentBehavior).toBe('automatic');
+  expect(scroll.props.contentOffset).toBeUndefined();
+  expect(scroll.props.contentInset).toBeUndefined();
+  screen.rerender(content(64));
+  act(()=>listeners.get('transitionEnd')?.({data:{closing:false}}));
+  expect(screen.UNSAFE_getByType(ScrollView)).toBe(scroll);
+  expect(scrollTo).not.toHaveBeenCalled();
 });

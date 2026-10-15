@@ -1622,14 +1622,6 @@ final class AppViewModel: ObservableObject {
         )
     }
 
-    var showsDNSProviderRecovery: Bool {
-        protectionStatus == .connected(.dnsSlow)
-    }
-
-    var showsChainedConfigurationRecovery: Bool {
-        configuration.chainedUpstreamEnabled && chainedConfigurationStartIssue != nil
-    }
-
     private var guardPanelMessageSelection: (message: String, isError: Bool, isChainedFailureMarker: Bool)? {
         let permissionMessage = !isVPNConfigurationInstalled && vpnMessage == Self.vpnPermissionPromptMessage
             ? vpnMessage : nil

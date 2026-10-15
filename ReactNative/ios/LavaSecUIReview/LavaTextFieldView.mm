@@ -150,6 +150,8 @@ static BOOL mayEditWireGuardName(const LavaTextFieldProps &props) {
   if (!next.editable || !nameEditable) { [_field resignFirstResponder]; [_multiline resignFirstResponder]; }
   _field.keyboardType = next.keyboardType == "email-address" ? UIKeyboardTypeEmailAddress
     : next.keyboardType == "url" || (!ordinary && next.keyboardType.empty()) ? UIKeyboardTypeURL : UIKeyboardTypeDefault;
+  _field.textContentType = next.textContentType == "URL" ? UITextContentTypeURL : nil;
+  _multiline.textContentType = _field.textContentType;
   _field.autocapitalizationType = next.autoCapitalize == "words" ? UITextAutocapitalizationTypeWords
     : next.autoCapitalize == "sentences" ? UITextAutocapitalizationTypeSentences : UITextAutocapitalizationTypeNone;
   _multiline.autocapitalizationType = _field.autocapitalizationType;
@@ -159,7 +161,8 @@ static BOOL mayEditWireGuardName(const LavaTextFieldProps &props) {
   _multiline.spellCheckingType = _field.spellCheckingType;
   _field.smartInsertDeleteType = next.smartInsertDelete ? UITextSmartInsertDeleteTypeDefault : UITextSmartInsertDeleteTypeNo;
   _multiline.smartInsertDeleteType = _field.smartInsertDeleteType;
-  _field.clearButtonMode = next.clearButtonMode == "while-editing" ? UITextFieldViewModeWhileEditing : UITextFieldViewModeNever;
+  _field.clearButtonMode = next.clearButtonMode == "always" ? UITextFieldViewModeAlways
+    : next.clearButtonMode == "while-editing" ? UITextFieldViewModeWhileEditing : UITextFieldViewModeNever;
   if (next.selectionColor) {
     _field.tintColor = RCTUIColorFromSharedColor(next.selectionColor);
     _multiline.tintColor = _field.tintColor;

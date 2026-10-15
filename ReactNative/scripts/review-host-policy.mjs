@@ -16,6 +16,7 @@ export const reviewSources = [
   '../native-app/LavaAppModule.h', '../native-app/LavaAppModule.mm',
   'LavaSecUIReview/LavaContextMenuView.h', 'LavaSecUIReview/LavaContextMenuView.mm',
   'LavaSecUIReview/LavaNativePageView.h', 'LavaSecUIReview/LavaNativePageView.mm', 'LavaSecUIReview/LavaSwitchView.h', 'LavaSecUIReview/LavaSwitchView.mm', 'LavaSecUIReview/LavaSliderView.h', 'LavaSecUIReview/LavaSliderView.mm', 'LavaSecUIReview/ReviewReferenceContent.swift',
+  'LavaSecUIReview/LavaScrollView.h', 'LavaSecUIReview/LavaScrollView.mm',
 ];
 export const testSource = 'LavaSecUIReviewUITests/ReviewLifecycleTests.swift';
 const sourceEntries = [...reviewSources.slice(0, 5).map(path => ({path})),

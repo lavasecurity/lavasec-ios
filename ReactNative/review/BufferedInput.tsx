@@ -18,7 +18,7 @@ export function BufferedInput({ref,value,defaultValue,resetRevision=0,characterL
   if(Platform.OS==='ios')return <NativeInput ref={input} testID={props.testID} accessibilityLabel={props.accessibilityLabel}
     inputLabel={props.accessibilityLabel??''} placeholder={props.placeholder??''} value={value??defaultValue??''} resetRevision={resetRevision}
     kind={nativeKind??(props.multiline?'prose':props.clearButtonMode?'search':'plain')} ownerID={ownerID} editable={props.editable!==false}
-    keyboardType={props.keyboardType} autoCapitalize={props.autoCapitalize} autoCorrect={props.autoCorrect} spellCheck={props.spellCheck} smartInsertDelete={props.smartInsertDelete} clearButtonMode={props.clearButtonMode} characterLimit={characterLimit} selectionColor={props.selectionColor}
+    keyboardType={props.keyboardType} textContentType={props.textContentType} autoCapitalize={props.autoCapitalize} autoCorrect={props.autoCorrect} spellCheck={props.spellCheck} smartInsertDelete={props.smartInsertDelete} clearButtonMode={props.clearButtonMode} characterLimit={characterLimit} selectionColor={props.selectionColor}
     fontPointSize={StyleSheet.flatten(props.style)?.fontSize}
     lineHeight={StyleSheet.flatten(props.style)?.lineHeight}
     textColor={StyleSheet.flatten(props.style)?.color} placeholderTextColor={props.placeholderTextColor}

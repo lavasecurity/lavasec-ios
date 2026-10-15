@@ -4,6 +4,7 @@ import UIKit
 @preconcurrency import NetworkExtension
 import LavaSecKit
 import LavaSecAppServices
+import LavaSecFilterPipeline
 import LavaSecPresentation
 
 @MainActor
@@ -28,6 +29,10 @@ final class LavaAppBridge: NSObject, ObservableObject {
     var shareCardForegroundEpoch: UInt64 = 0
     var shareCardModuleEpoch: UInt64 = 0
     var standaloneDomainReviews: [String: StandaloneDomainReview] = [:]
+    var domainCheckVisit: String?
+    var domainCheckEpoch: UInt64 = 0
+    var domainCheckGrant: DomainCheckGrant?
+    let domainCheckSnapshotLoadGate = SnapshotCompileGate()
     @Published var flow: LavaAppNativeFlow? {
         didSet {
             if let oldValue, oldValue.usesReactPresentation, oldValue.id != flow?.id { closingForegroundIDs.insert(oldValue.id) }
@@ -100,6 +105,34 @@ final class LavaAppBridge: NSObject, ObservableObject {
         #endif
         PrivateImportFiles.purgeExpired()
         #if DEBUG && targetEnvironment(simulator)
+        // Seed UIKit's actual pasteboard in the target process: the XCTest runner
+        // and host clipboard transport are unreliable on iOS 27 simulators.
+        // This fixed public fixture is never compiled into device/release builds.
+        if ProcessInfo.processInfo.environment["LAVA_UI_TEST_DOMAIN_CLIPBOARD"] == "1" {
+            UIPasteboard.general.string = "https//sites.google.com/fixture?private=value"
+        } else if ProcessInfo.processInfo.environment["LAVA_UI_TEST_DOMAIN_CLIPBOARD"] == "empty" {
+            UIPasteboard.general.items = []
+        }
+        if ProcessInfo.processInfo.environment["LAVA_UI_TEST_DOMAIN_FILTER"] == "1" {
+            // The task-owned simulator needs a published filter, not merely a
+            // parsed hostname. Publish one public manual rule through the real
+            // persistence funnel, without fetching blocklists or enabling VPN.
+            var fixture = model.configuration
+            fixture.enabledBlocklistIDs = []
+            fixture.customBlocklists = []
+            fixture.blockedDomains = ["blocked.example"]
+            fixture.allowedDomains = []
+            fixture.protectionEnabled = false
+            model.configuration = fixture
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                do {
+                    let prepared = try await self.model.prepareFilterSnapshot(for: fixture, catalogCacheOnly: true)
+                    _ = try await self.model.persistSharedState(preparedSnapshot: prepared.snapshot, schedulesAutomaticBackup: false)
+                }
+                catch { SecurityController.tracePresentation("domainCheck.fixture.failed") }
+            }
+        }
         // Each native UI journey declares its plan so a previous paid fixture
         // cannot leak persisted entitlement into a later free-plan scenario.
         if let plan = ProcessInfo.processInfo.environment["LAVA_UI_TEST_PLAN"], ["free", "paid"].contains(plan) {
@@ -180,6 +213,7 @@ final class LavaAppBridge: NSObject, ObservableObject {
         }.store(in: &subscriptions)
         NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification).sink { [weak self] _ in
             MainActor.assumeIsolated {
+                self?.retireDomainCheck()
                 self?.presentationCache.invalidate()
                 self?.concealPresentation()
                 self?.filterShareability.reset()
@@ -188,6 +222,7 @@ final class LavaAppBridge: NSObject, ObservableObject {
         }.store(in: &subscriptions)
         NotificationCenter.default.publisher(for: UIApplication.protectedDataWillBecomeUnavailableNotification).sink { [weak self] _ in
             MainActor.assumeIsolated {
+                self?.retireDomainCheck()
                 self?.security.protectedDataWillBecomeUnavailable()
                 self?.shareCardPrivacyChanged(isBlocked: true)
                 self?.presentationCache.invalidate()
@@ -270,7 +305,7 @@ final class LavaAppBridge: NSObject, ObservableObject {
         // pause, even before UIKit flips its availability bit. These metadata
         // markers never compose private fields or recreate a display frame.
         revision += 1
-        let value = json(["schema": 1, "fullApp": true, "revision": revision,
+        let value = json(["schema": 1, "fullApp": true, "domainCheckAvailable": true, "revision": revision,
                           "presentationBlocked": true, "presentationToken": presentationReveal.token, "backgroundPrivacyCoverRequired": security.backgroundPrivacyCoverRequired,
                           "authenticationInProgress": false, "presentationRevoked": true,
                           "security": ["ownerRevision": presentationOwnerRevision.revision(for: model.account.accountAuthState.connections.all.map { $0.session.userID })]])
@@ -293,7 +328,7 @@ final class LavaAppBridge: NSObject, ObservableObject {
         // Direct snapshot calls are readers too. A locked/inactive caller gets no
         // private projection, rather than trusting JavaScript to discard fields.
         guard canReadPresentation(.appUnlock) else {
-            return json(["schema": 1, "fullApp": true, "revision": revision, "presentationBlocked": true, "presentationToken": presentationReveal.token,
+            return json(["schema": 1, "fullApp": true, "domainCheckAvailable": true, "revision": revision, "presentationBlocked": true, "presentationToken": presentationReveal.token,
                          "backgroundPrivacyCoverRequired": security.backgroundPrivacyCoverRequired,
                          "authenticationInProgress": authenticationInProgressForPresentation,
                          "presentationRevoked": UIApplication.shared.applicationState == .background || !security.hasCurrentAuthorization(for: .appUnlock),
@@ -319,7 +354,7 @@ final class LavaAppBridge: NSObject, ObservableObject {
         let backupNeedsAttention: Bool
         if case .failed = m.backup.encryptedBackupState { backupNeedsAttention = true } else { backupNeedsAttention = false }
         var value: [String: Any] = [
-            "schema": 1, "revision": revision, "fullApp": true,
+            "schema": 1, "revision": revision, "fullApp": true, "domainCheckAvailable": true,
             "backgroundPrivacyCoverRequired": security.backgroundPrivacyCoverRequired,
             "authenticationInProgress": authenticationInProgressForPresentation,
             "onboardingSetup": onboardingVisit?.snapshot as Any? ?? NSNull(),
@@ -332,8 +367,7 @@ final class LavaAppBridge: NSObject, ObservableObject {
                 "action": m.protectionButtonTitle.lavaLocalized, "disabled": m.protectionPrimaryActionIsDisabled,
                 "configuring": m.isConfiguringVPN, "quiet": m.protectionButtonTint == LavaStyle.quietControl, "pauseOptions": ProtectionPauseDuration.allCases.map { ["minutes": Int($0.duration / 60), "title": $0.label] as [String: Any] },
                 "status": m.vpnStatus.rawValue, "paused": m.isProtectionTemporarilyPaused,
-                "canPause": m.showsTemporaryProtectionPauseControls, "needsVPNSetup": m.showsChainedConfigurationRecovery,
-                "needsDNSProviderChange": m.showsDNSProviderRecovery,
+                "canPause": m.showsTemporaryProtectionPauseControls,
                 "mood": guardMood(), "rules": m.protectedRuleCount, "activity": m.reports.guardActivityRowStat.lavaLocalized,
                 "today": ["countsEnabled": m.configuration.keepFilteringCounts,
                           "allowed": m.configuration.keepFilteringCounts ? today.allowedCount : 0,
@@ -421,6 +455,9 @@ final class LavaAppBridge: NSObject, ObservableObject {
             "icon": detail?.isEmpty == true ? "exclamationmark.shield.fill" : active ? m.blocklistCatalogFreshnessSystemImage : "pause.circle",
             "label": active ? "rules in effect" : "rules", "warning": detail?.isEmpty == true || active && !m.blocklistCatalogIsFresh]
         value["filterPreparationPresented"] = m.isFilterPreparationScreenPresented
+        if canReadPresentation(.filterEditing) {
+            value["domainCheckRevision"] = domainCheckRulesRevision()
+        }
         value["filterEditing"] = ["canSave": m.filterDraftHasChanges, "reviewCanConfirm": m.filterDrafts.review.canConfirm, "validation": m.filterDraftValidationMessage ?? "", "upgradeReason": m.filterDraftUpgradeReason ?? "", "refreshing": m.catalog.isSyncInFlight,
             "lists": m.stagedBlocklistIDsForDisplay().map { id in
                 ["id": id, "pending": m.isBlocklistPendingRemoval(id), "undo": m.isBlocklistPendingRemoval(id) || (m.isBlocklistNewInDraft(id) && !m.isCustomBlocklist(id))] as [String: Any]
@@ -629,6 +666,7 @@ final class LavaAppBridge: NSObject, ObservableObject {
                         try privateRead.validate()
                     } catch {
                         if name == "domains.stage" { discardStandaloneDomainResult(privateRead.value) }
+                        if name == "domainCheck.stage" { discardStandaloneDomainResult(privateRead.value) }
                         throw error
                     }
                     result = privateRead.value
@@ -640,12 +678,22 @@ final class LavaAppBridge: NSObject, ObservableObject {
                     completion(json(["result": result], sortedKeys: false), nil)
                     return
                 }
+                if name == "domainCheck.cancel" {
+                    completion(json(["result": result], sortedKeys: false), nil)
+                    return
+                }
                 let projection = publish()
                 completion(json(["snapshot": try JSONSerialization.jsonObject(with: Data(projection.utf8)), "result": result], sortedKeys: false), nil)
             } catch { completion(nil, error.localizedDescription) }
         }
     }
+    func domainCheckRulesRevision() -> String {
+        "\(presentationLibraryDisplayRevision):\(model.activeFilterID):\(model.library.filter(id: model.activeFilterID)?.lastCompiledToken ?? ""):\(model.configuration.limits.maxFilterRules):\(model.configuration.protectionEnabled):\(model.isProtectionTemporarilyPaused)"
+    }
+
     func perform(_ name: String, _ input: [String: Any]) async throws -> Any {
+        // Clipboard/check visits are ephemeral reads and must never enter the reusable query cache.
+        if name.hasPrefix("domainCheck.") { return try await domainCheckCommand(name, input) }
         if name.hasPrefix("onboarding.") { return try await onboardingCommand(name, input) }
         if name == "domains.cancel" {
             if let token = input["token"] as? String { cancelStandaloneDomainReview(token) }

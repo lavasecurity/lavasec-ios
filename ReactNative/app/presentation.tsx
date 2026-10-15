@@ -54,10 +54,13 @@ export function Text({verbatim=false,responsive=true,...props}:TextProps&{verbat
     {...(scale===undefined?{}:{allowFontScaling:false,dynamicTypeRamp:undefined,style:[props.style,{fontSize:(style?.fontSize??17)*scale*windowScale,...(style?.lineHeight?{lineHeight:style.lineHeight*scale*windowScale}:{})}]})}>{verbatim?props.children:localizedChildren(props.children)}</NativeText>;
 }
 type AlertOptions=NonNullable<Parameters<typeof NativeAlert.alert>[3]>&{verbatimTitle?:boolean;verbatimMessage?:boolean};
+export function isPresentationCancellation(message:string):boolean {
+  return message==='Authentication cancelled.'||message==='Read access changed.';
+}
 export const Alert:{alert:(title:string,message?:string,buttons?:Parameters<typeof NativeAlert.alert>[2],options?:AlertOptions)=>void;prompt:typeof NativeAlert.prompt} = {
   alert:(title,message,buttons,options)=>{
     // Cancelled authorization or a revoked read epoch silently retires the action.
-    if(message==='Authentication cancelled.'||message==='Read access changed.')return;
+    if(message&&isPresentationCancellation(message))return;
     const {verbatimTitle,verbatimMessage,...nativeOptions}=options??{};
     NativeAlert.alert(title&&!verbatimTitle?localized(title):title,message&&!verbatimMessage?localized(message):message,buttons?.map(button=>({...button,text:button.text?localized(button.text):button.text})),options?nativeOptions:undefined);
   },

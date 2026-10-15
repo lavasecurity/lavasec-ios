@@ -167,15 +167,7 @@ export function FilterIdentity({name,emoji,rules,status,icon,warning=false,inact
   </StorySurface>;
 }
 export function ExploreInvitation({onPress,attention=false}: {onPress:()=>void;attention?:boolean}){
-  const s=useScaffoldStyles(windowBase_s);
-  return <Pressable testID="guard.explore" accessibilityRole="button" accessibilityLabel={localized('Explore')}
-    accessibilityHint={attention?`${localized('New')}. ${localized('Learn more about how Lava works')}`:localized('Learn more about how Lava works')} onPress={onPress} style={({pressed})=>[s.surface,s.tileInset,s.invitationInset,pressed&&s.dim]}>
-    <StoryNavigationLine testID="guard.explore.accessory" attention={attention}><Copy role="caption" color={colors.secondaryText}>Explore</Copy></StoryNavigationLine>
-    <View style={s.invitationPath} accessible={false} accessibilityElementsHidden>
-      <Symbol name="iphone" size={30} tone="secondary"/><View style={s.invitationLine}/><Symbol name="lava.shield.fill" size={36}/><View style={s.invitationLine}/><Symbol name={connectionParts.dns.symbol} size={30} tone="secondary"/>
-    </View>
-    <Copy role="supporting" color={colors.secondaryText}>Learn more about how Lava works</Copy>
-  </Pressable>;
+  return <Row intent="page" testID="guard.explore" title="Explore how Lava works" icon="safari" attention={attention} onPress={onPress}/>;
 }
 export function ConnectionPanel({stages,onSelect,onExplore}:{stages:readonly ConnectionStage[];onSelect:(stage:ConnectionStage)=>void;onExplore:()=>void}){
   const {width,height,landscape}=useWindowLayout();const scale=useTextScale();const expanded=landscape&&width/scale>=foundation.layout.wideThreshold;
@@ -406,9 +398,7 @@ const s=StyleSheet.create({
   // a wrapping filter name makes the shared row taller. No text height is fixed.
   summaryFooter:{marginTop:'auto'},
   summaryHeading:{flexDirection:'row',alignItems:'flex-start',gap:space.sm},
-  invitationInset:{gap:space.sm},
   nodeDiscovery:{position:'absolute',top:2,right:2},
-  invitationPath:{alignSelf:'center',width:'100%',maxWidth:320,paddingHorizontal:space.lg,flexDirection:'row',alignItems:'center',gap:space.md,minHeight:40},invitationLine:{flex:1,height:1,backgroundColor:colors.safeGreen,opacity:0.35},
   pathHorizontal:{flexDirection:'row',alignItems:'flex-start'},compactStep:{flex:1,minWidth:44},compactNode:{minHeight:80,gap:space.xs,alignItems:'center',paddingVertical:space.xs,paddingHorizontal:space.xs,borderWidth:connectionStrokeWidth,borderColor:'transparent',borderRadius:foundation.radius.control},
   horizontalLine:{height:connectionStrokeWidth,backgroundColor:colors.safeGreen,flex:0.25,marginTop:28},
   node:{width:44,height:44,borderRadius:22,alignItems:'center',justifyContent:'center'},

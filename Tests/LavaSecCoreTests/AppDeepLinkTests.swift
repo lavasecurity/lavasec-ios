@@ -29,6 +29,19 @@ final class AppDeepLinkTests: XCTestCase {
         }
     }
 
+    func testDomainCheckOpensOnlyItsOwnPage() throws {
+        for url in ["lavasecurity://check-domain", "https://lavasecurity.app/app/check-domain", "https://lavasecurity.app/app/check-domain/"] {
+            let route = LavaAppDeepLink(url: try XCTUnwrap(URL(string: url)))
+            XCTAssertEqual(route, .domainCheck)
+            XCTAssertEqual(route?.effect, .navigate)
+        }
+        for url in ["lavasecurity://check-domain/allow", "https://lavasecurity.app/app/check-domain/block", "https://example.com/app/check-domain"] {
+            XCTAssertNil(LavaAppDeepLink(url: try XCTUnwrap(URL(string: url))))
+        }
+        // Parameters cannot prefill, check or stage a rule: the route has no payload.
+        XCTAssertEqual(LavaAppDeepLink(url: try XCTUnwrap(URL(string: "lavasecurity://check-domain?domain=private.example&action=block"))), .domainCheck)
+    }
+
     func testParsesUniversalAppRoutes() throws {
         XCTAssertEqual(
             LavaAppDeepLink(url: try XCTUnwrap(URL(string: "https://lavasecurity.app/app/guard"))),

@@ -29,6 +29,21 @@ public actor SnapshotCompileGate {
     /// Creates an empty compile queue.
     public init() {}
 
+    /// Validates a queued request before and after its body, within its serialized slot.
+    /// Failed validation skips stale work or releases a retired result before the next body
+    /// starts, without breaking the queue.
+    public func run<T: Sendable>(
+        validating validate: @Sendable @escaping () async throws -> Void,
+        _ operation: @Sendable @escaping () async throws -> T
+    ) async throws -> T {
+        try await run {
+            try await validate()
+            let result = try await operation()
+            try await validate()
+            return result
+        }
+    }
+
     /// Runs `operation` after every previously submitted operation has finished, and returns
     /// its result. Preserves throwing: a body that throws rethrows to its own caller without
     /// breaking the chain (the tail task itself never throws — it captures the outcome).

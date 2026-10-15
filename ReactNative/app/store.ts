@@ -217,7 +217,7 @@ export class AppStore {
       // Owner retirement releases native work when a concealed body unmounts.
       // It grants no new read/action authority; replies still follow epoch and
       // native snapshot fences below.
-      const retiresOwner=['vpn.cancel','customEntry.dismiss','foreground.dismiss','domains.cancel','filter.close','purchase.clearMessage'].includes(command.type)
+      const retiresOwner=['vpn.cancel','customEntry.dismiss','foreground.dismiss','domains.cancel','domainCheck.cancel','filter.close','purchase.clearMessage'].includes(command.type)
         ||command.type==='activity.visibility'&&!command.visible;
       if(!retiresOwner&&(AppState.currentState!=='active'||!this.state.snapshot))throw new Error('Read access changed.');
       // Restored native authorization permits mounted screens to prepare their
@@ -236,13 +236,13 @@ export class AppStore {
       const domainReviewEpoch = this.domainReviewEpoch;
       const response = JSON.parse(await this.native.command(JSON.stringify(command))) as {snapshot?: AppSnapshot; result: T};
       if (generation !== this.generation) {
-        if(command.type==='domains.stage')await this.discardUndeliveredDomainReview(response.result);
+        if(['domains.stage','domainCheck.stage'].includes(command.type))await this.discardUndeliveredDomainReview(response.result);
         throw new Error('The app screen closed while this action completed.');
       }
       // A haptic changes no app state. Native acknowledges only the effect;
       // independent snapshot events still carry actual runtime changes.
-      if (command.type === 'haptic') return response.result;
-      if(command.type==='domains.stage'&&domainReviewEpoch!==this.domainReviewEpoch) {
+      if (command.type === 'haptic' || command.type === 'domainCheck.cancel') return response.result;
+      if(['domains.stage','domainCheck.stage'].includes(command.type)&&domainReviewEpoch!==this.domainReviewEpoch) {
         await this.discardUndeliveredDomainReview(response.result);
         throw new Error('Read access changed.');
       }
@@ -255,7 +255,7 @@ export class AppStore {
       }
       if (!response.snapshot) throw new Error('The native app did not return its updated state.');
       if (!command.type.endsWith('.query') && !command.type.startsWith('navigation.') && !['refresh','haptic','guard.gesture','activity.visibility'].includes(command.type)) ++this.invalidation;
-      const mayPublish = readEpoch === this.readEpoch || command.type==='domains.stage'&&domainReviewEpoch===this.domainReviewEpoch;
+      const mayPublish = readEpoch === this.readEpoch || ['domains.stage','domainCheck.stage'].includes(command.type)&&domainReviewEpoch===this.domainReviewEpoch;
       if (revokesReads) this.revokeReads();
       // An interrupted mutation may finish, but its old presentation must not
       // repopulate a newly authenticated foreground session.

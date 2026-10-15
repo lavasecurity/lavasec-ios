@@ -26,6 +26,7 @@ final class ReactReviewViewController: UIViewController {
         let delegate = ReviewReactDelegate()
         delegate.dependencyProvider = ReviewDependencyProvider()
         let factory = RCTReactNativeFactory(delegate: delegate)
+        LavaInstallScrollScaffold()
         factoryDelegate = delegate
         self.factory = factory
         let root = factory.rootViewFactory.view(withModuleName: "LavaUIReview", initialProperties: ["activityExample": activityExample, "reviewGallery": reviewGallery])

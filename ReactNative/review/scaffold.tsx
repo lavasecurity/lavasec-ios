@@ -265,7 +265,7 @@ function SheetBody({children, footer, header, scrollRef,headerMaterial=true,scro
   const [viewportHeight,setViewportHeight]=useState(0);
   const [controlsHeight,setControlsHeight]=useState(0);
   const nativeScroll=useRef<ScrollViewInstance>(null);
-  const initializedOffset=useRef(false);
+  const initializedOffset=useRef(false);const hasHeader=!!header;
   useImperativeHandle(scrollRef,()=>nativeScroll.current!,[]);
   const pinnedOffset=useRef({x:0,y:-nativeHeaderInset});
   const latestOffset=useRef(pinnedOffset.current);
@@ -276,16 +276,16 @@ function SheetBody({children, footer, header, scrollRef,headerMaterial=true,scro
     previousInset.current=nativeHeaderInset;
   }
   useLayoutEffect(()=>{
-    if(scrollMode==='list')return;
+    if(scrollMode==='list'||!hasHeader)return;
     return navigation.addListener('transitionEnd',event=>{
-      // UIKit's form-sheet presentation can adjust the initial offset after
-      // Fabric lays out the body. Settle it once when that transition finishes.
+      // Sticky controls own an explicit inset; ordinary forms use UIKit's
+      // adjusted inset and must never receive this post-opening correction.
       if(!event.data.closing&&!initializedOffset.current){
         initializedOffset.current=true;
         nativeScroll.current?.scrollTo({...pinnedOffset.current,animated:false});
       }
     });
-  },[navigation,scrollMode]);
+  },[navigation,scrollMode,hasHeader]);
   const owner=useRef<SheetOwner>({mounted:true,listeners:new Set()});
   useLayoutEffect(()=>{owner.current.mounted=true;return()=>{
     owner.current.mounted=false;for(const listener of owner.current.listeners)listener();
@@ -300,8 +300,7 @@ function SheetBody({children, footer, header, scrollRef,headerMaterial=true,scro
   }, [navigation, footer, review?.app,review?.live, interactive,viewport]);
   // Native-stack makes its first scroll descendant use automatic safe-area
   // insets on iOS. Start the list viewport below the bar, so its content starts
-  // at zero with no duplicated inset or negative scrollTo correction (RN clamps
-  // commands using raw rather than adjusted insets). Fixed controls are siblings,
+  // at zero with no duplicated inset. Fixed controls are siblings,
   // so neither a pan nor keyboard adjustment can move them. Only their measured
   // height is reserved in the natural-sized results; rows still pass underneath
   // the individual glass capsules. Keep the scroll view first for sheet sizing.
@@ -318,15 +317,18 @@ function SheetBody({children, footer, header, scrollRef,headerMaterial=true,scro
   // Keep the direct ScrollView required by native form sheets. A sticky child
   // lets content pass behind the picker controls instead of reserving an opaque
   // strip above the scroll surface. The native footer still owns bottom actions.
-  // RN's sticky-header animation only reads the explicit contentInset. Use the
-  // navigator's measured bar height so its controls don't slide behind the bar.
+  // Only sticky controls need an explicit inset for RN's header animation.
+  // Ordinary forms use UIKit's adjusted inset, like the page scaffold. Forcing
+  // a negative offset and correcting it at transitionEnd moved Review's body
+  // after the sheet had already opened.
   // Keep ordinary editor sheets viewport-sized while their fields resize.
-  // Start at the inset's top, then preserve the scrolled position when rotation
-  // changes the native bar height. Ordinary scrolling remains owned by UIKit.
+  // Sticky controls preserve their scroll position when rotation changes the
+  // native bar height. Ordinary scrolling remains owned by UIKit.
   // Keep the material's scroll viewport full-width. Safe edges belong to its
   // content, with the cap expanded by that padding to retain the reading band.
   // The detached native footer already has its own native SafeAreaView.
-  return <ScrollView ref={nativeScroll} showsVerticalScrollIndicator={showsVerticalScrollIndicator} showsHorizontalScrollIndicator={false} onLayout={event=>{nativeLayout(event);onViewport(event.nativeEvent.layout);setViewportHeight(event.nativeEvent.layout.height);}} stickyHeaderIndices={header?[0]:undefined} pointerEvents={interactive?'auto':'none'} accessibilityElementsHidden={!interactive} importantForAccessibility={interactive?'auto':'no-hide-descendants'} style={{flex:1,backgroundColor:colors.groupedBackground,...(concealed?{opacity:0}:{})}} automaticallyAdjustKeyboardInsets automaticallyAdjustContentInsets={false} contentInset={{top:nativeHeaderInset}} contentOffset={pinnedOffset.current} onScroll={event=>{latestOffset.current=event.nativeEvent.contentOffset;}} scrollEventThrottle={16} contentInsetAdjustmentBehavior="never" scrollIndicatorInsets={{top:nativeHeaderInset}} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive" contentContainerStyle={[header?s.sheetPinnedContent:[s.sheetContent,horizontalReadingInsets],{minHeight:Math.max(0,viewportHeight-nativeHeaderInset)}]}>
+  const explicitInset=hasHeader;
+  return <ScrollView ref={nativeScroll} showsVerticalScrollIndicator={showsVerticalScrollIndicator} showsHorizontalScrollIndicator={false} onLayout={event=>{nativeLayout(event);onViewport(event.nativeEvent.layout);setViewportHeight(event.nativeEvent.layout.height);}} stickyHeaderIndices={header?[0]:undefined} pointerEvents={interactive?'auto':'none'} accessibilityElementsHidden={!interactive} importantForAccessibility={interactive?'auto':'no-hide-descendants'} style={{flex:1,backgroundColor:colors.groupedBackground,...(concealed?{opacity:0}:{})}} automaticallyAdjustKeyboardInsets automaticallyAdjustContentInsets={!explicitInset} contentInset={explicitInset?{top:nativeHeaderInset}:undefined} contentOffset={explicitInset?pinnedOffset.current:undefined} onScroll={event=>{latestOffset.current=event.nativeEvent.contentOffset;}} scrollEventThrottle={16} contentInsetAdjustmentBehavior={explicitInset?"never":"automatic"} scrollIndicatorInsets={{top:explicitInset?nativeHeaderInset:0}} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive" contentContainerStyle={[header?s.sheetPinnedContent:[s.sheetContent,horizontalReadingInsets],{minHeight:Math.max(0,viewportHeight-nativeHeaderInset)}]}>
     {header&&<View collapsable={false} testID="sheet.pinned-header" pointerEvents={interactive?'auto':'none'} accessibilityElementsHidden={!interactive} importantForAccessibility={interactive?'auto':'no-hide-descendants'}>
       {headerMaterial&&<NativeDecoration symbol="sheet.header.material" colorScheme={scheme} pointerEvents="none" style={StyleSheet.absoluteFill}/>}
       <View style={[s.sheetHeader,horizontalPadding]}>{header}</View>

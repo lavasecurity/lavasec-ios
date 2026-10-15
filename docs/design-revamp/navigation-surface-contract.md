@@ -43,3 +43,31 @@ Passcode and Sudoku retain their existing modal owners. No view mask, border,
 shadow compensation, navigation-state rewrite, or dependency patch is involved.
 The Reduce Motion observer is removed on unmount; a late initial read cannot
 overwrite a newer system event.
+
+## Keyboard and foreground stability
+
+The shared native `LavaScrollView` uses UIKit's adjusted content insets when
+clamping commands from React Native. Its legal resting offset includes the
+navigation bar's safe area. It also retains that offset when RN's cross-fade
+keyboard-dismiss branch would otherwise reset it to zero. Both React hosts
+install this owner before mounting their root; the inherited RN 0.87.1 hooks
+are guarded by the complete upstream source digest during preparation.
+
+The first field and large title must stay in place when that field is already
+visible above the keyboard. Native bounds still constrain both scroll ends,
+and UIKit/RN continue to reveal lower fields. Leaves must not add focus offsets
+or foreground scroll resets. Ordinary read-only and unfocused pages do not
+consume keyboard notifications.
+
+Domain/URL entry uses the native URL keyboard, URL content type, and disabled
+autocorrection, capitalization, spelling and smart insertion. An empty
+clipboard must not produce English prose predictions or an app-created paste
+prompt. The system owns its clipboard affordances and domain suffix key.
+
+`testDomainEntryKeepsPageGeometryAcrossKeyboardAndForeground` measures the
+header, input and Check button through three focus/dismiss/foreground cycles
+and verifies native `.com` insertion. Before cutting an RC that changes this
+scaffold, run it in light, dark and Prefer Cross-Fade Transitions modes alongside the existing domain
+check/review and native navigation collapse/restore journeys. The mandatory cross-fade journey phase also runs this geometry test. Capture actual
+frames; visibility alone does not qualify a stable layout. Preserve the same
+draft and user scroll position through interruption and return.

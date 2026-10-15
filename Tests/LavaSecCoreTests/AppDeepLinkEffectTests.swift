@@ -38,7 +38,7 @@ final class AppDeepLinkEffectTests: XCTestCase {
                 )
             ),
         ].map { .importFilters($0) }
-        return [.guardPanel, .explore, .filters, .activity] + settings + imports
+        return [.guardPanel, .explore, .domainCheck, .filters, .activity] + settings + imports
     }()
 
     func testEffectModelHasNoApplyEffect() {
@@ -60,6 +60,7 @@ final class AppDeepLinkEffectTests: XCTestCase {
     func testNavigationRoutesAreNavigate() {
         XCTAssertEqual(LavaAppDeepLink.guardPanel.effect, .navigate)
         XCTAssertEqual(LavaAppDeepLink.explore.effect, .navigate)
+        XCTAssertEqual(LavaAppDeepLink.domainCheck.effect, .navigate)
         XCTAssertEqual(LavaAppDeepLink.filters.effect, .navigate)
         XCTAssertEqual(LavaAppDeepLink.activity.effect, .navigate)
         XCTAssertEqual(LavaAppDeepLink.settings(nil).effect, .navigate)

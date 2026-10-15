@@ -61,7 +61,7 @@ if (tool==='xcrun' && args[0]==='simctl' && args[1]==='list') console.log(JSON.s
 if (tool==='xcrun' && args[0]==='simctl' && args[1]==='create') console.log(args[2].includes('iPad') ? 'isolated-ipad-simulator' : 'isolated-test-simulator');
 if (tool==='xcrun' && args[0]==='xcresulttool' && args[1]==='get') {
   const path=value('--path');
-  console.log(path.includes('ipad.xcresult') ? process.env.LAVA_CI_TEST_IPAD_SUMMARY : path.includes('preferences-') ? process.env.LAVA_CI_TEST_PREFERENCES_SUMMARY : path.includes('reduced-motion') || path.includes('crossfade') ? process.env.LAVA_CI_TEST_MOTION_SUMMARY : process.env.LAVA_CI_TEST_SUMMARY);
+  console.log(path.includes('ipad.xcresult') ? process.env.LAVA_CI_TEST_IPAD_SUMMARY : path.includes('preferences-') ? process.env.LAVA_CI_TEST_PREFERENCES_SUMMARY : path.includes('crossfade') ? process.env.LAVA_CI_TEST_CROSSFADE_SUMMARY : path.includes('reduced-motion') ? process.env.LAVA_CI_TEST_MOTION_SUMMARY : process.env.LAVA_CI_TEST_SUMMARY);
 }
 if (tool==='xcrun' && args[0]==='xcresulttool' && args[1]==='export') mkdirSync(value('--output-path'),{recursive:true});
 `;
@@ -72,10 +72,11 @@ if (tool==='xcrun' && args[0]==='xcresulttool' && args[1]==='export') mkdirSync(
     encoding: 'utf8', timeout: 120000,
     env: {...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: root,
       LAVA_CI_TEST_TRACE: trace,
-      LAVA_CI_TEST_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 75, failedTests: 0, skippedTests: 0}),
+      LAVA_CI_TEST_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 77, failedTests: 0, skippedTests: 0}),
       LAVA_CI_TEST_IPAD_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 2, failedTests: 0, skippedTests: 0}),
       LAVA_CI_TEST_PREFERENCES_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 1, failedTests: 0, skippedTests: 0}),
       LAVA_CI_TEST_MOTION_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 3, failedTests: 0, skippedTests: 0}),
+      LAVA_CI_TEST_CROSSFADE_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 4, failedTests: 0, skippedTests: 0}),
       ...options},
   });
   assert.ifError(result.error);
@@ -146,6 +147,7 @@ test('existing local default still runs journeys and retains review evidence', t
   assert.deepEqual(builds.slice(3, 8).map(call => call.args[call.args.indexOf('-resultBundlePath')+1].split('/').at(-1)),
     ['preferences-reduced.xcresult', 'reduced-motion.xcresult', 'preferences-crossfade.xcresult', 'crossfade.xcresult', 'preferences-reset.xcresult']);
   assert.ok(builds[6].args.includes('-only-testing:LavaSecUITests/RNFullAppUITests/testExplicitCrossFadeNavigation'));
+  assert.ok(builds[6].args.includes('-only-testing:LavaSecUITests/RNFullAppUITests/testDomainEntryKeepsPageGeometryAcrossKeyboardAndForeground'));
   const tablet = builds[8].args;
   assert.equal(tablet.at(-1), 'test-without-building');
   assert.equal(tablet[tablet.indexOf('-derivedDataPath')+1],build[build.indexOf('-derivedDataPath')+1]);
@@ -168,9 +170,9 @@ for (const [name, args, options] of [
   ['native scaffold failure', ['--compile'], {LAVA_CI_TEST_SCAFFOLD_EXIT: '1'}],
   ['unqualified simulated namespace', ['--journeys'], {LAVA_CI_TEST_UNQUALIFIED_SIMULATOR_GROUP:'1'}],
   ['mismatched simulated namespace', ['--journeys'], {LAVA_CI_TEST_SIMULATOR_GROUP_MISMATCH:'1'}],
-  ['failed journeys', ['--journeys'], {LAVA_CI_TEST_SUMMARY: JSON.stringify({result: 'Failed', passedTests: 75, failedTests: 1, skippedTests: 0})}],
-  ['skipped journeys', ['--journeys'], {LAVA_CI_TEST_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 75, failedTests: 0, skippedTests: 1})}],
-  ['missing ordinary journey', ['--journeys'], {LAVA_CI_TEST_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 74, failedTests: 0, skippedTests: 0})}],
+  ['failed journeys', ['--journeys'], {LAVA_CI_TEST_SUMMARY: JSON.stringify({result: 'Failed', passedTests: 77, failedTests: 1, skippedTests: 0})}],
+  ['skipped journeys', ['--journeys'], {LAVA_CI_TEST_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 77, failedTests: 0, skippedTests: 1})}],
+  ['missing ordinary journey', ['--journeys'], {LAVA_CI_TEST_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 76, failedTests: 0, skippedTests: 0})}],
   ['motion execution failure', ['--journeys'], {LAVA_CI_TEST_MOTION_XCODE_EXIT: '65'}],
   ['missing motion preference verification', ['--journeys'], {LAVA_CI_TEST_PREFERENCES_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 0, failedTests: 0, skippedTests: 0})}],
   ['failed motion journeys', ['--journeys'], {LAVA_CI_TEST_MOTION_SUMMARY: JSON.stringify({result: 'Failed', passedTests: 2, failedTests: 1, skippedTests: 0})}],

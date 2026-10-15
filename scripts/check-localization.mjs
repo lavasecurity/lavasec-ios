@@ -62,6 +62,7 @@ const allowedUntranslatedCoreEntries = new Set([
 // These interface labels are also the normal local words. Scope the exception
 // to each catalog key and language so it cannot hide untranslated sentences.
 const sharedAppTerms = new Set([
+  "fr:Actions",
   "it:Account",
   "it:Password",
   "de:Filter",

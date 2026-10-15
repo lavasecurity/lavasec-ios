@@ -39,7 +39,7 @@ real controllers with their existing authentication and persistence gates.
 | Automation instructions | Existing `AutoSwitchHowToSheet` / shared sheet | Existing shortcut/Focus instructions and external transitions. |
 | Feedback | Existing submission controller; shared success retains report ID and Copy ID | Real backend acceptance, retry, privacy mask, diagnostics opt-in and return. |
 | Custom DNS | Existing `DNSResolverSettingsView` | Validation, persistence, DNS apply/reconnect and errors. |
-| VPN chaining | Existing contained `LavaVPNNavigationPage` | Configuration/key handling, entitlement, authorized access, enable/disable and actual forwarding. |
+| VPN chaining | RN `VPNChainingScreen` on the shared `Screen` scaffold, like DNS; the WireGuard editor is the native `vpnConfiguration` flow | Configuration/key handling, entitlement, authorized access, enable/disable and actual forwarding. |
 | Legal notices | Existing notices view | Full attribution and usable navigation. |
 | Device QA / QA sheet | Existing conditional QA tools | Visible only in the existing eligible QA/developer context. |
 

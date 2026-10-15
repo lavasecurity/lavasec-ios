@@ -51,19 +51,30 @@ test.each([['Feedback','Feedback'],['phoneQA','DeviceQA'],['DeviceQA','DeviceQA'
   expect(nativeRedirectAction(before,'SettingsTab',input)).toEqual({type:'NAVIGATE',target:'tabs',payload:{name:'SettingsTab',params:{state:{index:1,routes:[{name:'Settings'},{name:destination}]}}}});
 });
 
-test('the Explore deep link pushes Explore above Guard with a normal Back destination',()=>{
+test.each(['Explore','DomainCheck'])('the %s deep link pushes a page above Guard with a normal Back destination',destination=>{
   const before={stale:false,type:'tab',key:'tabs',index:1,routeNames:['GuardTab','SettingsTab'],routes:[
     {name:'GuardTab',key:'guard',state:{...state('GuardTab',['Guard','Activity']).routes[0]!.state}},
     {name:'SettingsTab',key:'settings',state:{...state('SettingsTab',['Settings','Account']).routes[0]!.state}},
   ]} as NavigationState;
-  expect(nativeRedirectAction(before,'GuardTab','Explore')).toEqual({type:'NAVIGATE',target:'tabs',payload:{name:'GuardTab',params:{state:{index:1,routes:[{name:'Guard'},{name:'Explore'}]}}}});
+  expect(nativeRedirectAction(before,'GuardTab',destination)).toEqual({type:'NAVIGATE',target:'tabs',payload:{name:'GuardTab',params:{state:{index:1,routes:[{name:'Guard'},{name:destination}]}}}});
   expect(before.routes[1]?.state?.routes.map(route=>route.name)).toEqual(['Settings','Account']);
 });
 
-test.each([['SettingsTab','vpnChaining','VPNChaining'],['SettingsTab','phoneQA','DeviceQA'],['GuardTab','Explore','Explore'],['GuardTab','Guard','Guard']])('native redirect admission matches the committed normalized %s/%s destination', (tab,input,target)=>{
+test.each([['SettingsTab','vpnChaining','VPNChaining'],['SettingsTab','phoneQA','DeviceQA'],['GuardTab','Explore','Explore'],['GuardTab','DomainCheck','DomainCheck'],['GuardTab','Guard','Guard']])('native redirect admission matches the committed normalized %s/%s destination', (tab,input,target)=>{
   const root=tab==='SettingsTab'?'Settings':'Guard';
   const active={index:0,routes:[{name:tab,state:{index:target===root?0:1,routes:[{name:root},...(target===root?[]:[{name:target}])]}}]};
   expect(nativeRedirectMatches(active,tab,input)).toBe(true);
   expect(nativeRedirectMatches(active,tab==='SettingsTab'?'GuardTab':'SettingsTab',input)).toBe(false);
   expect(nativeRedirectMatches({index:0,routes:[{name:tab,state:{index:2,routes:[{name:root},{name:target},{name:'Different child'}]}}]},tab,input)).toBe(false);
+});
+
+test('every domain-check link owns a fresh native visit, including an already-focused checker',()=>{
+  const before=state('GuardTab',['Guard','DomainCheck']) as NavigationState;
+  const action=nativeRedirectAction(before,'GuardTab','DomainCheck',7)!;
+  expect(action).toMatchObject({payload:{params:{state:{routes:[{name:'Guard'},{name:'DomainCheck',key:'domain-check-link-7'}]}}}});
+  expect(nativeRedirectMatches(before,'GuardTab','DomainCheck',7)).toBe(false);
+  const committed={index:0,routes:[{name:'GuardTab',state:(action as any).payload.params.state}]};
+  expect(nativeRedirectMatches(committed,'GuardTab','DomainCheck',7)).toBe(true);
+  expect(nativeRedirectMatches(committed,'GuardTab','DomainCheck',8)).toBe(false);
+  expect(nativeRedirectAction(before,'GuardTab','DomainCheck',8)).toMatchObject({payload:{params:{state:{routes:[{name:'Guard'},{name:'DomainCheck',key:'domain-check-link-8'}]}}}});
 });

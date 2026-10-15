@@ -1,17 +1,18 @@
 import {useOnboardingDestination} from './onboarding-geometry';
 import {usePresentationNativeLayout} from '../app/use-presentation-readiness';
 export {DNSPatchScreen} from './DNSPatchScreen';
-export {VPNChainingScreen,AutoSwitchScreen,FeedbackSettingsScreen,DeviceQAScreen} from './NativePageScreen';
+export {AutoSwitchScreen,FeedbackSettingsScreen,DeviceQAScreen} from './NativePageScreen';
+export {VPNChainingScreen} from './VPNChainingScreen';
 import {useMascotTapInteraction} from './mascot-interaction';
 import {ContextMenu} from './ContextMenu';
 import {useIsFocused,useNavigation} from '@react-navigation/native';
 import {Alert, localized, localizedFormat} from '../app/presentation';
 import {useEffect,useRef,useState} from 'react';
 import { AppState, View} from 'react-native';
-import {Link} from './scaffold';
+import {Group} from './scaffold';
 import {LavaActionButton} from '../src';
 import {LavaComponentGallery} from '../gallery/LavaComponentGallery';
-import {Copy, Guardian, Screen} from './primitives';
+import {Copy, Guardian, Row, Screen} from './primitives';
 import {useReview,useRouteBodyConcealed} from './ReviewContext';
 import {activeFilterSummary,todaySummary} from './connection-model';
 import {ExploreInvitation,GuardSummaries,ProtectionHero,StoryColumns,StoryStack,StorySurface} from './story-scaffold';
@@ -25,6 +26,7 @@ export {FeedbackScreen} from './FeedbackScreen';
 export {ActivityScreen} from './ActivityScreen';
 export {SudokuScreen} from './SudokuScreen';
 export {ExploreScreen} from './ExploreScreen';
+export {DomainCheckScreen} from './DomainCheckScreen';
 
 export function GuardScreen() {
   const nav=useReviewNavigation();const {session,look,app,live,onboardingPreview}=useReview();
@@ -55,7 +57,7 @@ export function GuardScreen() {
     if(taps.current.count===5){taps.current.count=0;nav.navigate('Sudoku');}
   };
   // The mounted preview loses native private fields under the same resume cover.
-  const protection = onboardingPreview&&live?.protection ? {...live.protection,title:'Protection Off',subtitle:'Tap once to add local protection',action:'Turn On',mood:'sleeping',materialIntent:'rest' as const,actionTone:'affirmative' as const,canPause:false,configuring:false,disabled:false,needsVPNSetup:false,needsDNSProviderChange:false} : live?.protection;
+  const protection = onboardingPreview&&live?.protection ? {...live.protection,title:'Protection Off',subtitle:'Tap once to add local protection',action:'Turn On',mood:'sleeping',materialIntent:'rest' as const,actionTone:'affirmative' as const,canPause:false,configuring:false,disabled:false} : live?.protection;
   const command = () => {if(onboardingPreview||shared.setup)return;if(app) void app.command({type:'protection.toggle'}).catch(error=>Alert.alert('Lava',error.message)); else previewNotice();};
   const mood = mascotInteraction.grateful&&protection?.mood==='awake'?'grateful':protection?.mood ?? "sleeping";
   const pauseOptions=protection?.canPause?(protection.pauseOptions??[5,10,15].map(minutes=>({minutes,title:localizedFormat('Pause for %d minutes',minutes)}))).map(option=>({id:String(option.minutes),title:option.title,symbol:'pause.circle'})):[];
@@ -72,12 +74,12 @@ export function GuardScreen() {
       <LavaActionButton stablePill tone={protection?.actionTone} title={ready?'Open Guard':protection?.action ?? 'Turn On'} subtitle={protection?.canPause?'Long-press for pause options':undefined}
         disabled={protection?.disabled} busy={protection?.configuring} onPress={command}
         accessibilityActions={pauseOptions.map(option=>({name:option.id,label:localized(option.title)}))} onAccessibilityAction={event=>pause(event.nativeEvent.actionName)}/>
-    </ContextMenu></View>}>
-    {protection?.needsDNSProviderChange&&<Link title="Change DNS provider" onPress={()=>nav.navigate('DNS')} footer/>}
-    {protection?.needsVPNSetup&&<Link title="Review VPN setup" onPress={()=>nav.navigate('VPNChaining')} footer/>}
-  </ProtectionHero></View>} secondary={<StoryStack>
+    </ContextMenu></View>}/></View>} secondary={<StoryStack>
     <GuardSummaries today={todaySummary(live,session)} filter={activeFilterSummary(live,session)} onActivity={()=>nav.navigate('Activity')} onFilters={()=>nav.navigate('Filters')}/>
-    <ExploreInvitation attention={live?.discoveries?.['ios27Patch.settings']===true} onPress={()=>nav.navigate('Explore')}/>
+    <Group testID="guard.tools">
+      {(!app||live?.domainCheckAvailable)&&<Row intent="page" testID="guard.check-domain" title="Check a domain" icon="magnifyingglass" onPress={()=>nav.navigate('DomainCheck')}/>}
+      <ExploreInvitation attention={live?.discoveries?.['ios27Patch.settings']===true} onPress={()=>nav.navigate('Explore')}/>
+    </Group>
   </StoryStack>}/></Screen>;
 }
 export function ComponentsScreen() {const onLayout=usePresentationNativeLayout();return <LavaComponentGallery onLayout={onLayout}/>;}

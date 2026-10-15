@@ -15,6 +15,7 @@ enum LavaRootTab: Hashable {
 
 enum GuardDestination: Hashable {
     case explore
+    case domainCheck
     case filters
     case activity
 }
@@ -262,7 +263,7 @@ struct RootView: View {
     private func forwardReactNavigation() {
         if selectedRootTab == .guardPanel {
             let screen: String
-            switch guardNavigationPath.last { case .explore: screen = "Explore"; case .filters: screen = "Filters"; case .activity: screen = "Activity"; case nil: screen = "Guard" }
+            switch guardNavigationPath.last { case .explore: screen = "Explore"; case .domainCheck: screen = "DomainCheck"; case .filters: screen = "Filters"; case .activity: screen = "Activity"; case nil: screen = "Guard" }
             LavaAppBridge.shared.requestNavigation(tab: "GuardTab", screen: screen)
         } else {
             let screen: String
@@ -344,6 +345,11 @@ struct RootView: View {
         case .explore:
             settingsPath = []
             guardNavigationPath = [.explore]
+            selectedRootTab = .guardPanel
+            forwardReactNavigation()
+        case .domainCheck:
+            settingsPath = []
+            guardNavigationPath = [.domainCheck]
             selectedRootTab = .guardPanel
             forwardReactNavigation()
         case .filters:

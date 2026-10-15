@@ -104,6 +104,7 @@ visible editor drafts; retaining a user-entered draft does not change that rule.
 | Covered resume of a query page | `PresentationHydration` holds the cover while focused scoped reads settle and the new body completes layout. Offscreen reads cannot indefinitely hold the cover. |
 | Native sheets, headers and footers | Route-local cover and scaffold pixel/input/accessibility fences cover UIKit presentation layers; mounted-owner callbacks and renderer cleanup retire erased private bodies. |
 | Share reveal and copied state | The shared native all-off policy preserves the current code/QR state; a new code, lost frame or concealment boundary retires it. |
+| VPN chaining page | Ordinary settings route: `Screen` is the direct route root and `LiveRenderBoundary` alone chooses concealment. The page owns no cover or lifecycle wrapper; its native admission gates input and withholds rows without a current Settings grant. |
 | Native VPN editor | `SecurityPrivacyPolicy` preserves an explicitly revealed user-entered all-off draft through sleep. Imported/unrevealed drafts and selected/unknown security remain covered. Native input waits for protected-data recovery. |
 | Explore | Inactivity pauses clocks and speech without erasing the displayed lesson step. Route/routing changes and unmount retain their reset/cancellation ownership. |
 | Activity date picker, Sudoku, mascot and held chart/paging gestures | Cancel pending presentation or contact tracking and release scrolling. Keep accepted range/game/service content through the shared all-off frame. |

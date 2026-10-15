@@ -25,6 +25,8 @@ export type BackupEnablement = {
 export type OnboardingFrame = {x:number;y:number;width:number;height:number};
 export type OnboardingSetup = {id:string;mock:boolean;page:number;history:number[];visited:number[];level:'essential'|'balanced'|'comprehensive';fallback:boolean;dnsProfile:boolean;supportsDNSProfile:boolean;vpnInstalled:boolean;notifications:boolean;busy:string;error:string;phase:'setup'|'arriving'|'ready'|'opening'|'released'};
 export type AppSnapshot = {
+  domainCheckAvailable?: boolean;
+  domainCheckRevision?: string;
   foregroundFlow?:ForegroundFlow|null;
   foregroundClosing?:string[];
   customEntry?:{id:string;kind:'dns'|'blocklist';name:string;primary:string;secondary:string;allowed:boolean;overBudget:boolean}|null;
@@ -49,7 +51,7 @@ export type AppSnapshot = {
   security: {readRevision?: number; sourceRevision?: string; ownerRevision?:string;displayClearRevision?:string;hasAuthenticationMethod?:boolean;updatingSurface?:boolean;unavailable:boolean;showBiometrics:boolean;canEnableBiometrics:boolean;biometricTitle:string;status:string};
   navigation?: {serial:number;tab:string;screen:string};
   schema: 1; revision: number; fullApp: true; sourceRevision?:string; version: string; build: string;
-  protection: {materialIntent?:GuardMaterialIntent;actionTone?:'affirmative'|'quiet'|'recovery';today?:{countsEnabled:boolean;allowed:number;blocked:number};configuring?:boolean;quiet?:boolean;pauseOptions?:{minutes:number;title:string}[];mood:string; title: string; subtitle: string; action: string; disabled: boolean; status: number; paused: boolean; canPause: boolean; needsVPNSetup?: boolean; needsDNSProviderChange?:boolean; rules: number; activity: string};
+  protection: {materialIntent?:GuardMaterialIntent;actionTone?:'affirmative'|'quiet'|'recovery';today?:{countsEnabled:boolean;allowed:number;blocked:number};configuring?:boolean;quiet?:boolean;pauseOptions?:{minutes:number;title:string}[];mood:string; title: string; subtitle: string; action: string; disabled: boolean; status: number; paused: boolean; canPause: boolean; rules: number; activity: string};
   account: {appleBusy?:boolean;googleBusy?:boolean;signedIn: boolean; status: string; detail: string; appleTitle: string; googleTitle: string; appleConnected: boolean; googleConnected: boolean; busy: boolean; message: string};
   backup: {enablement?:BackupEnablement;detail?:string;needsAttention?:boolean;deletionPending?:boolean;backingUp?:boolean;remoteStatus?:string;remoteAvailable?:boolean;statusUnavailable?:boolean;configured: boolean; title: string; summary: string; automatic: boolean; busy: boolean};
   plus: {enabled: boolean; busy: boolean; checking:boolean; showsYearlyPaidMonthly:boolean; expiration:string; message: string; offers: {id: string; title: string; subtitle: string; price: string; commitmentPrice?: string}[]};
@@ -150,4 +152,7 @@ export type AppCommand =
   | {type: 'domains.copy'; domain: string}
   | {type: 'domains.enableHistory'}
   | {type: 'domains.cancel'; token: string}
-  | {type: 'domains.stage'; domain: string; decision: 'allowed' | 'blocked'};
+  | {type: 'domains.stage'; domain: string; decision: 'allowed' | 'blocked'}
+  | {type:'domainCheck.query';visit:string;input:string;refresh?:boolean}
+  | {type:'domainCheck.cancel';visit:string}
+  | {type:'domainCheck.stage';visit:string;proof:string;decision:'allowed'|'blocked'};

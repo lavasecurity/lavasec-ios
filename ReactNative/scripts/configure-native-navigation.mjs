@@ -1,4 +1,6 @@
 import './native-navigation/discovery-symbol.mjs';
+import {verifyInstalledScrollOwner} from './native-navigation/scroll-owner.mjs';
+verifyInstalledScrollOwner();
 import {configurePageMargins} from './native-navigation/page-margins.mjs';
 configurePageMargins();
 import {readFileSync,writeFileSync} from 'node:fs';
