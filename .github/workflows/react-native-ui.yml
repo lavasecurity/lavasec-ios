@@ -66,7 +66,7 @@ jobs:
           docs_only="$(ci/detect-docs-only.sh --event "$EVENT" --base "$BASE" --head "$HEAD")"
           case "$docs_only" in true|false) ;; *) docs_only=false ;; esac
           echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         if: ${{ steps.changes.outputs.docs_only != 'true' }}
         with:
           node-version: '24'
@@ -116,7 +116,7 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
       - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1
@@ -170,7 +170,7 @@ jobs:
     timeout-minutes: ${{ (inputs.validation == 'full-app-journeys' || inputs.validation == 'parity-review') && 210 || 50 }}
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
       - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1
