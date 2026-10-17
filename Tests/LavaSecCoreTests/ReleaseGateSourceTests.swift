@@ -32,7 +32,7 @@ final class ReleaseGateSourceTests: XCTestCase {
             endingBefore: "- name: Trigger lavasec-runner builds for"
         )
 
-        XCTAssertTrue(workflow.contains("uses: actions/checkout@v4"))
+        XCTAssertTrue(workflow.contains("uses: actions/checkout@v7"))
         XCTAssertTrue(guardBlock.contains("Config/Lava.xcconfig"))
         XCTAssertTrue(guardBlock.contains("MARKETING_VERSION"))
         XCTAssertTrue(guardBlock.contains("declared_version"))
