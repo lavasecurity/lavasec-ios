@@ -56,12 +56,17 @@ jobs:
         id: changes
         working-directory: .
         env:
+          FORCE_NATIVE: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'full-build') }}
           EVENT: ${{ github.event_name }}
           BASE: ${{ github.event_name == 'push' && github.event.before || github.event.pull_request.base.sha }}
           HEAD: ${{ github.event_name == 'push' && github.sha || github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          docs_only="$(ci/detect-docs-only.sh --event "$EVENT" --base "$BASE" --head "$HEAD")"
+          if [ "$FORCE_NATIVE" = true ]; then
+            docs_only=false
+          else
+            docs_only="$(ci/detect-docs-only.sh --event "$EVENT" --base "$BASE" --head "$HEAD")"
+          fi
           case "$docs_only" in true|false) ;; *) docs_only=false ;; esac
           echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@v7

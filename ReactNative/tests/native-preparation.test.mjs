@@ -15,6 +15,8 @@ function prepare(t, {nativeOnly = false, failure = '', mutateProject = false, ar
   const trace = join(root, 'trace.jsonl');
   const build = join(root, 'build');
   const evidence = join(root, 'evidence');
+  const engineMarker = join(root, 'fresh-engine-marker.json');
+  const engineReceipt = {fixtureSourceEngine: root};
   const cargoHome = join(root, 'cargo-home');
   const cargoBin = join(root, 'pinned-toolchain/bin');
   mkdirSync(join(app, 'scripts'), {recursive: true});
@@ -45,7 +47,15 @@ if [ -n "$LAVA_PREPARATION_FAILURE" ]; then
 fi
 if [ "$stage" = 'npm test' ]; then printf 'JavaScript and Yoga layout validation passed\\n'; fi
 if [ "$tool" = xcodegen ]; then printf 'Version: 2.45.4\\n'; fi
-if [ "$tool" = build-wireguard-core.sh ]; then printf 'Fresh source engine built\\n'; fi
+if [ "$tool" = build-wireguard-core.sh ]; then
+  printf '%s\\n' "$LAVA_PREPARATION_ENGINE_RECEIPT" > "$LAVA_PREPARATION_ENGINE_MARKER"
+  printf 'Fresh source engine built\\n'
+fi
+if [ "$tool" = python3 ] && [ "\${1:-}" = scripts/verify-preview-source.py ] && [ "\${2:-}" = capture-engine ]; then
+  # The real helper's hash/mode checks have independent mutation fixtures.
+  # This receipt models only capture of the engine built by this invocation.
+  cat "$LAVA_PREPARATION_ENGINE_MARKER" > "$3"
+fi
 if [ "$stage" = 'rustup which cargo' ]; then printf '%s\\n' "$LAVA_PREPARATION_CARGO"; fi
 if [ "$tool" = ruby ] && [ "$LAVA_PREPARATION_MUTATE_PROJECT" = true ]; then
   printf 'unapproved production mutation\\n' > ../project.yml
@@ -58,6 +68,8 @@ if [ "$stage" = 'bundle exec ruby scripts/inspect-full-app.rb' ]; then printf '{
     encoding: 'utf8', timeout: 120000,
     env: {...process.env, PATH: `${bin}:${process.env.PATH}`, CARGO_HOME: cargoHome,
       LAVA_PREPARATION_CARGO: join(cargoBin, 'cargo'),
+      LAVA_PREPARATION_ENGINE_MARKER: engineMarker,
+      LAVA_PREPARATION_ENGINE_RECEIPT: JSON.stringify(engineReceipt),
       LAVA_PREPARATION_TRACE: trace, LAVA_PREPARATION_FAILURE: failure,
       LAVA_PREPARATION_MUTATE_PROJECT: String(mutateProject)},
   });
@@ -66,12 +78,18 @@ if [ "$stage" = 'bundle exec ruby scripts/inspect-full-app.rb' ]; then printf '{
     const [tool, argumentsString, cwd, graph, bundlePath, frozen, commandPath] = line.split('\t');
     return {tool, args: argumentsString ? argumentsString.split(' ') : [], cwd, graph, bundlePath, frozen, commandPath};
   }) : [];
-  return {result, calls, build, evidence, app, cargoBin};
+  return {result, calls, build, evidence, app, cargoBin, engineReceipt};
 }
 
 const stage = call => `${call.tool} ${call.args.join(' ')}`.trimEnd();
 
-function assertSourceEnginePrepared({calls, evidence, app, cargoBin}) {
+function assertFreshEngineReceipt({evidence, engineReceipt}) {
+  assert.deepEqual(JSON.parse(readFileSync(join(evidence, 'wireguard-artifact-manifest.json'), 'utf8')), engineReceipt,
+    'Capture must replace stale provenance with the engine marker from this invocation.');
+}
+
+function assertSourceEnginePrepared(prepared) {
+  const {calls, evidence, app, cargoBin} = prepared;
   const stages = calls.map(stage);
   const engine = stages.indexOf('build-wireguard-core.sh');
   const receipt = stages.findIndex(value => value.startsWith('python3 scripts/verify-preview-source.py capture-engine '));
@@ -84,6 +102,7 @@ function assertSourceEnginePrepared({calls, evidence, app, cargoBin}) {
   assert.equal(calls[notices].commandPath.split(':')[0], cargoBin,
     'The notices gate must resolve Cargo from rustup, independently of a runner default.');
   assert.match(readFileSync(join(evidence, 'wireguard-build.log'), 'utf8'), /Fresh source engine built/);
+  assertFreshEngineReceipt(prepared);
 }
 
 test('native-only preparation retains source engine, bundle, Pods, notices and generated graph validation', t => {
@@ -132,10 +151,15 @@ test('a failed default JS suite stops preparation before bundling', t => {
 for (const failure of ['build-wireguard-core.sh', 'python3 scripts/verify-preview-source.py capture-engine', 'rustup which cargo',
   'node ../scripts/generate-wireguard-core-notices.mjs --check']) {
   test(`native-only preparation stops before npm when ${failure} fails`, t => {
-    const {result, calls, evidence} = prepare(t, {nativeOnly: true, failure});
+    const prepared = prepare(t, {nativeOnly: true, failure});
+    const {result, calls, evidence} = prepared;
     assert.equal(result.status, 42, result.stderr);
     assert.ok(!calls.some(call => call.tool === 'npm'), 'Source engine failures must block all RN preparation.');
-    assert.ok(!existsSync(join(evidence, 'wireguard-artifact-manifest.json')), 'A failed source engine build cannot retain stale provenance.');
+    if (failure === 'build-wireguard-core.sh' || failure === 'python3 scripts/verify-preview-source.py capture-engine') {
+      assert.ok(!existsSync(join(evidence, 'wireguard-artifact-manifest.json')), 'A failed build or capture must remove stale provenance.');
+    } else {
+      assertFreshEngineReceipt(prepared);
+    }
   });
 }
 
