@@ -1087,7 +1087,7 @@ test("light-build provisions Node before running the XcodeGen drift check", (con
   }
 
   const source = fs.readFileSync(lightBuildWorkflowPath, "utf8");
-  const setupNodeIndex = source.indexOf("uses: actions/setup-node@v6");
+  const setupNodeIndex = source.indexOf("uses: actions/setup-node@v7");
   const driftCheckIndex = source.indexOf("scripts/check-xcodegen-drift.sh");
 
   assert.ok(setupNodeIndex >= 0, "light-build must install Node on self-hosted runners");

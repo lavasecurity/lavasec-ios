@@ -66,7 +66,7 @@ jobs:
           docs_only="$(ci/detect-docs-only.sh --event "$EVENT" --base "$BASE" --head "$HEAD")"
           case "$docs_only" in true|false) ;; *) docs_only=false ;; esac
           echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         if: ${{ steps.changes.outputs.docs_only != 'true' }}
         with:
           node-version: '24'
@@ -116,10 +116,10 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
-      - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1
+      - uses: ruby/setup-ruby@e81a8fa391b11a595c1b7ed84177cc0fe02faf83 # v1.328.0
         with:
           ruby-version: '3.3.12'
           bundler: '4.0.16'
@@ -128,7 +128,7 @@ jobs:
         run: ci/run-with-maintenance-lock.sh -- bash ReactNative/scripts/build-review-host.sh
       - name: Upload review build and evidence
         if: ${{ always() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: lava-ui-review-${{ github.sha }}
           path: ReactNative/.artifacts/review-host/
@@ -165,15 +165,16 @@ jobs:
     # the owned Mac (Kilo review of PR #780; ios.yml adopted the same predicate).
     if: ${{ !cancelled() && github.event.pull_request.draft != true && needs.lava-ui.outputs.docs_only != 'true' && needs.lava-ui.outputs.native_required != 'false' && github.repository == 'lavasecurity/lavasec-ios-internal' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]' && contains(github.event.pull_request.labels.*.name, 'full-build'))) }}
     runs-on: [self-hosted, macOS]
-    # The explicit journey lane now covers the complete foreground/security UI
-    # suite plus tablet passes. Keep routine compilation's existing budget.
-    timeout-minutes: ${{ (inputs.validation == 'full-app-journeys' || inputs.validation == 'parity-review') && 210 || 50 }}
+    # The explicit journey lane covers the complete foreground/security UI suite
+    # plus tablet passes. Cold compilation exceeded 50 minutes while sharing the
+    # VM with the full build matrix on PR #933, so allow 90 minutes for compile.
+    timeout-minutes: ${{ (inputs.validation == 'full-app-journeys' || inputs.validation == 'parity-review') && 210 || 90 }}
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
-      - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1
+      - uses: ruby/setup-ruby@e81a8fa391b11a595c1b7ed84177cc0fe02faf83 # v1.328.0
         with:
           ruby-version: '3.3.12'
           bundler: '4.0.16'
@@ -195,7 +196,7 @@ jobs:
           cat ReactNative/.artifacts/full-app/native-scaffold-results.json >> "$GITHUB_STEP_SUMMARY"
       - name: Upload full-app build and evidence
         if: ${{ always() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: lava-rn-full-${{ github.sha }}
           path: ReactNative/.artifacts/full-app/
