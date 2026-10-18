@@ -5,13 +5,10 @@
 #
 # Packaging contract (D4): the ENGINE source is vendored (boringtun/ — the exact
 # crates.io 0.7.1 tarball contents, provenance hash in README.md) and consumed as a
-# path dependency; transitive deps are pinned by Cargo.lock's sha256 checksums (the
-# committed xcframework means release builds never run cargo — only the CI drift
-# gate fetches, hash-verified). Toolchain pinned in rust-toolchain.toml; the drift
-# gate rebuilds from this tree and byte-compares against the committed artifact —
-# that pairing is the AGPL provenance answer for a Rust artifact the Xcode build
-# cannot produce (shell phases/plugins are structurally rejected by the xcodegen
-# boundary guards).
+# path dependency. Cargo.lock pins transitive versions and checksums; all app,
+# release and CI preparation builds with --locked before consuming the artifact.
+# rust-toolchain.toml pins Rust; the host selects Xcode and the SDKs. The engine
+# gate checks two clean builds with that active toolchain for reproducibility.
 [package]
 name = "lavasec-wireguard-core"
 version = "0.1.0"

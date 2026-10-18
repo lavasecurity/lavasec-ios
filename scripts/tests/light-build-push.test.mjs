@@ -70,16 +70,18 @@ internalTest('docs-only or unknown build results never clear a standing main ala
   const script = step('Raise or clear the alarm');
   assert.match(workflow, /needs: \[changes, app-compile, wireguard-core-drift, version-guard\]/);
   assert.match(workflow, /DOCS_ONLY: \$\{\{ needs.changes.outputs.docs_only \}\}/);
-  for (const [docsOnly, compile, shouldClose, shouldReportFailure] of [
-    ['true', 'success', false, false], ['', 'success', false, false],
-    ['false', 'success', true, false], ['false', 'cancelled', false, false],
-    ['true', 'failure', false, true], ['false', 'failure', false, true],
+  for (const [docsOnly, compile, version, shouldClose, shouldReportFailure] of [
+    ['true', 'success', 'success', false, false], ['', 'success', 'success', false, false],
+    ['false', 'success', 'success', true, false], ['false', 'cancelled', 'success', false, false],
+    ['true', 'failure', 'success', false, true], ['false', 'failure', 'success', false, true],
+    ['false', 'success', 'failure', false, true], ['false', 'success', 'cancelled', false, false],
+    ['false', 'success', 'unknown', false, false], ['false', 'success', 'skipped', false, false],
   ]) {
     writeFileSync(calls, '');
-    const run = spawnSync('bash', ['-c', script], {cwd, encoding: 'utf8', env: {...process.env, PATH: `${cwd}:${process.env.PATH}`, CALLS: calls, DOCS_ONLY: docsOnly, APP_COMPILE: compile, ENGINE_DRIFT: 'success', VERSION_GUARD: 'success', COMMIT: 'fixture', RUN_URL: 'https://example.test/run'}});
+    const run = spawnSync('bash', ['-c', script], {cwd, encoding: 'utf8', env: {...process.env, PATH: `${cwd}:${process.env.PATH}`, CALLS: calls, DOCS_ONLY: docsOnly, APP_COMPILE: compile, ENGINE_DRIFT: 'success', VERSION_GUARD: version, COMMIT: 'fixture', RUN_URL: 'https://example.test/run'}});
     assert.equal(run.status, 0, run.stderr);
     const commands = readFileSync(calls, 'utf8');
-    assert.equal(commands.includes('issue close'), shouldClose, `${docsOnly}/${compile}`);
+    assert.equal(commands.includes('issue close'), shouldClose, `${docsOnly}/${compile}/${version}`);
     if (shouldReportFailure) assert.match(commands, /Failing jobs:/);
     if (!shouldClose && !shouldReportFailure) assert.ok(!commands.includes('issue comment'));
   }
@@ -93,12 +95,15 @@ internalTest('a surviving alarm reports current build results after pending evic
   git('init', '-q', '-b', 'main');
   write('ci/detect-docs-only.sh', readFileSync(path.join(root, 'ci/detect-docs-only.sh'), 'utf8'));
   chmodSync(path.join(cwd, 'ci/detect-docs-only.sh'), 0o755);
+  write('ci/detect-rn-native-build.mjs', readFileSync(path.join(root, 'ci/detect-rn-native-build.mjs'), 'utf8'));
   write('App/Feature.swift', 'first\n');
   const first = commit();
   write('App/Feature.swift', 'second\n');
   const second = commit();
   write('docs/README.md', 'documentation\n');
   const docs = commit();
+  write('ReactNative/src/label.ts', 'export const label = 1;\n');
+  const javascript = commit();
   git('remote', 'add', 'origin', cwd);
   const script = step('Select the current main build result');
   assert.match(workflow, /group: light-build-main-alarm\n\s+cancel-in-progress: false/);
@@ -142,13 +147,44 @@ esac
   // Read the current gates even though the overall current workflow is pending.
   const docsGates = gates();
   docsGates[0].steps = compileSteps('skipped');
-  const recovered = evaluate([[item(30, docs), item(20, second), item(10, first)]], {30: docsGates, 20: gates('failure')});
+  const recovered = evaluate([[item(40, javascript), item(30, docs), item(20, second), item(10, first)]], {40: docsGates, 30: docsGates, 20: gates('failure')});
   assert.equal(recovered.status, 0, recovered.stderr);
   assert.equal(recovered.output, 'current=true');
   assert.match(recovered.environment, new RegExp(`COMMIT=${second}`));
   assert.match(recovered.environment, /APP_COMPILE=failure/);
   assert.match(recovered.environment, /RUN_URL=https:\/\/example.test\/runs\/20/);
   assert.match(recovered.environment, /DOCS_ONLY=false/);
+  // Native-equivalent JS pushes may reuse the previous compile, but their
+  // version check reads the current public release floor and must stay current.
+  for (const [conclusion, status, expected] of [
+    ['success', 'completed', 'success'], ['failure', 'completed', 'failure'],
+    ['cancelled', 'completed', 'cancelled'], [null, 'in_progress', 'unknown'],
+    ['timed_out', 'completed', 'failure'], ['startup_failure', 'completed', 'failure'],
+  ]) {
+    const latest = gates();
+    latest[0].steps = compileSteps('skipped');
+    latest[2] = {...latest[2], conclusion, status};
+    const result = evaluate([[item(40, javascript), item(20, second)]], {40: latest, 20: gates()});
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.output, 'current=true');
+    assert.match(result.environment, /APP_COMPILE=success/);
+    assert.match(result.environment, new RegExp(`VERSION_GUARD=${expected}\\n`));
+    assert.match(result.environment, /VERSION_GUARD_RUN_URL=https:\/\/example.test\/runs\/40/);
+  }
+  const missingVersion = gates().slice(0, 2);
+  missingVersion[0].steps = compileSteps('skipped');
+  const missing = evaluate([[item(40, javascript), item(20, second)]], {40: missingVersion, 20: gates()});
+  assert.equal(missing.status, 0, missing.stderr);
+  assert.match(missing.environment, /APP_COMPILE=success/);
+  assert.match(missing.environment, /VERSION_GUARD=unknown\n/);
+  // A newer incomplete check must not fall back to an older green run of the
+  // same latest SHA, either.
+  const cancelledVersion = gates();
+  cancelledVersion[0].steps = compileSteps('skipped');
+  cancelledVersion[2].conclusion = 'cancelled';
+  const sameSource = evaluate([[item(41, javascript), item(40, javascript), item(20, second)]], {41: cancelledVersion, 40: docsGates, 20: gates()});
+  assert.equal(sameSource.status, 0, sameSource.stderr);
+  assert.match(sameSource.environment, /VERSION_GUARD=cancelled\n/);
   const unbuilt = gates(); unbuilt[0].steps = [];
   const partiallyBuilt = gates(); partiallyBuilt[0].steps[2].conclusion = 'skipped';
   for (const incomplete of [unbuilt, partiallyBuilt]) {

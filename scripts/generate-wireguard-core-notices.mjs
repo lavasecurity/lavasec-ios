@@ -17,8 +17,7 @@
 //   node scripts/generate-wireguard-core-notices.mjs            # write
 //   node scripts/generate-wireguard-core-notices.mjs --check    # fail if the committed file is stale
 //
-// Requires cargo on PATH (rustup lives at /opt/homebrew/opt/rustup/bin on the dev machines
-// and is provisioned explicitly in the CI job).
+// Requires the crate's pinned Cargo on PATH; build preparation resolves it via rustup.
 
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";

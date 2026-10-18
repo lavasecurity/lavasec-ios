@@ -1,138 +1,159 @@
 #!/usr/bin/env bash
-# Build the LavaSec WireGuard engine (ThirdParty/wireguard-core) into a 3-slice
-# xcframework and write it to ThirdParty/wireguard-core/build/. Phase 1 of the
-# chained-VPN-upstream plan (lavasec-infra
-# plans/2026-07-22-vpn-upstream-chaining-implementation-plan.md, D4).
-#
-# The output is REPRODUCIBLE: run twice on any Mac with the pinned toolchain and
-# the bytes are identical. That is a hard requirement, not a nicety —
-# scripts/check-wireguard-core-drift.sh re-runs this and byte-compares against the
-# committed artifact (the AGPL provenance answer: the public tree carries source +
-# pinned toolchain + a CI-verified bit-identical rebuild). This script is the SOLE
-# authority for producing the committed artifact; never build it with a bare
-# `cargo build` (that would embed machine-specific paths — see below).
-#
-# Determinism levers:
-#   - profile pins (Cargo.toml): lto + codegen-units=1 + strip=debuginfo.
-#   - --remap-path-prefix (here): panic-location metadata embeds absolute source
-#     paths for the crate, the cargo registry, and the rust sysroot; those vary by
-#     machine, so they are remapped to fixed virtual roots. (Cargo 1.94 has not
-#     stabilized the `trim-paths` profile option, so this is done via RUSTFLAGS.)
-#   - SOURCE_DATE_EPOCH + deterministic `ar` (Rust's default) keep archive member
-#     metadata stable.
+# Build the pinned WireGuard source with the active Xcode/SDKs. Build preparation
+# runs this before SwiftPM/Xcode consumes the local binary target. Historical
+# artifact bytes and compiler versions are never inputs to this build.
 set -euo pipefail
 
-here="$(cd "$(dirname "${BASH_SOURCE[0]}")/../ThirdParty/wireguard-core" && pwd)"
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")/../ThirdParty/wireguard-core" && pwd -P)"
 out="${here}/build"
-xcframework="${out}/LavaSecWGCore.xcframework"
-lib_basename="liblavasec_wireguard_core.a"
+if [ "$#" -ne 0 ]; then
+  if [ "$#" -ne 2 ] || [ "$1" != --output ] || [[ "$2" != /* ]] || [ -e "$2" ] || [ -L "$2" ]; then
+    echo "usage: $0 [--output /absolute/nonexistent/directory]" >&2
+    exit 2
+  fi
+  out="$2"
+fi
 
+cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+export PATH="$cargo_home/bin:$PATH"
+# Notices checks in later CI steps need the same Rust installation.
+if [ -n "${GITHUB_PATH:-}" ]; then
+  printf '%s\n' "$cargo_home/bin" >> "$GITHUB_PATH"
+fi
+for tool in xcodebuild xcrun python3 plutil; do
+  command -v "$tool" >/dev/null 2>&1 || { echo "error: $tool not found" >&2; exit 1; }
+done
 if ! command -v rustup >/dev/null 2>&1; then
-  echo "error: rustup not found on PATH." >&2
-  exit 1
+  curl --proto '=https' --tlsv1.2 --fail --silent --show-error \
+    https://sh.rustup.rs | sh -s -- -y --default-toolchain none --no-modify-path
 fi
-if ! command -v xcodebuild >/dev/null 2>&1; then
-  echo "error: xcodebuild not found (Xcode required)." >&2
-  exit 1
-fi
-
-# Run every rustc/cargo/rustup command from the crate dir so the pinned
-# rust-toolchain.toml is the active override. This is load-bearing on a machine
-# with NO default toolchain set (e.g. the CI runner): from a directory with no
-# toolchain file, `rustc`/`rustup target list` would fail with "no default
-# toolchain configured" even though the pinned toolchain and targets are present.
+# The crate override, not a host's default Rust, selects the compiler and targets.
 cd "$here"
+rustup toolchain install --profile minimal
+# Homebrew can expose rustup without Cargo/rustc shims on PATH. Resolve the
+# selected compiler's binaries through rustup rather than guessing install paths.
+cargo_path="$(rustup which cargo)"
+cargo_bin="${cargo_path%/*}"
+export PATH="$cargo_bin:$PATH"
+if [ -n "${GITHUB_PATH:-}" ]; then
+  printf '%s\n' "$cargo_bin" >> "$GITHUB_PATH"
+fi
 
-# Device + iOS simulator + macOS (the macOS slice lets executable package tests
-# drive the real Noise state machine under `swift test`).
+# Device, simulator and executable macOS package tests.
 targets=(aarch64-apple-ios aarch64-apple-ios-sim aarch64-apple-darwin)
 for t in "${targets[@]}"; do
   if ! rustup target list --installed | grep -qx "$t"; then
-    echo "error: rust target $t not installed (for the pinned toolchain)." >&2
-    echo "       cd ThirdParty/wireguard-core && rustup target add $t" >&2
-    exit 1
+    rustup target add "$t"
   fi
 done
 
-# Stable virtual roots for embedded source paths. The cargo registry index hash is
-# a function of the crates.io URL (identical across machines for a given cargo), so
-# remapping CARGO_HOME/registry normalizes every dependency path.
-cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+scratch="$(mktemp -d "${TMPDIR:-/tmp}/lavasec-wireguard.XXXXXX")"
+scratch="$(cd "$scratch" && pwd -P)"
+trap 'rm -rf "$scratch"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+# A clean target directory also prevents Cargo build.rs outputs from retaining
+# C objects produced by a previous Xcode selected at the same filesystem path.
+export CARGO_TARGET_DIR="$scratch/target"
+staged="$scratch/build"
+xcframework="$staged/LavaSecWGCore.xcframework"
+mkdir -p "$staged"
 sysroot="$(rustc --print sysroot)"
-export RUSTFLAGS="${RUSTFLAGS:-} \
-  --remap-path-prefix=${here}=/lavasec-wireguard-core \
-  --remap-path-prefix=${cargo_home}=/cargo \
-  --remap-path-prefix=${sysroot}=/rustc"
-# RUSTFLAGS only remaps rustc-compiled code. `ring` (our transitive crypto dep)
-# compiles C (curve25519.c, aes_nohw.c, …) via its own build.rs + the cc crate,
-# which bakes the absolute registry path into each object. `-ffile-prefix-map`
-# (honored by the cc crate through CFLAGS, covering both debug info and __FILE__)
-# remaps those to the same virtual root. Without this the .a is NOT reproducible.
-export CFLAGS="${CFLAGS:-} -ffile-prefix-map=${cargo_home}=/cargo -ffile-prefix-map=${here}=/lavasec-wireguard-core"
-# Fixed timestamp for any archive/member metadata that honors it.
+# Cargo splits ordinary RUSTFLAGS at whitespace even when a path is quoted.
+# Append our mappings through its argument-preserving encoded form, retaining
+# the caller's flags and Cargo's precedence for an existing encoded value.
+CARGO_ENCODED_RUSTFLAGS="$(python3 - "$here" "$cargo_home" "$sysroot" "$scratch" <<'PYEOF'
+import os, re, sys
+encoded = os.environ.get("CARGO_ENCODED_RUSTFLAGS")
+flags = encoded.split("\x1f") if encoded else []
+if encoded is None:
+    flags = re.findall(r"[^ \t\r\n\v\f]+", os.environ.get("RUSTFLAGS", ""))
+for source, destination in zip(sys.argv[1:], ("/lavasec-wireguard-core", "/cargo", "/rustc", "/wireguard-build")):
+    flags.append(f"--remap-path-prefix={source}={destination}")
+print("\x1f".join(flags))
+PYEOF
+)"
+export CARGO_ENCODED_RUSTFLAGS
+# ring uses the pinned cc crate, whose shell-escaped mode preserves spaces and
+# quotes in C path mappings. Preserve the caller's existing parsing semantics.
+CFLAGS="$(python3 - "$cargo_home" "$here" "$scratch" <<'PYEOF'
+import os, re, shlex, sys
+value = os.environ.get("CFLAGS", "")
+shell_escaped = os.environ.get("CC_SHELL_ESCAPED_FLAGS", "") not in ("", "0", "no", "false")
+flags = shlex.split(value) if shell_escaped else re.findall(r"[^ \t\r\n\v\f]+", value)
+for source, destination in zip(sys.argv[1:], ("/cargo", "/lavasec-wireguard-core", "/wireguard-build")):
+    flags.append(f"-ffile-prefix-map={source}={destination}")
+print(shlex.join(flags))
+PYEOF
+)"
+export CFLAGS CC_SHELL_ESCAPED_FLAGS=1
 export SOURCE_DATE_EPOCH=0
 
-echo "==> building static libs (reproducible)"
-# Remove ONLY the generated artifacts, never the whole build/ directory: it also holds
-# the committed BUILD-TOOLCHAIN.txt sidecar, which is regenerated below. An
-# `rm -rf "$out"` here silently deleted a committed file once. (.gitattributes used to live
-# here too and now sits one level up, where it is scannable and diffable.)
-rm -rf "$xcframework"
-mkdir -p "$out"
 for t in "${targets[@]}"; do
-  ( cd "$here" && cargo build --release --target "$t" )
+  cargo build --locked --release --target "$t"
 done
-
-device_lib="${here}/target/aarch64-apple-ios/release/${lib_basename}"
-sim_lib="${here}/target/aarch64-apple-ios-sim/release/${lib_basename}"
-macos_lib="${here}/target/aarch64-apple-darwin/release/${lib_basename}"
-
-echo "==> assembling ${xcframework}"
-rm -rf "$xcframework"
+lib_basename=liblavasec_wireguard_core.a
 xcodebuild -create-xcframework \
-  -library "$device_lib" -headers "${here}/include" \
-  -library "$sim_lib" -headers "${here}/include" \
-  -library "$macos_lib" -headers "${here}/include" \
+  -library "$CARGO_TARGET_DIR/aarch64-apple-ios/release/$lib_basename" -headers "$here/include" \
+  -library "$CARGO_TARGET_DIR/aarch64-apple-ios-sim/release/$lib_basename" -headers "$here/include" \
+  -library "$CARGO_TARGET_DIR/aarch64-apple-darwin/release/$lib_basename" -headers "$here/include" \
   -output "$xcframework"
 
-# Canonicalize Info.plist: `xcodebuild -create-xcframework` orders the
-# AvailableLibraries array nondeterministically (identical entries, swapped
-# run-to-run — the slice .a bytes are stable, only this ordering is not), which
-# alone would defeat the byte-compare drift gate. Sort the array by
-# LibraryIdentifier and re-emit with sorted keys so the plist is a pure function
-# of the inputs. Done via plutil + the json module (not plistlib) so it does not
-# depend on a working pyexpat.
-plist="${xcframework}/Info.plist"
-plist_json="${out}/Info.plist.json"
-plutil -convert json -o "$plist_json" "$plist"
-python3 - "$plist_json" <<'PYEOF'
+# xcodebuild can emit AvailableLibraries in different orders on repeated builds.
+plist="$xcframework/Info.plist"
+plutil -convert json -o "$staged/Info.plist.json" "$plist"
+python3 - "$staged/Info.plist.json" <<'PYEOF'
 import json, sys
 p = sys.argv[1]
 with open(p) as f:
     data = json.load(f)
-libs = data.get("AvailableLibraries")
-if isinstance(libs, list):
-    data["AvailableLibraries"] = sorted(libs, key=lambda d: d.get("LibraryIdentifier", ""))
+data["AvailableLibraries"] = sorted(data["AvailableLibraries"], key=lambda d: d["LibraryIdentifier"])
 with open(p, "w") as f:
     json.dump(data, f, sort_keys=True)
 PYEOF
-plutil -convert xml1 -o "$plist" "$plist_json"
-rm -f "$plist_json"
+plutil -convert xml1 -o "$plist" "$staged/Info.plist.json"
+rm "$staged/Info.plist.json"
 
-# Record the toolchain that produced these bytes. The .a is reproducible only
-# under a FIXED Xcode as well as the pinned rustc: `ring` compiles its C crypto
-# (curve25519.c, aes_nohw.c, …) with the ambient Xcode clang, so a different
-# Xcode changes those objects (the Rust code, same rustc, stays identical). This
-# file lets the drift gate report an Xcode-driven mismatch in plain language
-# instead of an opaque byte diff. It is metadata, not part of the byte-compared
-# xcframework.
-xcode_build="$(xcodebuild -version | awk '/^Build version/{print $3}')"
+# Detected versions are provenance, not host requirements or historical pins.
 {
   echo "rustc: $(rustc --version)"
-  echo "xcode-build: ${xcode_build}"
-} > "${out}/BUILD-TOOLCHAIN.txt"
+  xcodebuild -version
+  xcrun clang --version | sed -n '1p'
+  for sdk in iphoneos iphonesimulator macosx; do
+    sdk_version="$(xcrun --sdk "$sdk" --show-sdk-version)"
+    echo "$sdk-sdk: $sdk_version"
+  done
+} > "$staged/BUILD-TOOLCHAIN.txt"
 
-echo "==> done"
-for lib in "$device_lib" "$sim_lib" "$macos_lib"; do
-  printf '    %-52s %s\n' "$(basename "$(dirname "$(dirname "$lib")")")" "$(shasum -a 256 "$lib" | cut -d' ' -f1)"
+# Only the generated slices, headers and metadata may reach a consumer. Check
+# entry types too: manifests of regular files alone would silently omit symlinks.
+python3 - "$staged" <<'PYEOF'
+from pathlib import Path
+import sys
+root = Path(sys.argv[1])
+expected = {"BUILD-TOOLCHAIN.txt", "LavaSecWGCore.xcframework/Info.plist"}
+for slice in ("ios-arm64", "ios-arm64-simulator", "macos-arm64"):
+    for file in ("Headers/lavasec_wireguard_core.h", "liblavasec_wireguard_core.a"):
+        expected.add(f"LavaSecWGCore.xcframework/{slice}/{file}")
+entries = list(root.rglob("*"))
+if any(p.is_symlink() or not (p.is_file() or p.is_dir()) for p in entries):
+    sys.exit("error: non-regular entry in generated WireGuard artifact")
+actual = {str(p.relative_to(root)) for p in entries if p.is_file()}
+if actual != expected:
+    sys.exit(f"error: unexpected WireGuard artifact contents: {sorted(actual ^ expected)}")
+PYEOF
+for lib in "$xcframework"/*/"$lib_basename"; do
+  strings -a "$lib" > "$scratch/strings.txt"
+  if grep -F -e "$HOME" -e "$cargo_home" -e "$here" -e "$scratch" "$scratch/strings.txt" >/dev/null; then
+    echo "error: absolute build path embedded in $lib" >&2
+    exit 1
+  fi
 done
+
+# Publish only a complete successful build. A failed build cannot fall back to
+# the checked-in snapshot: callers stop on this script's nonzero exit status.
+mkdir -p "$(dirname "$out")"
+rm -rf "$out"
+mv "$staged" "$out"
+echo "WireGuard source build ready: $out"
+cat "$out/BUILD-TOOLCHAIN.txt"

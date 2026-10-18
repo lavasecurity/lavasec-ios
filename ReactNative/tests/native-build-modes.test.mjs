@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
-import {copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
+import {copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'node:test';
+
+const normalMinimum = JSON.parse(readFileSync(new URL('../scripts/full-app-journey-lanes.json', import.meta.url))).normalSimulatorMinimumTests;
 
 // Execute the real orchestration script with fake native tools. This exercises
 // mode selection, failure propagation and cleanup without Xcode or a simulator.
@@ -21,7 +23,7 @@ function run(t, args, options = {}) {
   copyFileSync(new URL('../scripts/simulator-cleanup.sh', import.meta.url), join(app, 'scripts/simulator-cleanup.sh'));
   copyFileSync(new URL('../scripts/simulator-signing-fixture.py', import.meta.url), join(app, 'scripts/simulator-signing-fixture.py'));
   copyFileSync(new URL('../scripts/full-app-journey-lanes.json', import.meta.url), join(app, 'scripts/full-app-journey-lanes.json'));
-  writeFileSync(join(app, 'scripts/prepare-full-app.sh'), 'set -eu\nprintf prepared > "$2/prepared"\n');
+  writeFileSync(join(app, 'scripts/prepare-full-app.sh'), 'set -eu\nprintf prepared > "$2/prepared"\nexit "${LAVA_CI_TEST_PREPARE_EXIT:-0}"\n');
   writeFileSync(join(app, 'scripts/test-native-containment.sh'), 'set -eu\nprintf \'{"passed":true,"checks":26}\' > "$2/native-scaffold-results.json"\nexit "${LAVA_CI_TEST_SCAFFOLD_EXIT:-0}"\n');
   // Old journey evidence must never survive a compile or failed retry.
   writeFileSync(join(evidence, 'test-summary.json'), '{}');
@@ -72,7 +74,7 @@ if (tool==='xcrun' && args[0]==='xcresulttool' && args[1]==='export') mkdirSync(
     encoding: 'utf8', timeout: 120000,
     env: {...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: root,
       LAVA_CI_TEST_TRACE: trace,
-      LAVA_CI_TEST_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 77, failedTests: 0, skippedTests: 0}),
+      LAVA_CI_TEST_SUMMARY: JSON.stringify({result: 'Passed', passedTests: normalMinimum, failedTests: 0, skippedTests: 0}),
       LAVA_CI_TEST_IPAD_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 2, failedTests: 0, skippedTests: 0}),
       LAVA_CI_TEST_PREFERENCES_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 1, failedTests: 0, skippedTests: 0}),
       LAVA_CI_TEST_MOTION_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 3, failedTests: 0, skippedTests: 0}),
@@ -81,7 +83,7 @@ if (tool==='xcrun' && args[0]==='xcresulttool' && args[1]==='export') mkdirSync(
   });
   assert.ifError(result.error);
   const calls = existsSync(trace) ? readFileSync(trace, 'utf8').trim().split('\n').map(line => JSON.parse(line)) : [];
-  return {result, evidence, calls};
+  return {result, evidence, calls, buildRoots: readdirSync(root).filter(name => name.startsWith('lava-rn-full.'))};
 }
 
 function assertCleaned(calls) {
@@ -108,7 +110,29 @@ test('mandatory journey selectors exist and the normal minimum covers every ordi
   }
 });
 
-test('routine compile keeps UIKit regressions and produces no journey or app ZIP evidence', t => {
+test('containment runs UIKit regressions without full app preparation or compilation', t => {
+  // A broken full-app preparation path cannot affect the independent UIKit app.
+  const {result, evidence, calls, buildRoots} = run(t, ['--containment'], {LAVA_CI_TEST_PREPARE_EXIT: '99'});
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(!existsSync(join(evidence, 'prepared')));
+  assert.ok(!calls.some(call => call.tool === 'xcodebuild'));
+  assert.ok(!calls.some(call => call.tool === 'ditto' || call.args[0] === 'xcresulttool'));
+  assert.ok(existsSync(join(evidence, 'native-scaffold-results.json')));
+  assert.ok(!existsSync(join(evidence, 'test-summary.json')));
+  assert.ok(!existsSync(join(evidence, 'Lava-RN-Full-Simulator.zip')));
+  assert.ok(!existsSync(join(evidence, 'xcodebuild.log')));
+  const receipt = JSON.parse(readFileSync(join(evidence, 'validation.json')));
+  assert.equal(receipt.mode, 'containment');
+  assert.equal(receipt.result, 'Passed');
+  assert.equal(receipt.containmentExecuted, true);
+  assert.equal(receipt.fullAppCompiled, false);
+  assert.equal(receipt.journeysExecuted, false);
+  assert.ok(Number.isFinite(receipt.elapsedSeconds) && receipt.elapsedSeconds >= 0);
+  assert.deepEqual(buildRoots, []);
+  assertCleaned(calls);
+});
+
+test('explicit compile keeps UIKit regressions and produces no journey or app ZIP evidence', t => {
   const {result, evidence, calls} = run(t, ['--compile']);
   assert.equal(result.status, 0, result.stderr);
   const build = calls.find(call => call.tool === 'xcodebuild').args;
@@ -165,14 +189,17 @@ test('existing local default still runs journeys and retains review evidence', t
 });
 
 for (const [name, args, options] of [
+  ['containment failure', ['--containment'], {LAVA_CI_TEST_SCAFFOLD_EXIT: '1'}],
   ['compile failure', ['--compile'], {LAVA_CI_TEST_XCODE_EXIT: '65'}],
   ['missing full app', ['--compile'], {LAVA_CI_TEST_MISSING_APP: '1'}],
   ['native scaffold failure', ['--compile'], {LAVA_CI_TEST_SCAFFOLD_EXIT: '1'}],
   ['unqualified simulated namespace', ['--journeys'], {LAVA_CI_TEST_UNQUALIFIED_SIMULATOR_GROUP:'1'}],
   ['mismatched simulated namespace', ['--journeys'], {LAVA_CI_TEST_SIMULATOR_GROUP_MISMATCH:'1'}],
-  ['failed journeys', ['--journeys'], {LAVA_CI_TEST_SUMMARY: JSON.stringify({result: 'Failed', passedTests: 77, failedTests: 1, skippedTests: 0})}],
-  ['skipped journeys', ['--journeys'], {LAVA_CI_TEST_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 77, failedTests: 0, skippedTests: 1})}],
-  ['missing ordinary journey', ['--journeys'], {LAVA_CI_TEST_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 76, failedTests: 0, skippedTests: 0})}],
+  ['failed journeys', ['--journeys'], {LAVA_CI_TEST_SUMMARY: JSON.stringify({result: 'Failed', passedTests: normalMinimum, failedTests: 1, skippedTests: 0})}],
+  ['skipped journeys', ['--journeys'], {LAVA_CI_TEST_SUMMARY: JSON.stringify({result: 'Passed', passedTests: normalMinimum, failedTests: 0, skippedTests: 1})}],
+  // An extra skipped case must fail even when enough ordinary cases passed.
+  ['skipped additional journey', ['--journeys'], {LAVA_CI_TEST_SUMMARY: JSON.stringify({result: 'Passed', passedTests: normalMinimum + 1, failedTests: 0, skippedTests: 1})}],
+  ['missing ordinary journey', ['--journeys'], {LAVA_CI_TEST_SUMMARY: JSON.stringify({result: 'Passed', passedTests: normalMinimum - 1, failedTests: 0, skippedTests: 0})}],
   ['motion execution failure', ['--journeys'], {LAVA_CI_TEST_MOTION_XCODE_EXIT: '65'}],
   ['missing motion preference verification', ['--journeys'], {LAVA_CI_TEST_PREFERENCES_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 0, failedTests: 0, skippedTests: 0})}],
   ['failed motion journeys', ['--journeys'], {LAVA_CI_TEST_MOTION_SUMMARY: JSON.stringify({result: 'Failed', passedTests: 2, failedTests: 1, skippedTests: 0})}],
@@ -184,10 +211,11 @@ for (const [name, args, options] of [
   ['missing tablet journey', ['--journeys'], {LAVA_CI_TEST_IPAD_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 1, failedTests: 0, skippedTests: 0})}],
 ]) {
   test(`${name} cannot produce a passing receipt and cleans its isolated build`, t => {
-    const {result, evidence, calls} = run(t, args, options);
+    const {result, evidence, calls, buildRoots} = run(t, args, options);
     assert.notEqual(result.status, 0);
     assert.ok(!existsSync(join(evidence, 'validation.json')));
     assert.ok(!existsSync(join(evidence, 'Lava-RN-Full-Simulator.zip')));
+    assert.deepEqual(buildRoots, []);
     assertCleaned(calls);
   });
 }
@@ -260,7 +288,7 @@ test('native job runs after prerequisite failure while preserving cancellation, 
   assert.equal(runs({event: 'push', native: 'false'}), false);
 });
 
-for (const prepare of ['prepare-full-app.sh','prepare-review-host.sh']) {
+for (const prepare of ['prepare-review-host.sh']) {
   for (const yogaFails of [true,false]) {
     test(`${prepare} requires the real-layout gate before bundling (${yogaFails?'failure':'success'})`, t => {
       const root=mkdtempSync(join(tmpdir(),'lava-prepare-layout-'));
@@ -268,12 +296,12 @@ for (const prepare of ['prepare-full-app.sh','prepare-review-host.sh']) {
       const app=join(root,'ReactNative'),bin=join(root,'bin'),trace=join(root,'trace.jsonl');
       mkdirSync(join(app,'scripts'),{recursive:true});mkdirSync(bin);
       copyFileSync(new URL(`../scripts/${prepare}`,import.meta.url),join(app,'scripts',prepare));
-      for(const tool of ['npm','node','bundle']) {
-        writeFileSync(join(bin,tool),`#!${process.execPath}\nimport {appendFileSync} from 'node:fs';\nconst tool=${JSON.stringify(tool)},args=process.argv.slice(2);\nappendFileSync(${JSON.stringify(trace)},JSON.stringify({tool,args})+'\\n');\nif(tool==='node')process.exit(${yogaFails?42:0});\nif(tool==='bundle')process.exit(43);\n`,{mode:0o755});
+      for(const tool of ['npm','node','bundle','rustup']) {
+        writeFileSync(join(bin,tool),`#!${process.execPath}\nimport {appendFileSync} from 'node:fs';\nconst tool=${JSON.stringify(tool)},args=process.argv.slice(2);\nappendFileSync(${JSON.stringify(trace)},JSON.stringify({tool,args})+'\\n');\nif(tool==='rustup')console.log(${JSON.stringify(join(bin,'cargo'))});\nif(tool==='node'&&args[0]==='scripts/test-story-columns-layout.mjs')process.exit(${yogaFails?42:0});\nif(tool==='bundle')process.exit(43);\n`,{mode:0o755});
       }
-      const result=spawnSync('bash',[join(app,'scripts',prepare),join(root,'build'),join(root,'evidence')],{encoding:'utf8',timeout:30000,env:{...process.env,PATH:`${bin}:${process.env.PATH}`}});
-      const calls=readFileSync(trace,'utf8').trim().split('\n').map(line=>JSON.parse(line));
+      const result=spawnSync('bash',[join(app,'scripts',prepare),join(root,'build'),join(root,'evidence')],{encoding:'utf8',timeout:30000,env:{...process.env,PATH:`${bin}:${process.env.PATH}`,CARGO_HOME:root,LAVA_CI_TEST_TRACE:trace}});
       assert.equal(result.status,yogaFails?42:43,result.stderr);
+      const calls=readFileSync(trace,'utf8').trim().split('\n').map(line=>JSON.parse(line));
       const layout=calls.findIndex(call=>call.tool==='node'&&call.args[0]==='scripts/test-story-columns-layout.mjs');
       assert.ok(layout>=0,'Native preparation must execute the Yoga gate.');
       const bundle=calls.findIndex(call=>call.tool==='npm'&&call.args.join(' ')==='run bundle:review');

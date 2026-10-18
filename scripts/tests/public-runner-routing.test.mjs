@@ -10,9 +10,9 @@ function job(workflow, name) {
   const block = text.split(`\n  ${name}:\n`)[1].split(/\n  [a-z][\w-]*:\n/)[0];
   return Object.fromEntries(['if', 'runs-on'].map(key => [key, block.match(new RegExp(`^    ${key}: (.+)$`, 'm'))?.[1]]));
 }
-function evaluate(value, github, cancelled = false) {
+function evaluate(value, github, cancelled = false, needs = {changes: {outputs: {}}}) {
   if (!value.startsWith('${{')) return value;
-  return Function('github', 'fromJSON', 'cancelled', `return (${value.slice(3, -2)});`)(github, JSON.parse, () => cancelled);
+  return Function('github', 'fromJSON', 'cancelled', 'needs', `return (${value.slice(3, -2)});`)(github, JSON.parse, () => cancelled, needs);
 }
 function context(repo, kind = 'trusted', event = 'pull_request') {
   return { repository: repo, event_name: event, event: { pull_request: {
@@ -23,7 +23,7 @@ function context(repo, kind = 'trusted', event = 'pull_request') {
 
 const packageJob = job('ios.yml', 'swift-package-tests');
 const appJob = job('ios.yml', 'ios-simulator-build');
-const linuxJobs = [job('ios.yml', 'changes'), job('ios.yml', 'repo-checks'), job('react-native-ui.yml', 'lava-ui'), job('catalog-health.yml', 'sources')];
+const linuxJobs = [job('ios.yml', 'changes'), job('ios.yml', 'repo-checks'), job('ios.yml', 'lava-ui'), job('catalog-health.yml', 'sources')];
 
 test('public source and forks use hosted runners, including dependency PRs', () => {
   for (const repo of ['lavasecurity/lavasec-ios', 'contributor/lavasec-ios', 'contributor/lavasec-ios-internal']) {
@@ -33,7 +33,7 @@ test('public source and forks use hosted runners, including dependency PRs', () 
       assert.deepEqual(evaluate(packageJob['runs-on'], ctx), ['macos-26']);
       for (const lane of linuxJobs) assert.equal(evaluate(lane['runs-on'], ctx), 'ubuntu-latest');
       assert.equal(evaluate(appJob.if, ctx), repo === 'lavasecurity/lavasec-ios');
-      assert.equal(appJob['runs-on'], 'macos-26');
+      assert.equal(evaluate(appJob['runs-on'], ctx), 'macos-26');
     }
   }
 });

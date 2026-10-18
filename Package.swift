@@ -93,11 +93,10 @@ let package = Package(
             name: "LavaSecCore",
             dependencies: ["LavaSecKit", "LavaSecNetworking", "LavaSecDNS", "LavaSecFilterPipeline", "LavaSecPresentation", "LavaSecAppServices"]
         ),
-        // The WireGuard engine as a prebuilt, provenance-gated artifact. The Xcode/SwiftPM
-        // build cannot run Rust (shell phases, build rules, and plugins are all rejected by
-        // the committed xcodegen guards), so the engine ships as a committed xcframework
-        // whose bytes CI proves equal a from-source rebuild — see
-        // scripts/check-wireguard-core-drift.sh and ThirdParty/wireguard-core/README.md.
+        // Build preparation compiles the pinned WireGuard source with the active
+        // Xcode before SwiftPM consumes this artifact. Rust runs outside the Xcode
+        // graph, whose guards reject shell phases, build rules and plugins. See
+        // scripts/build-wireguard-core.sh and ThirdParty/wireguard-core/README.md.
         // This is the package's only binary target; the boundary guard whitelists it by
         // exact shape so a second one cannot appear unreviewed.
         .binaryTarget(

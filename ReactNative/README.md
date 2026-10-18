@@ -48,24 +48,27 @@ Documentation-only PRs report their classification without installing dependenci
 
 ## CI validation levels
 
-Every code PR keeps React component, query, authentication and feature contracts,
-project/dependency policies, TypeScript and both gallery and full-app bundle checks. The measured JS lane
-took about 48 seconds, including 309 component/unit tests in 11.8 seconds.
-Swift tests and the independent native app/extension compile remain in CI.
+Every ready code PR keeps React component, query, authentication and feature
+contracts, project/dependency policies, TypeScript and both gallery and full-app
+bundle checks. These JavaScript checks run once in the shared iOS workflow;
+native preparation installs dependencies and verifies the generated native graph
+without repeating that suite. Swift tests and the independent native
+app/extension compile remain required checks. Known JS-only diffs complete the
+app check on Linux after UI validation; native and unknown inputs still compile.
 
-The **full app with RN** compile and 26 UIKit regressions run when a complete diff
-contains native inputs or unknown paths. Changes confined to UI JS/TS files under
-`app`, `review`, `src`, `gallery` and known fast test files, plus documentation, skip
-that cold native rebuild. Generated-graph tests, bridge/codegen specs, Swift/Objective-C, dependencies, project and
-build configuration always compile. Renames, missing ranges and classifier
-failures cannot hide native changes. PRs and main pushes use local Git diffs,
-avoiding GitHub event-filter limits; manual runs always request native validation.
+The internal **React Native UI** workflow runs the standalone UIKit regressions
+on main and PRs labelled `full-build` when a complete diff contains native inputs
+or unknown paths. Changes confined to UI JS/TS files under `app`, `review`, `src`,
+`gallery` and known fast test files, plus documentation, skip this optional lane.
+Renames, missing ranges and classifier failures cannot hide native changes.
+PRs and main pushes use local Git diffs, avoiding GitHub event-filter limits;
+manual runs always request native validation. Public and fork code uses hosted
+CI and never runs on the private Mac runner.
 
-The previous cold native job took about 24 minutes (17m26s in Xcode), mostly
-because its isolated build directory cannot reuse Xcode's incremental compilation.
-That cost is retained for changes affecting native integration and explicit checks,
-instead of charging every ordinary screen edit. Signed releases still build the
-complete native app through lavasec-runner.
+The routine CI `containment` mode builds and runs only the independent UIKit
+regression app in a private simulator. It does not install RN dependencies or
+repeat the complete app compile already covered by the required build check.
+Signed releases still build the complete native app through lavasec-runner.
 
 The isolated preview app and long user-journey tours are retained for deliberate
 device/parity review instead of rebuilding both apps on every edit. In the
@@ -73,21 +76,24 @@ device/parity review instead of rebuilding both apps on every edit. In the
 
 | Validation | Native work |
 | --- | --- |
-| `compile` (default) | Full RN app compile and UIKit scaffold regressions |
+| Routine main/`full-build` | Standalone UIKit scaffold regressions |
+| `compile` (dispatch default) | Full RN app compile and UIKit scaffold regressions |
 | `full-app-journeys` | Full RN app journeys, screenshots, lifecycle traces and simulator app |
 | `parity-review` | Full-app journeys, followed by the isolated preview tour |
 
 For example, run `gh workflow run react-native-ui.yml --ref <branch> -f validation=full-app-journeys`.
-The native jobs remain serial when both are requested. Forks still use hosted
-Linux contract checks and never execute native builds on the private Mac runner.
+The native jobs remain serial when both are requested.
 Dependency/SDK, native navigation, presentation or accessibility changes warrant
 an explicit journey run and the relevant device checks.
 
-`scripts/build-full-app.sh --compile` builds without XCTest journeys. Its
+`scripts/build-full-app.sh --containment` retains the scaffold report and a
+`validation.json` receipt with `fullAppCompiled: false` and
+`journeysExecuted: false`. It produces no complete app or journey evidence.
+`--compile` builds without XCTest journeys. Its
 `validation.json` says `journeysExecuted: false`; it retains the native scaffold
 report, generated graph and build log, without uploading a large simulator ZIP.
 `--journeys` retains test results, recordings and the app ZIP. Calling the script
-without arguments preserves the existing journey default. Neither mode signs or
+without arguments preserves the existing journey default. None of these modes signs or
 uploads a device release; those continue through lavasec-runner.
 
 ## Shared API and iOS implementation
