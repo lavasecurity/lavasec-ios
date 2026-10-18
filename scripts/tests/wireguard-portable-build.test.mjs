@@ -193,10 +193,19 @@ test('explicit output is isolated and cannot overwrite an existing directory', t
 
 test('app/release preparation and Swift CI build the artifact before consumers run', () => {
   const prep = readFileSync(path.join(root, 'ReactNative/scripts/prepare-full-app.sh'), 'utf8');
-  assert.ok(prep.indexOf('bash ../scripts/build-wireguard-core.sh') < prep.indexOf('ruby native-app/generate-project.rb'));
+  const build = prep.indexOf('bash ../scripts/build-wireguard-core.sh');
+  const notices = prep.indexOf('node ../scripts/generate-wireguard-core-notices.mjs --check');
+  const generate = prep.indexOf('ruby native-app/generate-project.rb');
+  assert.ok(build >= 0, 'App preparation must build the WireGuard artifact.');
+  assert.ok(notices >= 0, 'App preparation must check source-built notices.');
+  assert.ok(generate >= 0, 'App preparation must generate the native project.');
+  assert.ok(build < notices && notices < generate, 'Source and notices must pass before project generation.');
   assert.match(prep, /set -euo pipefail/);
-  assert.match(prep, /generate-wireguard-core-notices\.mjs --check/);
   const workflow = readFileSync(path.join(root, '.github/workflows/ios.yml'), 'utf8').split('  swift-package-tests:')[1].split('  ios-simulator-build:')[0];
   assert.match(workflow, /ci\/run-with-maintenance-lock\.sh -- bash scripts\/build-wireguard-core\.sh/);
-  assert.ok(workflow.indexOf('scripts/build-wireguard-core.sh') < workflow.indexOf('cmd=(swift test'));
+  const packageBuild = workflow.indexOf('scripts/build-wireguard-core.sh');
+  const packageTests = workflow.indexOf('cmd=(swift test');
+  assert.ok(packageBuild >= 0, 'Swift CI must build the WireGuard artifact.');
+  assert.ok(packageTests >= 0, 'Swift CI must execute the package tests.');
+  assert.ok(packageBuild < packageTests, 'Source compilation must precede Swift package tests.');
 });
