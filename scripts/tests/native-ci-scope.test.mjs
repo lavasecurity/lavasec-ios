@@ -18,6 +18,30 @@ function needs(native, docs = 'false', javascript = 'success', classification = 
 const publicBuild = job('ios.yml', 'ios-simulator-build');
 const condition = block => block.match(/^        if: (.+)$/m)[1];
 
+test('shared iOS checks keep a read-only token and react to full-build label changes', () => {
+  const workflow = read('.github/workflows/ios.yml');
+  const header = workflow.split('\njobs:\n')[0];
+  assert.match(header, /^permissions:\n  contents: read$/m);
+  const events = header.match(/^    types: \[([^\]]+)\]/m)[1].split(',').map(value => value.trim());
+  for (const event of ['labeled', 'unlabeled']) assert.ok(events.includes(event), event);
+  const classifier = step(job('ios.yml', 'changes'), 'Classify native build inputs');
+  const expression = classifier.match(/^          FORCE_NATIVE: (.+)$/m)[1].slice(3, -2)
+    .replace('github.event.pull_request.labels.*.name', 'github.event.pull_request.labels.map(label => label.name)');
+  const force = Function('github', 'contains', `return (${expression});`);
+  for (const repository of ['lavasecurity/lavasec-ios', 'lavasecurity/lavasec-ios-internal']) {
+    for (const [event, labels, expected] of [
+      ['pull_request', ['full-build'], true],
+      ['pull_request', [], false],
+      ['pull_request', ['other-label'], false],
+      ['push', ['full-build'], false],
+      ['workflow_dispatch', [], false],
+    ]) {
+      assert.equal(force({repository, event_name: event, event: {pull_request: {labels: labels.map(name => ({name}))}}},
+        (values, value) => values.includes(value)), expected);
+    }
+  }
+});
+
 test('required public app check fails when JS or classification failed, even on a JS-only diff', () => {
   const guard = step(publicBuild, 'Require successful classification and JavaScript validation');
   const script = guard.split('        run: |\n')[1].split('\n').map(line => line.slice(10)).join('\n');
@@ -63,9 +87,9 @@ test('internal JS receipts use Linux and unknown/native inputs retain owned Macs
 test('full-build explicitly forces native classification without consulting an unavailable diff', t => {
   const temporary = mkdtempSync(join(tmpdir(), 'lava-force-native-'));
   t.after(() => rmSync(temporary, {recursive: true, force: true}));
-  for (const file of ['light-build.yml', 'react-native-ui.yml']) {
+  for (const file of ['ios.yml', 'light-build.yml', 'react-native-ui.yml']) {
     if (!existsSync(new URL(`.github/workflows/${file}`, root))) continue;
-    const block = step(job(file, file === 'light-build.yml' ? 'changes' : 'lava-ui'), 'Classify native build inputs');
+    const block = step(job(file, file === 'react-native-ui.yml' ? 'lava-ui' : 'changes'), 'Classify native build inputs');
     const script = block.split('        run: |\n')[1].split('\n').map(line => line.slice(10)).join('\n');
     assert.match(block, /FORCE_NATIVE: .*contains\(github.event.pull_request.labels\.\*\.name, 'full-build'\)/);
     const output = join(temporary, file);

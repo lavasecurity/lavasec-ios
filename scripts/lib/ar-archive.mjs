@@ -137,8 +137,10 @@
  * It cannot detect a flipped byte inside a member's payload (code, data, or a DWARF
  * string). Nothing at this layer can: there is no redundancy to check it against. A flip
  * inside a source-path string will silently change or remove one crate's recovered
- * version. Provenance of the input file has to be established elsewhere — for this repo,
- * by the drift gate that rebuilds the artifact and byte-compares it.
+ * version. Provenance of the input file has to be established elsewhere. App preparation
+ * and Swift CI consume fresh source builds; the drift gate compares two such builds on
+ * the active toolchain. Neither this reader nor that gate proves the historical snapshot
+ * matches source. Snapshot-only inspection retains this payload-integrity limitation.
  *
  * Measured on the shipped ios-arm64 slice (19,802,008 bytes): only 137,329 bytes —
  * 0.69% of the file — are load-bearing for the crate set (member names plus the matched

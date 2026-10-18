@@ -37,12 +37,13 @@ lto = true
 panic = "abort"
 strip = "debuginfo"
 # One codegen unit: with lto=true this removes unit-partitioning nondeterminism —
-# the CI drift gate byte-compares a rebuild against the committed artifact, so the
-# release profile must be deterministic, not just fast.
+# the CI reproducibility gate compares two independent builds on the active host,
+# so the release profile must be deterministic, not just fast.
 codegen-units = 1
 # NOTE reproducibility: the built .a also embeds absolute source paths in panic-location
 # metadata (~150 crates.io registry paths), which vary by machine. Those are normalized by
-# `--remap-path-prefix` flags that scripts/build-wireguard-core.sh injects via RUSTFLAGS
-# (Cargo 1.94 has not stabilized the `trim-paths` profile option). The build script is the
-# sole authority for producing the committed artifact, so the drift gate — which re-runs it —
-# applies identical remapping. Do not build the shipped artifact with a bare `cargo build`.
+# `--remap-path-prefix` arguments that scripts/build-wireguard-core.sh injects via
+# CARGO_ENCODED_RUSTFLAGS (Cargo 1.94 has not stabilized `trim-paths`). App and Swift CI
+# preparation consume this source-built output; the reproducibility gate runs the same
+# script twice. Historical snapshot bytes are not a compiler-independent expectation.
+# Do not build the shipped artifact with a bare `cargo build`.

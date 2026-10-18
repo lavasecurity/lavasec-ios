@@ -39,6 +39,8 @@ if (tool === 'xcodebuild') {
     if (mode === 'unexpected') write(path.join(out, 'unverified.txt'), 'unexpected');
     if (mode === 'symlink') fs.symlinkSync(env.MOCK_COUNT, path.join(out, 'linked-file'));
     if (mode === 'missing-slice') fs.rmSync(path.join(out, 'macos-arm64'), {recursive:true});
+    if (mode === 'output-race') write(path.join(env.MOCK_OUTPUT, 'keep.txt'), 'concurrent output');
+    if (mode === 'output-parent-race') fs.symlinkSync(env.MOCK_PARENT_TARGET, env.MOCK_OUTPUT_PARENT);
   }
 } else throw Error(tool);
 `;
@@ -182,13 +184,57 @@ for (const [mode, error] of [
 }
 
 test('explicit output is isolated and cannot overwrite an existing directory', t => {
-  const f = fixture(t);
-  const output = path.join(f.dir, 'isolated');
+  const f = fixture(t, true);
+  const output = path.join(f.dir, 'new output parent', 'isolated output');
   const result = f.run('build-wireguard-core.sh', {}, ['--output', output]);
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.equal(readFileSync(path.join(f.build, archive), 'utf8'), 'historical compiler bytes');
   assert.ok(existsSync(path.join(output, archive)));
   assert.notEqual(f.run('build-wireguard-core.sh', {}, ['--output', output]).status, 0);
+});
+
+test('an unresolved parent traversal cannot delete an existing explicit output', t => {
+  const f = fixture(t);
+  const existing = path.join(f.dir, 'existing');
+  mkdirSync(existing);
+  writeFileSync(path.join(existing, 'keep.txt'), 'existing output');
+  // path.join would normalize away the missing component that hid the existing
+  // destination from the original shell existence check.
+  const output = `${f.dir}/missing/../existing`;
+  const result = f.run('build-wireguard-core.sh', {}, ['--output', output]);
+  assert.notEqual(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stderr, /explicit output already exists/);
+  assert.equal(readFileSync(path.join(existing, 'keep.txt'), 'utf8'), 'existing output');
+  assert.equal(existsSync(path.join(f.dir, 'missing')), false);
+  assert.equal(existsSync(f.env.MOCK_LOG), false, 'Reject the hidden destination before compiling.');
+});
+
+test('an explicit output created during compilation is preserved', t => {
+  const f = fixture(t);
+  const output = path.join(f.dir, 'concurrent-output');
+  const result = f.run('build-wireguard-core.sh', {MOCK_CASE:'output-race', MOCK_OUTPUT:output}, ['--output', output]);
+  assert.notEqual(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stderr, /explicit output appeared during the build/);
+  assert.equal(readFileSync(path.join(output, 'keep.txt'), 'utf8'), 'concurrent output');
+  assert.deepEqual(readdirSync(output), ['keep.txt']);
+  assert.equal(readFileSync(path.join(f.build, archive), 'utf8'), 'historical compiler bytes');
+  assert.deepEqual(readdirSync(f.dir).filter(name => name.startsWith('.lavasec-wireguard-publish-')), []);
+});
+
+test('an explicit output parent replaced by a symlink cannot redirect publication', t => {
+  const f = fixture(t);
+  const target = path.join(f.dir, 'other-parent');
+  mkdirSync(path.join(target, 'isolated'), {recursive:true});
+  writeFileSync(path.join(target, 'isolated/keep.txt'), 'unrelated data');
+  const parent = path.join(f.dir, 'future-parent');
+  const output = path.join(parent, 'isolated');
+  const result = f.run('build-wireguard-core.sh', {
+    MOCK_CASE:'output-parent-race', MOCK_PARENT_TARGET:target, MOCK_OUTPUT_PARENT:parent,
+  }, ['--output', output]);
+  assert.notEqual(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stderr, /explicit output parent changed during the build/);
+  assert.equal(readFileSync(path.join(target, 'isolated/keep.txt'), 'utf8'), 'unrelated data');
+  assert.deepEqual(readdirSync(path.join(target, 'isolated')), ['keep.txt']);
 });
 
 test('app/release preparation and Swift CI build the artifact before consumers run', () => {

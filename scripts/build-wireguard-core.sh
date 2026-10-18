@@ -6,12 +6,14 @@ set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/../ThirdParty/wireguard-core" && pwd -P)"
 out="${here}/build"
+explicit_output=false
 if [ "$#" -ne 0 ]; then
   if [ "$#" -ne 2 ] || [ "$1" != --output ] || [[ "$2" != /* ]] || [ -e "$2" ] || [ -L "$2" ]; then
     echo "usage: $0 [--output /absolute/nonexistent/directory]" >&2
     exit 2
   fi
   out="$2"
+  explicit_output=true
 fi
 
 cargo_home="${CARGO_HOME:-$HOME/.cargo}"
@@ -23,6 +25,19 @@ fi
 for tool in xcodebuild xcrun python3 plutil; do
   command -v "$tool" >/dev/null 2>&1 || { echo "error: $tool not found" >&2; exit 1; }
 done
+if [ "$explicit_output" = true ]; then
+  # Resolve missing/../existing and existing parent aliases before the build.
+  # Remember the physical destination so a later parent symlink cannot redirect it.
+  out="$(python3 - "$out" <<'PYEOF'
+from pathlib import Path
+import sys
+output = Path(sys.argv[1]).resolve()
+if output.exists() or output.is_symlink():
+    sys.exit(f"error: explicit output already exists: {output}")
+print(output)
+PYEOF
+)"
+fi
 if ! command -v rustup >/dev/null 2>&1; then
   curl --proto '=https' --tlsv1.2 --fail --silent --show-error \
     https://sh.rustup.rs | sh -s -- -y --default-toolchain none --no-modify-path
@@ -152,8 +167,37 @@ done
 
 # Publish only a complete successful build. A failed build cannot fall back to
 # the checked-in snapshot: callers stop on this script's nonzero exit status.
-mkdir -p "$(dirname "$out")"
-rm -rf "$out"
-mv "$staged" "$out"
+if [ "$explicit_output" = true ]; then
+  python3 - "$staged" "$out" <<'PYEOF'
+from pathlib import Path
+from tempfile import TemporaryDirectory
+import os, shutil, sys
+source, output = map(Path, sys.argv[1:])
+output.parent.mkdir(parents=True, exist_ok=True)
+if output.resolve() != output:
+    sys.exit(f"error: explicit output parent changed during the build: {output}")
+# Stage beside the destination so publication is a same-filesystem rename even
+# when TMPDIR is on another volume. mkdir claims the final name atomically: an
+# existing directory, file or symlink is never removed or used as a container.
+with TemporaryDirectory(prefix=".lavasec-wireguard-publish-", dir=output.parent) as temporary:
+    artifact = Path(temporary) / "build"
+    shutil.copytree(source, artifact)
+    try:
+        output.mkdir()
+    except FileExistsError:
+        sys.exit(f"error: explicit output appeared during the build: {output}")
+    try:
+        os.replace(artifact, output)
+    except BaseException:
+        # Only our empty reservation may be removed; never recursively delete a
+        # caller-supplied output, even if publication fails.
+        output.rmdir()
+        raise
+PYEOF
+else
+  mkdir -p "$(dirname "$out")"
+  rm -rf "$out"
+  mv "$staged" "$out"
+fi
 echo "WireGuard source build ready: $out"
 cat "$out/BUILD-TOOLCHAIN.txt"

@@ -16,7 +16,7 @@ on:
     # the other half: marking a running PR as draft fires a new run in the same
     # concurrency group, which cancels the in-flight Mac jobs instead of letting them
     # finish work nobody is waiting on (Codex P2 on PR #784).
-    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
+    types: [opened, synchronize, reopened, labeled, unlabeled, ready_for_review, converted_to_draft]
 
 # NB: intentionally NO event-level `paths-ignore` (REL-6). A docs filter means a docs-only PR never
 # TRIGGERS this workflow, so its required contexts (Repo Checks, Swift Package Tests,
@@ -26,6 +26,9 @@ on:
 # runs; the `changes` job flags a docs-only diff so the expensive macOS jobs short-circuit
 # their work (still completing green) while the contexts always report.
 # Pushes use the same complete local diff, avoiding event-level path-filter limits.
+
+permissions:
+  contents: read
 
 concurrency:
   # A docs-only push must not cancel a running or queued source build.
@@ -84,12 +87,17 @@ jobs:
         id: native
         if: ${{ steps.detect.outputs.docs_only != 'true' }}
         env:
+          FORCE_NATIVE: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'full-build') }}
           EVENT: ${{ github.event_name }}
           BASE: ${{ github.event_name == 'push' && github.event.before || github.event.pull_request.base.sha }}
           HEAD: ${{ github.event_name == 'push' && github.sha || github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          required="$(node ci/detect-rn-native-build.mjs --event "$EVENT" --base "$BASE" --head "$HEAD")"
+          if [ "$FORCE_NATIVE" = true ]; then
+            required=true
+          else
+            required="$(node ci/detect-rn-native-build.mjs --event "$EVENT" --base "$BASE" --head "$HEAD")"
+          fi
           case "$required" in true|false) ;; *) required=true ;; esac
           echo "required=$required" >> "$GITHUB_OUTPUT"
 

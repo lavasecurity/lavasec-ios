@@ -38,10 +38,12 @@ of expanding use of the façade.
 - `LavaSecAppServices` depends on `LavaSecKit` and `LavaSecFilterPipeline`.
 - No layer imports `LavaSecAppServices` from below.
 - `LavaSecChainedUpstream` depends on `LavaSecKit` and the `LavaSecWGCore` binary target
-  (the committed WireGuard engine xcframework). **Nothing engine-ward depends on it** —
+  (the WireGuard engine xcframework). **Nothing engine-ward depends on it** —
   no layer, and not the façade. `LavaSecWGCore` is the package's only binary target; the
-  boundary guard whitelists it by exact shape, and its bytes are proven to equal a
-  from-source rebuild by `scripts/check-wireguard-core-drift.sh`.
+  boundary guard whitelists it by exact shape. App preparation and Swift CI replace
+  the historical snapshot with a build from pinned source before consuming it.
+  `scripts/check-wireguard-core-drift.sh` compares two fresh builds under the active
+  toolchain; it does not prove the historical snapshot equals today's source.
 
 These rules apply to target dependencies, direct imports, and re-exported imports. Put
 shared APIs in the lowest layer that owns their semantics; do not route a forbidden

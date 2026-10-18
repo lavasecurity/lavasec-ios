@@ -30,6 +30,7 @@ function prepare(t, {nativeOnly = false, failure = '', mutateProject = false, ar
   writeFileSync(join(root, 'LavaSec.xcodeproj/project.pbxproj'), 'production project\n');
   writeFileSync(join(evidence, 'javascript-tests.log'), 'stale passing tests\n');
   writeFileSync(join(evidence, 'story-columns-layout.log'), 'stale passing layout\n');
+  writeFileSync(join(evidence, 'wireguard-artifact-manifest.json'), 'stale source engine evidence\n');
   copyFileSync(new URL('../scripts/prepare-full-app.sh', import.meta.url), join(app, 'scripts/prepare-full-app.sh'));
   const toolPaths = ['npm', 'bundle', 'xcodegen', 'ruby', 'python3', 'node'].map(tool => join(bin, tool));
   toolPaths.push(join(root, 'scripts/build-wireguard-core.sh'), join(cargoHome, 'bin/rustup'), join(cargoBin, 'cargo'));
@@ -73,11 +74,12 @@ const stage = call => `${call.tool} ${call.args.join(' ')}`.trimEnd();
 function assertSourceEnginePrepared({calls, evidence, app, cargoBin}) {
   const stages = calls.map(stage);
   const engine = stages.indexOf('build-wireguard-core.sh');
+  const receipt = stages.findIndex(value => value.startsWith('python3 scripts/verify-preview-source.py capture-engine '));
   const rustup = stages.indexOf('rustup which cargo');
   const notices = stages.indexOf('node ../scripts/generate-wireguard-core-notices.mjs --check');
   const dependencies = stages.indexOf('npm ci --ignore-scripts --no-audit --no-fund');
-  assert.ok(engine >= 0 && rustup > engine && notices > rustup && dependencies > notices,
-    'Build the source engine and verify its notices with the pinned toolchain before installing RN dependencies.');
+  assert.ok(engine >= 0 && receipt > engine && rustup > receipt && notices > rustup && dependencies > notices,
+    'Build and record the source engine, then verify its notices with the pinned toolchain before installing RN dependencies.');
   assert.equal(calls[rustup].cwd, join(app, '../ThirdParty/wireguard-core'));
   assert.equal(calls[notices].commandPath.split(':')[0], cargoBin,
     'The notices gate must resolve Cargo from rustup, independently of a runner default.');
@@ -127,12 +129,13 @@ test('a failed default JS suite stops preparation before bundling', t => {
   assert.ok(!calls.some(call => stage(call) === 'npm run bundle:review'));
 });
 
-for (const failure of ['build-wireguard-core.sh', 'rustup which cargo',
+for (const failure of ['build-wireguard-core.sh', 'python3 scripts/verify-preview-source.py capture-engine', 'rustup which cargo',
   'node ../scripts/generate-wireguard-core-notices.mjs --check']) {
   test(`native-only preparation stops before npm when ${failure} fails`, t => {
-    const {result, calls} = prepare(t, {nativeOnly: true, failure});
+    const {result, calls, evidence} = prepare(t, {nativeOnly: true, failure});
     assert.equal(result.status, 42, result.stderr);
     assert.ok(!calls.some(call => call.tool === 'npm'), 'Source engine failures must block all RN preparation.');
+    assert.ok(!existsSync(join(evidence, 'wireguard-artifact-manifest.json')), 'A failed source engine build cannot retain stale provenance.');
   });
 }
 

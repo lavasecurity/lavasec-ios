@@ -91,9 +91,13 @@ bash scripts/check-wireguard-core-drift.sh
 ```
 
 `build/LavaSecWGCore.xcframework` remains checked in for source-distribution and
-attribution inspection without an Apple compiler. Its recorded toolchain describes
-that snapshot; it does not constrain a new build. Before building the app or running
-Swift package tests, regenerate it using the command above. The shared app
+attribution inspection without an Apple compiler. It is a historical convenience
+snapshot, not a verified source-to-binary baseline or an approved fallback for app
+builds. Node-only archive/notices checks establish structural and attribution
+consistency, not payload provenance. Review changes to the snapshot as binary
+changes; the fresh-build reproducibility gate does not certify its bytes. Its
+recorded toolchain describes that snapshot; it does not constrain a new build. Before
+building the app or running Swift package tests, regenerate it using the command above. The shared app
 preparation entry point and Swift CI do this automatically, so QA and production
 archives also consume fresh source builds. Rerun preparation after selecting a
 new Xcode. A successful build replaces the local snapshot and sidecar; ordinary

@@ -17,11 +17,12 @@ build_root="${1:?absolute temporary build directory required}"
 evidence="${2:?absolute evidence directory required}"
 [[ "$build_root" == /* && "$evidence" == /* ]] || { echo "Absolute paths required" >&2; exit 1; }
 mkdir -p "$build_root" "$evidence"
-rm -f "$evidence/javascript-tests.log" "$evidence/story-columns-layout.log"
+rm -f "$evidence/javascript-tests.log" "$evidence/story-columns-layout.log" "$evidence/wireguard-artifact-manifest.json"
 export BUNDLE_PATH="$build_root/gems"
 export BUNDLE_FROZEN=true
 # Every CI and release archive consumes a fresh engine built by the active Xcode.
 bash ../scripts/build-wireguard-core.sh | tee "$evidence/wireguard-build.log"
+python3 scripts/verify-preview-source.py capture-engine "$evidence/wireguard-artifact-manifest.json"
 export PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
 cargo_path="$(cd ../ThirdParty/wireguard-core && rustup which cargo)"
 cargo_bin="${cargo_path%/*}"
