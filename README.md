@@ -60,8 +60,9 @@ the React Native / native split.
 
 Install Xcode 26+, Node matching `ReactNative/package.json` engines
 (`^22.13 || ^24.3 || >=26`, with npm), Ruby 3.3.12 with Bundler 4.0.16, and
-Python 3 on your `PATH`. The first preparation installs the locked npm and
-CocoaPods dependencies and pinned Rust toolchain, builds the WireGuard engine
+Python 3 plus a trusted `rustup` installation on your `PATH`. The first
+preparation installs the locked npm and CocoaPods dependencies and pinned Rust
+toolchain, builds the WireGuard engine
 with the active Xcode, downloads the pinned XcodeGen, runs the RN checks, and
 generates the workspace — so it needs network access. The DNS-filtering core
 builds with no account configuration; a **physical device** needs a Developer

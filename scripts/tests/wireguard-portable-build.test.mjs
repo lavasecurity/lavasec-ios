@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
-import {existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, readdirSync, rmSync, writeFileSync} from 'node:fs';
+import {existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, readdirSync, rmSync, symlinkSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -129,6 +129,30 @@ test('consumer build replaces the snapshot only after a successful source build'
   const result = f.run('build-wireguard-core.sh');
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.equal(readFileSync(path.join(f.build, archive), 'utf8'), 'current-compiler:aarch64-apple-darwin');
+});
+
+test('missing trusted rustup fails before any network bootstrap or compilation', t => {
+  const f = fixture(t);
+  const isolated = path.join(f.dir, 'prerequisites');
+  const bootstrapLog = path.join(f.dir, 'bootstrap-attempts');
+  mkdirSync(isolated);
+  // Isolate PATH so a developer machine's rustup cannot satisfy the prerequisite.
+  // Only the tools needed to reach the missing-rustup check are visible.
+  symlinkSync('/bin/bash', path.join(isolated, 'bash'));
+  symlinkSync('/usr/bin/dirname', path.join(isolated, 'dirname'));
+  for (const tool of ['xcodebuild', 'xcrun', 'plutil']) {
+    symlinkSync(path.join(f.dir, 'bin', tool), path.join(isolated, tool));
+  }
+  writeFileSync(path.join(isolated, 'python3'), '#!/bin/bash\nexit 0\n', {mode:0o755});
+  for (const tool of ['curl', 'sh']) {
+    writeFileSync(path.join(isolated, tool), `#!/bin/bash\nprintf '%s\\n' ${tool} >> "$MOCK_BOOTSTRAP_LOG"\nexit 77\n`, {mode:0o755});
+  }
+  const result = f.run('build-wireguard-core.sh', {PATH:isolated, MOCK_BOOTSTRAP_LOG:bootstrapLog});
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stderr, /rustup not found; provision trusted rustup/);
+  assert.equal(existsSync(bootstrapLog), false, 'A source build must never bootstrap a downloaded shell program.');
+  assert.equal(existsSync(f.env.MOCK_LOG), false, 'Missing prerequisites must stop before Cargo compilation.');
+  assert.equal(readFileSync(path.join(f.build, archive), 'utf8'), 'historical compiler bytes');
 });
 
 for (const encoded of [false, true]) {

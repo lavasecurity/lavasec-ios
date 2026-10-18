@@ -19,8 +19,10 @@ run no longer needs its harness).
 - **Transitive deps** are pinned by `Cargo.lock` checksums. Builds use `--locked`;
   dependency changes require a reviewed lockfile update.
 - **Toolchain**: `rust-toolchain.toml` pins Rust and the three Apple targets.
-  `scripts/build-wireguard-core.sh` provisions that toolchain on a fresh host and
-  uses its active Xcode/SDK selection, including `DEVELOPER_DIR` when set.
+  Hosts must provide a trusted `rustup` installation, just as they provide Xcode.
+  `scripts/build-wireguard-core.sh` uses it to install the pinned toolchain and
+  missing targets; it never downloads or executes a bootstrap installer. Builds
+  use the active Xcode/SDK selection, including `DEVELOPER_DIR` when set.
   Detected compiler and SDK versions are recorded in `build/BUILD-TOOLCHAIN.txt`.
 - **Source-to-artifact verification**: app, release and Swift CI preparation build
   the artifact they consume from source. A clean Cargo target directory prevents

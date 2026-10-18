@@ -39,8 +39,8 @@ PYEOF
 )"
 fi
 if ! command -v rustup >/dev/null 2>&1; then
-  curl --proto '=https' --tlsv1.2 --fail --silent --show-error \
-    https://sh.rustup.rs | sh -s -- -y --default-toolchain none --no-modify-path
+  echo "error: rustup not found; provision trusted rustup in $cargo_home/bin or PATH before running this build" >&2
+  exit 1
 fi
 # The crate override, not a host's default Rust, selects the compiler and targets.
 cd "$here"
