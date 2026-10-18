@@ -17,8 +17,7 @@
 //   node scripts/generate-wireguard-core-notices.mjs            # write
 //   node scripts/generate-wireguard-core-notices.mjs --check    # fail if the committed file is stale
 //
-// Requires cargo on PATH (rustup lives at /opt/homebrew/opt/rustup/bin on the dev machines
-// and is provisioned explicitly in the CI job).
+// Requires the crate's pinned Cargo on PATH; build preparation resolves it via rustup.
 
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -134,8 +133,8 @@ const SYSROOT_EXEMPT_MEMBERS_PER_SLICE = new Map([["adler2", 1]]);
 // than assumed. This is a TRIPWIRE, not an anchor: it is committed like everything else and
 // an editor who knows about it can change it too. What it buys is that hiding a crate now
 // requires editing this file as well as the archive, which is a visible, reviewable change
-// rather than a silent one — and unlike the from-source byte-compare it costs no toolchain,
-// so it runs on the public mirror where that gate does not exist.
+// rather than a silent one. It costs no toolchain and applies to historical snapshot
+// inspection on the public mirror too; it does not establish payload provenance.
 //
 // If a toolchain bump changes the crate's CGU count, this fails loudly and the new number
 // goes here deliberately.
@@ -1925,15 +1924,16 @@ function render({ crates, bodies, missing }) {
 //      reach the public mirror without a cargo-backed regeneration.
 //
 //   2. `scripts/check-wireguard-core-drift.sh` (Rust + Xcode required)
-//      Rebuilds the whole engine from source and byte-compares the archives. Catches ANY
-//      byte change, including every member rename described below.
+//      Compares two independent clean source builds under the active toolchain and
+//      installs the verified fresh output for the following notices check. It detects
+//      nondeterminism, not edits to the historical committed snapshot.
 //      Runs: light-build.yml only — self-hosted, fork-guarded, internal repo. It does NOT
 //      run on the public mirror.
 //
 //   3. `--verify-committed` (this file, Node only)   BEST EFFORT
 //      Reads the committed archives and cross-checks them against the notices. Runs
-//      anywhere, which is the point: it is the only one of the three present on the public
-//      mirror.
+//      anywhere, including forks and the public mirror. These are consistency checks
+//      on the snapshot; they do not prove its payload came from source.
 //
 // WHY 3 IS "BEST EFFORT", IN ONE SENTENCE: it learns what a binary contains by reading
 // MEMBER NAMES, and member names are editable text.
@@ -1955,26 +1955,26 @@ function render({ crates, bodies, missing }) {
 //   - Accidental omission — a dependency added without regenerating, a partial
 //     regeneration, a hand-edit, a bad merge — is caught, usually by more than one check.
 //     That is the failure that actually happens, and it is well covered.
-//   - Deliberate tampering inside this repo is caught by 1 and 2, both of which rebuild
-//     from outside sources.
-//   - Deliberate tampering in a pull request against the PUBLIC mirror faces only 3. There
-//     it raises the cost and makes the edit visible in review; it does not make it
-//     impossible.
+//   - App preparation and Swift CI in both repositories rebuild from pinned source
+//     before consuming the engine, then app preparation checks notices against that
+//     fresh output. Edited snapshot payloads therefore do not become an app fallback.
+//   - The committed snapshot is retained for source-distribution/attribution inspection.
+//     Neither 1 nor 2 certifies its historical bytes. Snapshot-only inspection has the
+//     member-name and payload-integrity limits of 3; binary edits still need review.
 //
 // Do not extend 3 in the belief that it can become authoritative. It cannot. If more
-// assurance is wanted on the public side, the lever is making 1 or 2 run there, not adding
-// another name-based rule here.
+// assurance is wanted for a consumed artifact, build it from source and check its
+// notices; adding another name-based rule cannot certify historical binary payloads.
 //
 // --verify-committed: everything that can be checked WITHOUT cargo.
 //
-// The full --check re-derives the crate set from `cargo tree`, so it can only run where the
-// pinned Rust toolchain is — the internal, self-hosted engine lane. That left the gate
-// absent from the PUBLIC mirror, which is where the binary redistribution creating the
-// obligation actually happens. This mode closes that: it verifies the two emitted copies
-// are byte-identical, that the rendered file agrees with the committed index, and that no
-// crate was left unresolved. It cannot notice a crate JOINING the graph — only the cargo
-// mode can — but it catches every way the committed artefacts can be edited or drift apart,
-// and it runs anywhere node does, including forks and the public repo.
+// The full --check re-derives the crate set from `cargo tree` and needs the pinned Rust
+// toolchain. This mode supports compiler-free inspection: it verifies that the two
+// emitted notice copies are byte-identical, the rendered file agrees with the index,
+// and no crate is unresolved. Archive inspection cannot establish the complete graph
+// of LTO-linked code or certify arbitrary binary payload edits. It catches the structural
+// and attribution inconsistencies described below and runs anywhere Node does,
+// including forks and the public repo.
 // Declared as hoisted functions, not const arrows: --verify-committed runs before the
 // index is constructed further down the file, and a const would be in its temporal dead
 // zone there.
@@ -2460,12 +2460,11 @@ if (process.argv.includes("--verify-committed")) {
     // CGU binds it to the crate that produced it. No amount of reading the archive
     // distinguishes it from the real thing.
     //
-    // What does: `scripts/check-wireguard-core-drift.sh` rebuilds the xcframework from
-    // source with the pinned toolchain and BYTE-COMPARES. Any rename changes the archive
-    // bytes, so it fails there — and light-build.yml scopes that job to the whole of
-    // `ThirdParty/wireguard-core`, which is precisely where a member rename has to be
-    // committed. So member-name integrity is anchored by the reproducible build, not by
-    // this reader, and this reader should not be read as if it were the last line.
+    // App preparation and Swift CI avoid trusting such snapshot edits by building the
+    // consumed xcframework from pinned source. The reproducibility gate compares two
+    // fresh builds, not the committed snapshot, so it does not detect a rename in that
+    // historical snapshot. This reader cannot close that provenance gap; snapshot-only
+    // inspection remains best effort and binary changes require review.
     //
     // THE INDEPENDENT SOURCE.
     //

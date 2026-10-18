@@ -82,7 +82,7 @@ final class ReleaseGateSourceTests: XCTestCase {
         // must re-bound this the way `version-guard` above had to be re-bounded.
         let jobBlock = try sourceBlock(in: workflow, startingAt: "  main-red-alarm:")
 
-        // `push`-only. A context reported on a pull request is the shape that deadlocked the
+        // Main pushes and their completed iOS workflows only. A pull-request context deadlocked the
         // android-controller required check, and this job has no business gating a PR at all.
         // The whole `if:` line, not its parts. Both halves are stated in the comment directly
         // above them in the workflow, so a `contains("always()")` is satisfied by the PROSE and
@@ -90,7 +90,7 @@ final class ReleaseGateSourceTests: XCTestCase {
         // `failure()` left that assertion green. `always()`, not `failure()`, because the job
         // must also run on green to CLOSE the alarm.
         XCTAssertTrue(
-            jobBlock.contains("if: ${{ always() && github.event_name == 'push' }}"))
+            jobBlock.contains("if: ${{ always() && github.repository == 'lavasecurity/lavasec-ios-internal' && (github.event_name == 'push' || (github.event_name == 'workflow_run' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository)) }}"))
         XCTAssertTrue(jobBlock.contains("needs: [changes, app-compile, wireguard-core-drift, version-guard]"))
         XCTAssertTrue(jobBlock.contains("group: light-build-main-alarm"))
         XCTAssertTrue(jobBlock.contains("cancel-in-progress: false"))

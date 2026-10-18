@@ -1,18 +1,38 @@
 #!/usr/bin/env bash
 # Shared credential-free preparation for full-app Simulator checks and signed QA device archives.
+# Usage: prepare-full-app.sh [--native-only] /absolute/build /absolute/evidence
+# CI may omit repeated JavaScript tests when the required Linux lane validates
+# the same revision. Local and signed-QA callers retain the complete default.
 set -euo pipefail
 export LANG=en_US.UTF-8
 export LC_ALL=en_US.UTF-8
 cd "$(dirname "$0")/.."
+native_only=false
+if [ "${1:-}" = --native-only ]; then
+  native_only=true
+  shift
+fi
+[ "$#" -eq 2 ] || { echo "usage: prepare-full-app.sh [--native-only] /absolute/build /absolute/evidence" >&2; exit 64; }
 build_root="${1:?absolute temporary build directory required}"
 evidence="${2:?absolute evidence directory required}"
 [[ "$build_root" == /* && "$evidence" == /* ]] || { echo "Absolute paths required" >&2; exit 1; }
 mkdir -p "$build_root" "$evidence"
+rm -f "$evidence/javascript-tests.log" "$evidence/story-columns-layout.log" "$evidence/wireguard-artifact-manifest.json"
 export BUNDLE_PATH="$build_root/gems"
 export BUNDLE_FROZEN=true
+# Every CI and release archive consumes a fresh engine built by the active Xcode.
+bash ../scripts/build-wireguard-core.sh | tee "$evidence/wireguard-build.log"
+python3 scripts/verify-preview-source.py capture-engine "$evidence/wireguard-artifact-manifest.json"
+export PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
+cargo_path="$(cd ../ThirdParty/wireguard-core && rustup which cargo)"
+cargo_bin="${cargo_path%/*}"
+export PATH="$cargo_bin:$PATH"
+node ../scripts/generate-wireguard-core-notices.mjs --check
 npm ci --ignore-scripts --no-audit --no-fund
-npm test
-node scripts/test-story-columns-layout.mjs | tee "$evidence/story-columns-layout.log"
+if [ "$native_only" = false ]; then
+  # npm test already includes the Yoga layout gate; record that one execution.
+  npm test | tee "$evidence/javascript-tests.log"
+fi
 npm run bundle:review
 bundle install
 

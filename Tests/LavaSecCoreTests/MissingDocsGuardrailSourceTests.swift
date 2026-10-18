@@ -175,7 +175,11 @@ final class MissingDocsGuardrailSourceTests: XCTestCase {
             ),
             "the hosted simulator build runs for public PRs and skips drafts"
         )
-        XCTAssertTrue(simulatorBuildJob.contains("runs-on: macos-26"))
+        XCTAssertTrue(simulatorBuildJob.contains(
+            "runs-on: ${{ (needs.changes.outputs.docs_only == 'true' "
+                + "|| needs.changes.outputs.native_required == 'false') "
+                + "&& 'ubuntu-latest' || 'macos-26' }}"
+        ))
     }
 
     private func yamlList(in block: String) -> [String] {

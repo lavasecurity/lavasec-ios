@@ -143,9 +143,9 @@ pub const LAVA_WG_MAX_IP_PACKET: u32 = 1500;
 /// window every rekey, and one successful poison lasts until `REJECT_AFTER_TIME` retires the
 /// session 180 s later (review of infra#151).
 ///
-/// Enforced HERE rather than in the engine because the vendored crate cannot be patched without
-/// breaking the drift gate's byte-compare against the committed xcframework. If an engine ever
-/// enforces it this becomes redundant rather than wrong.
+/// Enforced HERE so the vendored crate remains an unpatched upstream baseline. Source-built
+/// artifacts include this wrapper guard. If a future engine enforces the same bound, this
+/// becomes redundant rather than wrong.
 pub const LAVA_WG_REJECT_AFTER_MESSAGES: u64 = u64::MAX - (1 << 13);
 
 /// Byte offset of the counter in a transport datagram.

@@ -24,6 +24,40 @@ function temporary(t) {
   return cwd;
 }
 
+internalTest('iOS completion observers reconcile only trusted main pushes and never schedule builds', () => {
+  const repository = 'lavasecurity/lavasec-ios-internal';
+  function condition(id, github) {
+    const block = workflow.split(`\n  ${id}:\n`)[1].split(/\n  [a-z][\w-]*:\n/)[0];
+    let expression = block.match(/^    if: (.+)$/m)?.[1];
+    if (expression === '>-') expression = block.match(/^    if: >-\n((?:      .*\n)+)/m)[1].trim();
+    assert.ok(expression?.startsWith('${{'), `An observer must explicitly gate ${id}.`);
+    return Function('github', 'always', 'cancelled', 'needs', `return (${expression.slice(3, -2)});`)(
+      github, () => true, () => false, {changes: {outputs: {engine_changed: 'true'}}});
+  }
+  const context = (event = 'workflow_run', override = {}) => ({
+    repository, event_name: event, event: {workflow_run: {
+      event: 'push', head_branch: 'main', head_repository: {full_name: repository}, ...override,
+    }, pull_request: {draft: false}},
+  });
+  const observer = context();
+  const ids = [...workflow.split('\njobs:\n')[1].matchAll(/^  ([a-z][\w-]*):$/gm)].map(match => match[1]);
+  for (const id of ids.filter(id => id !== 'main-red-alarm')) {
+    assert.equal(condition(id, observer), false, `The completion observer must not schedule ${id}.`);
+  }
+  assert.equal(condition('main-red-alarm', observer), true);
+  assert.equal(condition('main-red-alarm', context('push')), true);
+  for (const github of [context('pull_request'), context('workflow_run', {event: 'pull_request'}),
+    context('workflow_run', {head_branch: 'feature'}),
+    context('workflow_run', {head_repository: {full_name: 'outsider/fork'}}),
+    {...observer, repository: 'outsider/lavasec-ios-internal', event: {...observer.event,
+      workflow_run: {...observer.event.workflow_run, head_repository: {full_name: 'outsider/lavasec-ios-internal'}}}}]) {
+    assert.equal(condition('main-red-alarm', github), false, 'Untrusted/non-main completion cannot write the alarm.');
+  }
+  const alarm = workflow.split('\n  main-red-alarm:\n')[1];
+  assert.match(alarm, /uses: actions\/checkout@v7\n\s+with:\n\s+fetch-depth: 0\n\s+ref: main/);
+  assert.match(step('Select the current main build result'), /light-build\.yml\/runs\?event=push&branch=main/);
+});
+
 internalTest('engine scope handles real PR/push diffs without rebuilding unrelated changes', t => {
   const cwd = temporary(t);
   const git = (...args) => execFileSync('git', args, {cwd, encoding: 'utf8'}).trim();
@@ -70,16 +104,18 @@ internalTest('docs-only or unknown build results never clear a standing main ala
   const script = step('Raise or clear the alarm');
   assert.match(workflow, /needs: \[changes, app-compile, wireguard-core-drift, version-guard\]/);
   assert.match(workflow, /DOCS_ONLY: \$\{\{ needs.changes.outputs.docs_only \}\}/);
-  for (const [docsOnly, compile, shouldClose, shouldReportFailure] of [
-    ['true', 'success', false, false], ['', 'success', false, false],
-    ['false', 'success', true, false], ['false', 'cancelled', false, false],
-    ['true', 'failure', false, true], ['false', 'failure', false, true],
+  for (const [docsOnly, compile, version, shouldClose, shouldReportFailure] of [
+    ['true', 'success', 'success', false, false], ['', 'success', 'success', false, false],
+    ['false', 'success', 'success', true, false], ['false', 'cancelled', 'success', false, false],
+    ['true', 'failure', 'success', false, true], ['false', 'failure', 'success', false, true],
+    ['false', 'success', 'failure', false, true], ['false', 'success', 'cancelled', false, false],
+    ['false', 'success', 'unknown', false, false], ['false', 'success', 'skipped', false, false],
   ]) {
     writeFileSync(calls, '');
-    const run = spawnSync('bash', ['-c', script], {cwd, encoding: 'utf8', env: {...process.env, PATH: `${cwd}:${process.env.PATH}`, CALLS: calls, DOCS_ONLY: docsOnly, APP_COMPILE: compile, ENGINE_DRIFT: 'success', VERSION_GUARD: 'success', COMMIT: 'fixture', RUN_URL: 'https://example.test/run'}});
+    const run = spawnSync('bash', ['-c', script], {cwd, encoding: 'utf8', env: {...process.env, PATH: `${cwd}:${process.env.PATH}`, CALLS: calls, DOCS_ONLY: docsOnly, APP_COMPILE: compile, ENGINE_DRIFT: 'success', VERSION_GUARD: version, LAVA_UI: 'success', COMMIT: 'fixture', RUN_URL: 'https://example.test/run'}});
     assert.equal(run.status, 0, run.stderr);
     const commands = readFileSync(calls, 'utf8');
-    assert.equal(commands.includes('issue close'), shouldClose, `${docsOnly}/${compile}`);
+    assert.equal(commands.includes('issue close'), shouldClose, `${docsOnly}/${compile}/${version}`);
     if (shouldReportFailure) assert.match(commands, /Failing jobs:/);
     if (!shouldClose && !shouldReportFailure) assert.ok(!commands.includes('issue comment'));
   }
@@ -93,25 +129,33 @@ internalTest('a surviving alarm reports current build results after pending evic
   git('init', '-q', '-b', 'main');
   write('ci/detect-docs-only.sh', readFileSync(path.join(root, 'ci/detect-docs-only.sh'), 'utf8'));
   chmodSync(path.join(cwd, 'ci/detect-docs-only.sh'), 0o755);
+  write('ci/detect-rn-native-build.mjs', readFileSync(path.join(root, 'ci/detect-rn-native-build.mjs'), 'utf8'));
   write('App/Feature.swift', 'first\n');
   const first = commit();
   write('App/Feature.swift', 'second\n');
   const second = commit();
   write('docs/README.md', 'documentation\n');
   const docs = commit();
+  write('ReactNative/src/label.ts', 'export const label = 1;\n');
+  const javascript = commit();
   git('remote', 'add', 'origin', cwd);
   const script = step('Select the current main build result');
   assert.match(workflow, /group: light-build-main-alarm\n\s+cancel-in-progress: false/);
   assert.doesNotMatch(workflow, /queue: max/);
   // A queued docs-only app job can temporarily hide its skip result. Its own
   // finished alarm must reconcile too, rather than leaving no future observer.
-  assert.match(workflow, /if: \$\{\{ always\(\) && github.event_name == 'push' \}\}/);
+  assert.match(workflow, /workflow_run:\n\s+workflows: \[iOS CI\]\n\s+types: \[completed\]\n\s+branches: \[main\]/);
   assert.match(workflow, /if: \$\{\{ steps.relevant.outputs.current == 'true' \}\}/);
   const gh = path.join(cwd, 'gh');
   writeFileSync(gh, `#!/bin/bash
 set -euo pipefail
-[ "$1" = api ]
+if [ "$1" != api ]; then
+  printf '%s\\n' "$*" >> "$CALLS"
+  if [ "$1 $2" = 'issue list' ]; then printf '42\\n'; fi
+  exit 0
+fi
 case "$2" in
+  *"workflows/ios.yml/runs?"*) cat "$FIXTURE/ios-runs.json" ;;
   *"/runs?"*) page="\${2##*&page=}"; cat "$FIXTURE/runs-$page.json" ;;
   *"/jobs?"*) id="\${2#*/actions/runs/}"; id="\${id%%/*}"; jq -c '.[]' "$FIXTURE/jobs-$id.json" ;;
   *) exit 1 ;;
@@ -129,26 +173,112 @@ esac
     {name: 'WireGuard engine xcframework matches source', status: 'completed', conclusion: 'success'},
     {name: 'Marketing version ahead of latest public release', status: 'completed', conclusion: 'success'},
   ];
-  function evaluate(pages, jobs, source = first) {
+  const uiJob = (conclusion = 'success', status = 'completed') => ({
+    name: 'Lava UI tokens, contracts, and iOS bundle', conclusion, status,
+  });
+  function evaluate(pages, jobs, source = first, ui = {runs: [item(140, javascript)], jobs: {140: [uiJob()]}}) {
     const fixture = mkdtempSync(path.join(cwd, 'api-'));
     [...pages, []].forEach((runs, i) => writeFileSync(path.join(fixture, `runs-${i + 1}.json`), JSON.stringify({workflow_runs: runs})));
-    for (const [id, rows] of Object.entries(jobs)) writeFileSync(path.join(fixture, `jobs-${id}.json`), JSON.stringify(rows));
+    writeFileSync(path.join(fixture, 'ios-runs.json'), JSON.stringify({workflow_runs: ui.runs}));
+    for (const [id, rows] of Object.entries({...jobs, ...ui.jobs})) writeFileSync(path.join(fixture, `jobs-${id}.json`), JSON.stringify(rows));
     const output = path.join(fixture, 'output'); writeFileSync(output, '');
     const environment = path.join(fixture, 'environment'); writeFileSync(environment, '');
     const run = spawnSync('bash', ['-c', script], {cwd, encoding: 'utf8', env: {...process.env, PATH: `${cwd}:${process.env.PATH}`, FIXTURE: fixture, COMMIT: source, GH_REPO: 'fixture/repo', GITHUB_OUTPUT: output, GITHUB_ENV: environment}});
-    return {...run, output: readFileSync(output, 'utf8').trim(), environment: readFileSync(environment, 'utf8')};
+    return {...run, fixture, output: readFileSync(output, 'utf8').trim(), environment: readFileSync(environment, 'utf8')};
+  }
+  function reconcile(result) {
+    const calls = path.join(result.fixture, 'alarm-calls');
+    writeFileSync(calls, '');
+    const selected = Object.fromEntries(result.environment.trim().split('\n').map(line => {
+      const split = line.indexOf('=');
+      return [line.slice(0, split), line.slice(split + 1)];
+    }));
+    const run = spawnSync('bash', ['-c', step('Raise or clear the alarm')], {cwd, encoding: 'utf8',
+      env: {...process.env, ...selected, PATH: `${cwd}:${process.env.PATH}`, CALLS: calls}});
+    assert.equal(run.status, 0, run.stderr);
+    return readFileSync(calls, 'utf8');
   }
   // An old finishing run displaced the failed current run's pending alarm.
   // Read the current gates even though the overall current workflow is pending.
   const docsGates = gates();
   docsGates[0].steps = compileSteps('skipped');
-  const recovered = evaluate([[item(30, docs), item(20, second), item(10, first)]], {30: docsGates, 20: gates('failure')});
+  // The light-build push alarm may run before iOS CI finishes. Its later
+  // workflow_run observer must query again and use the newly completed result.
+  for (const [conclusion, status, expected] of [
+    ['success', 'completed', 'success'], ['failure', 'completed', 'failure'],
+    [null, 'in_progress', 'unknown'], ['cancelled', 'completed', 'cancelled'],
+    ['skipped', 'completed', 'skipped'], ['timed_out', 'completed', 'failure'],
+  ]) {
+    const result = evaluate([[item(40, javascript), item(20, second)]], {40: docsGates, 20: gates()}, first,
+      {runs: [item(140, javascript)], jobs: {140: [uiJob(conclusion, status)]}});
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.output, 'current=true');
+    assert.match(result.environment, new RegExp(`LAVA_UI=${expected}\\n`));
+    assert.match(result.environment, /LAVA_UI_RUN_URL=https:\/\/example.test\/runs\/140/);
+    const commands = reconcile(result);
+    assert.equal(commands.includes('issue close'), expected === 'success');
+    assert.equal(commands.includes('Failing jobs:'), expected === 'failure');
+    if (expected === 'failure') assert.match(commands, /Lava UI tokens, contracts, and iOS bundle/);
+  }
+  for (const ui of [
+    {runs: [], jobs: {}},
+    {runs: [item(140, javascript)], jobs: {140: []}},
+    {runs: [item(140, second)], jobs: {140: [uiJob()]}},
+  ]) {
+    const result = evaluate([[item(40, javascript), item(20, second)]], {40: docsGates, 20: gates()}, first, ui);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.environment, /LAVA_UI=unknown\n/);
+    assert.ok(!reconcile(result).includes('issue close'), 'Missing current JS evidence must preserve a standing alarm.');
+  }
+  const newestUI = evaluate([[item(40, javascript), item(20, second)]], {40: docsGates, 20: gates()}, first,
+    {runs: [item(141, javascript), item(140, javascript)], jobs: {141: [uiJob('cancelled')], 140: [uiJob()]}});
+  assert.match(newestUI.environment, /LAVA_UI=cancelled\n/);
+  assert.ok(!reconcile(newestUI).includes('issue close'), 'Never fall back to an older green UI run for the same SHA.');
+  const pendingUI = evaluate([[item(40, javascript), item(20, second)]], {40: docsGates, 20: gates()}, first,
+    {runs: [item(140, javascript)], jobs: {140: [uiJob(null, 'in_progress')]}});
+  assert.ok(!reconcile(pendingUI).includes('issue close'));
+  const completedUI = evaluate([[item(40, javascript), item(20, second)]], {40: docsGates, 20: gates()});
+  assert.ok(reconcile(completedUI).includes('issue close'), 'Completion observer must reevaluate the previously pending JS result.');
+  const pendingNative = evaluate([[item(40, javascript), item(20, second)]], {40: docsGates, 20: gates(null, 'in_progress')});
+  assert.equal(pendingNative.output, 'current=false', 'UI finishing first cannot turn incomplete native evidence green.');
+  const recovered = evaluate([[item(40, javascript), item(30, docs), item(20, second), item(10, first)]], {40: docsGates, 30: docsGates, 20: gates('failure')});
   assert.equal(recovered.status, 0, recovered.stderr);
   assert.equal(recovered.output, 'current=true');
   assert.match(recovered.environment, new RegExp(`COMMIT=${second}`));
   assert.match(recovered.environment, /APP_COMPILE=failure/);
   assert.match(recovered.environment, /RUN_URL=https:\/\/example.test\/runs\/20/);
   assert.match(recovered.environment, /DOCS_ONLY=false/);
+  // Native-equivalent JS pushes may reuse the previous compile, but their
+  // version check reads the current public release floor and must stay current.
+  for (const [conclusion, status, expected] of [
+    ['success', 'completed', 'success'], ['failure', 'completed', 'failure'],
+    ['cancelled', 'completed', 'cancelled'], [null, 'in_progress', 'unknown'],
+    ['timed_out', 'completed', 'failure'], ['startup_failure', 'completed', 'failure'],
+  ]) {
+    const latest = gates();
+    latest[0].steps = compileSteps('skipped');
+    latest[2] = {...latest[2], conclusion, status};
+    const result = evaluate([[item(40, javascript), item(20, second)]], {40: latest, 20: gates()});
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.output, 'current=true');
+    assert.match(result.environment, /APP_COMPILE=success/);
+    assert.match(result.environment, new RegExp(`VERSION_GUARD=${expected}\\n`));
+    assert.match(result.environment, /VERSION_GUARD_RUN_URL=https:\/\/example.test\/runs\/40/);
+  }
+  const missingVersion = gates().slice(0, 2);
+  missingVersion[0].steps = compileSteps('skipped');
+  const missing = evaluate([[item(40, javascript), item(20, second)]], {40: missingVersion, 20: gates()});
+  assert.equal(missing.status, 0, missing.stderr);
+  assert.match(missing.environment, /APP_COMPILE=success/);
+  assert.match(missing.environment, /VERSION_GUARD=unknown\n/);
+  // A newer incomplete check must not fall back to an older green run of the
+  // same latest SHA, either.
+  const cancelledVersion = gates();
+  cancelledVersion[0].steps = compileSteps('skipped');
+  cancelledVersion[2].conclusion = 'cancelled';
+  const sameSource = evaluate([[item(41, javascript), item(40, javascript), item(20, second)]], {41: cancelledVersion, 40: docsGates, 20: gates()});
+  assert.equal(sameSource.status, 0, sameSource.stderr);
+  assert.match(sameSource.environment, /VERSION_GUARD=cancelled\n/);
   const unbuilt = gates(); unbuilt[0].steps = [];
   const partiallyBuilt = gates(); partiallyBuilt[0].steps[2].conclusion = 'skipped';
   for (const incomplete of [unbuilt, partiallyBuilt]) {

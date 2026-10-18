@@ -2,11 +2,11 @@
 # Run under ci/run-with-maintenance-lock.sh on self-hosted CI. Every generated
 # native target, dependency, and executable build phase is checked before Xcode.
 set -euo pipefail
-# Routine CI compiles the complete app and executes the small UIKit regression
-# app. Journey tours remain explicit; preserve the existing local default.
+# Containment mode runs only the isolated UIKit regressions; compile and journey
+# modes also prepare and build the complete app. Preserve the local default.
 mode=${1:---journeys}
-if [ "$#" -gt 1 ] || { [ "$mode" != --compile ] && [ "$mode" != --journeys ]; }; then
-  echo "usage: build-full-app.sh [--compile|--journeys]" >&2
+if [ "$#" -gt 1 ] || { [ "$mode" != --containment ] && [ "$mode" != --compile ] && [ "$mode" != --journeys ]; }; then
+  echo "usage: build-full-app.sh [--containment|--compile|--journeys]" >&2
   exit 64
 fi
 # launchd-hosted runners can inherit an ASCII locale; CocoaPods requires UTF-8.
@@ -38,16 +38,29 @@ cleanup() {
 }
 trap cleanup EXIT
 
-bash scripts/prepare-full-app.sh "$build_root" "$evidence"
+if [ "$mode" != --containment ]; then
+  bash scripts/prepare-full-app.sh "$build_root" "$evidence"
+fi
 
 # A private simulator prevents two runner jobs from sharing UI state. The trap
 # deletes only this invocation's simulator, including on failure/cancellation.
+containment_started=$(date +%s)
 xcrun simctl list runtimes --json > "$build_root/runtimes.json"
 runtime=$(node -e 'const fs=require("fs"); const rs=JSON.parse(fs.readFileSync(process.argv[1])).runtimes.filter(r=>r.isAvailable && r.identifier.includes(".iOS-")); rs.sort((a,b)=>b.version.localeCompare(a.version,"en",{numeric:true})); if(!rs[0]) throw Error("An iOS simulator runtime is required"); process.stdout.write(rs[0].identifier);' "$build_root/runtimes.json")
 simulator_id=$(xcrun simctl create "Lava RN Full ${GITHUB_RUN_ID:-local}" com.apple.CoreSimulator.SimDeviceType.iPhone-16 "$runtime")
 xcrun simctl boot "$simulator_id"
 xcrun simctl bootstatus "$simulator_id" -b
 bash scripts/test-native-containment.sh "$simulator_id" "$evidence"
+if [ "$mode" = --containment ]; then
+  containment_finished=$(date +%s)
+  elapsed=$((containment_finished - containment_started))
+  echo "Containment elapsed seconds: $elapsed" > "$evidence/build-cost.txt"
+  # This receipt proves only the standalone UIKit regression app ran. It must
+  # never stand in for a compiled Lava app or completed full-app journeys.
+  node -e 'const fs=require("fs");fs.writeFileSync(process.argv[1],JSON.stringify({mode:"containment",result:"Passed",elapsedSeconds:Number(process.argv[2]),containmentExecuted:true,fullAppCompiled:false,journeysExecuted:false},null,2)+"\n");' \
+    "$evidence/validation.json" "$elapsed"
+  exit 0
+fi
 started=$(date +%s)
 build_args=(-workspace native-app/LavaSecRN.xcworkspace -scheme LavaSec -configuration Debug
   -destination "platform=iOS Simulator,id=$simulator_id"

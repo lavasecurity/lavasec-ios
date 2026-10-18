@@ -1,5 +1,6 @@
 # Keep generated artifacts byte-preserving: no line-ending normalization or textconv.
-# The internal scripts/check-wireguard-core-drift.sh rebuild verifies byte identity.
+# The internal reproducibility gate compares two fresh builds; it does not verify
+# these historical snapshot bytes against the active compiler.
 # The QA-enablement scan excludes only the three compiled Rust archives; its --text
 # diff still scans headers, plist, toolchain metadata and unexpected files in build/.
 #

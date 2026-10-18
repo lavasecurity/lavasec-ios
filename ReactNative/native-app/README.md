@@ -20,8 +20,10 @@ native components presented by the shared root.
 Install the [build prerequisites](../../README.md#building), then
 build with `bash ReactNative/scripts/prepare-full-app.sh /absolute/build /absolute/evidence`,
 then use `ReactNative/native-app/LavaSecRN.xcworkspace`, scheme `LavaSec`.
-`build-full-app.sh` creates its own Simulator, runs real-controller UI journeys,
-and exports the app and evidence. Simulator tests use ad-hoc signing so native
+`build-full-app.sh` defaults to creating its own Simulator, running real-controller
+UI journeys, and exporting the app and evidence. `--compile` builds the complete
+app without journeys; `--containment` runs only the independent UIKit regression
+app without RN preparation or a complete app build. Simulator tests use ad-hoc signing so native
 keychain/app-group gates remain active. A direct app build of `LavaSec.xcodeproj` fails with instructions to prepare
 the RN workspace, preventing accidental placeholder or legacy app builds.
 

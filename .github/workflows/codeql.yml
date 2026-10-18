@@ -40,7 +40,8 @@ jobs:
     if: ${{ github.repository == 'lavasecurity/lavasec-ios' }}
     # Public source analysis uses hosted macOS, matching the public app build.
     runs-on: macos-26
-    timeout-minutes: 60
+    # Recent cold instrumented builds reached analysis at the 60-minute deadline.
+    timeout-minutes: 90
     permissions:
       contents: read
       security-events: write
@@ -75,13 +76,15 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: '24'
+          cache: npm
+          cache-dependency-path: ReactNative/package-lock.json
       - uses: ruby/setup-ruby@e81a8fa391b11a595c1b7ed84177cc0fe02faf83 # v1.328.0
         with:
           ruby-version: '3.3.12'
           bundler: '4.0.16'
           working-directory: ReactNative
       - name: Prepare canonical RN app workspace
-        run: ci/run-with-maintenance-lock.sh -- bash ReactNative/scripts/prepare-full-app.sh "$RUNNER_TEMP/lava-rn-prepare" "$RUNNER_TEMP/lava-rn-evidence"
+        run: ci/run-with-maintenance-lock.sh -- bash ReactNative/scripts/prepare-full-app.sh --native-only "$RUNNER_TEMP/lava-rn-prepare" "$RUNNER_TEMP/lava-rn-evidence"
 
       - name: Build LavaSec
         run: |
@@ -98,3 +101,7 @@ jobs:
         uses: github/codeql-action/analyze@v4
         with:
           category: '/language:swift'
+
+      - name: Remove generated native dependencies and preparation files
+        if: ${{ always() }}
+        run: rm -rf ReactNative/node_modules ReactNative/native-app/Pods ReactNative/native-app/build "$RUNNER_TEMP/lava-rn-prepare" "$RUNNER_TEMP/lava-rn-evidence"

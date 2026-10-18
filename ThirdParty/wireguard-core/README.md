@@ -16,27 +16,26 @@ run no longer needs its harness).
   `ThirdPartyLegalNotice` category, and `lavasec-doc` attribution land with the
   Phase-1 legal-notice deliverable). No local patches — any future patch is a
   reviewable diff against this baseline.
-- **Transitive deps** are pinned by `Cargo.lock` sha256 checksums, not vendored: the
-  built xcframework is committed, so release builds never run cargo; only the CI
-  rebuild-drift gate fetches (hash-verified, pinned toolchain).
-- **Toolchain**: `rust-toolchain.toml` pins the exact rustc and the three targets —
-  `aarch64-apple-ios`, `aarch64-apple-ios-sim`, `aarch64-apple-darwin` (the macOS
-  slice is what lets executable package tests drive the real Noise state machine
-  under `swift test`).
-- **Determinism**: release profile uses `lto = true` + `codegen-units = 1` +
-  `strip = "debuginfo"`; the drift gate byte-compares a from-source rebuild against
-  the committed artifact (the AGPL provenance answer — the public tree carries
-  source + pins + a CI-verified bit-identical rebuild). The build script normalizes
-  the machine-specific leaks (`--remap-path-prefix` for rustc code, `-ffile-prefix-map`
-  for `ring`'s C objects, `AvailableLibraries` plist ordering).
-- **Xcode is part of the pin.** `ring` compiles its C crypto with the ambient Xcode
-  clang, so the artifact is reproducible under a *fixed Xcode* as well as the pinned
-  rustc — a different Xcode changes those C objects (the Rust code stays identical).
-  The **canonical build environment is the CI runner's Xcode**; the committed artifact
-  is built there, and `build/BUILD-TOOLCHAIN.txt` records the exact rustc + Xcode build
-  version. A local rebuild on a different Xcode will (correctly) report drift naming the
-  version gap — rebuild on the runner (or a matching Xcode) to reproduce. An intentional
-  runner Xcode upgrade means re-baselining the artifact.
+- **Transitive deps** are pinned by `Cargo.lock` checksums. Builds use `--locked`;
+  dependency changes require a reviewed lockfile update.
+- **Toolchain**: `rust-toolchain.toml` pins Rust and the three Apple targets.
+  Hosts must provide a trusted `rustup` installation, just as they provide Xcode.
+  `scripts/build-wireguard-core.sh` uses it to install the pinned toolchain and
+  missing targets; it never downloads or executes a bootstrap installer. Builds
+  use the active Xcode/SDK selection, including `DEVELOPER_DIR` when set.
+  Detected compiler and SDK versions are recorded in `build/BUILD-TOOLCHAIN.txt`.
+- **Source-to-artifact verification**: app, release and Swift CI preparation build
+  the artifact they consume from source. A clean Cargo target directory prevents
+  C objects from a previous Xcode being reused. Build failures stop preparation;
+  the checked-in snapshot is never a fallback in these pipelines. App preparation
+  also checks legal notices against the freshly built archive inventory.
+- **Reproducibility**: `scripts/check-wireguard-core-drift.sh` compares two clean
+  builds under the same active toolchain, including every generated file. It
+  rejects unexpected files, symlinks and embedded build paths, then leaves the
+  verified artifact for the notices check. Source, dependency or compiler changes
+  may legitimately change bytes compared with the historical snapshot. Switching
+  hosts or Xcode requires neither that old compiler nor an artifact re-baseline.
+  The build normalizes Rust/C source paths and XCFramework plist ordering.
 
 ## Phase 1 progress
 
@@ -45,10 +44,9 @@ run no longer needs its harness).
       handshake/transport tests (`tests/engine_abi.rs`) — slice 2. Uniform
       data-path buffer contract makes every engine panic path unreachable;
       buffer sizing tracks the ios-internal #442 co-residency measurement.
-- [x] `scripts/build-wireguard-core.sh` → committed 3-slice xcframework
+- [x] `scripts/build-wireguard-core.sh` → source-built 3-slice xcframework
       (`build/LavaSecWGCore.xcframework`, ios-arm64 / ios-arm64-simulator /
-      macos-arm64) — slice 3. Byte-reproducible across machine / `$HOME` /
-      `CARGO_HOME` / checkout path (verified), so the drift gate can byte-compare.
+      macos-arm64) — slice 3. Clean builds are compared under the active toolchain.
 - [x] CI rebuild-drift gate: `scripts/check-wireguard-core-drift.sh` +
       the `wireguard-core-drift` job in `light-build.yml` (internal-repo-only).
       The `changes` job classifies the engine inputs on Linux, so PRs that do not
@@ -86,13 +84,27 @@ run no longer needs its harness).
       binary-vs-runtime distinction.
 - [x] `lavasec-doc` `docs/legal/third-party-notices.md` public disclosure (PR #40).
 
-## The committed artifact
+## Building and the checked-in snapshot
 
-`build/LavaSecWGCore.xcframework` is a checked-in binary (~19 MB per static-lib
-slice: LTO bitcode + `ring`'s asm objects; the members are LLVM bitcode, so
-`nm`/`objdump` can't read them — they resolve at Xcode link time, verified by a
-C link+run test). `build/BUILD-TOOLCHAIN.txt` records the rustc + Xcode build
-version it was built with. Rebuild it ONLY via `scripts/build-wireguard-core.sh`
-(never a bare `cargo build`) **on the CI runner's Xcode** (the canonical
-environment); the drift gate enforces that the committed bytes equal a
-from-source rebuild there.
+```sh
+bash scripts/build-wireguard-core.sh
+# Optional reproducibility check (two independent builds):
+bash scripts/check-wireguard-core-drift.sh
+```
+
+`build/LavaSecWGCore.xcframework` remains checked in for source-distribution and
+attribution inspection without an Apple compiler. It is a historical convenience
+snapshot, not a verified source-to-binary baseline or an approved fallback for app
+builds. Node-only archive/notices checks establish structural and attribution
+consistency, not payload provenance. Review changes to the snapshot as binary
+changes; the fresh-build reproducibility gate does not certify its bytes. Its
+recorded toolchain describes that snapshot; it does not constrain a new build. Before
+building the app or running Swift package tests, regenerate it using the command above. The shared app
+preparation entry point and Swift CI do this automatically, so QA and production
+archives also consume fresh source builds. Rerun preparation after selecting a
+new Xcode. A successful build replaces the local snapshot and sidecar; ordinary
+host changes do not require committing those regenerated binaries.
+
+The three static libraries contain Rust LTO bitcode and `ring` C/assembly objects.
+Use this script rather than bare `cargo build` so the same path normalization,
+locked dependency resolution, artifact layout and provenance checks apply.

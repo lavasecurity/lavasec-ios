@@ -82,8 +82,10 @@ def binary_target(name: str, path: str) -> dict[str, object]:
     including `packageAccess: False` and the artifact path — so a second binary
     target, a relocated artifact, or a remote `url:`/`checksum:` variant (which
     would fetch bytes CI never rebuilt) all fail the boundary instead of shipping.
-    The one approved artifact is the WireGuard engine, whose bytes CI proves equal
-    a from-source rebuild (scripts/check-wireguard-core-drift.sh).
+    The one approved artifact is the WireGuard engine. App preparation and Swift CI
+    build it from pinned source before consumption; this shape check does not prove
+    the historical snapshot's bytes. The separate drift gate compares two fresh builds
+    under the active toolchain (scripts/check-wireguard-core-drift.sh).
     """
     return {
         "dependencies": [],
