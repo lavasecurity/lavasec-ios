@@ -46,6 +46,7 @@ protocol FilterDraftContextProviding: AnyObject {
     var threatGuardrail: DomainRuleSet { get }
     func draftRuleBudgetRejection(for ids: Set<String>) -> String?
     func draftCustomBlocklistDisplayKey(for source: CustomBlocklistSource) -> String
+    func isCurrentPreparationReplacement(_ epoch: Int) -> Bool
 }
 
 /// Owns draft sessions and preparation presentation. It has no configuration
@@ -70,11 +71,94 @@ final class FilterDraftController: ObservableObject {
     }
 
     @Published private(set) var sessions = FilterDraftSessionState()
-    @Published var preparationState: FilterPreparationState = .idle
-    @Published var isPreparationPresented = false
+    @Published var preparationState: FilterPreparationState = .idle { didSet { schedulePreparationTerminalFallback() } }
+    @Published var isPreparationPresented = false { didSet { if !isPreparationPresented { preparationTerminalFallback?.cancel() } } }
     @Published var preparationOrigin: FilterReviewOrigin = .filters
     @Published var preparationFailureIsRetryable = true
+    @Published private(set) var preparationPresentation = FilterPreparationPresentationLifetime()
+    @Published var preparationUpgradeContext: String?
+    @Published var preparationRecoveryInFlight = false
+    var preparationReplacementEpoch: Int?
     var pendingSwitchFilterID: String?
+    private var preparationTerminalFallback: Task<Void, Never>?
+
+    /// Native operations own this identity; a remount or animation never starts work.
+    func beginPreparationPresentation() {
+        preparationPresentation.begin()
+        preparationState = .idle
+        preparationUpgradeContext = nil
+        preparationRecoveryInFlight = false
+    }
+
+    func acknowledgePreparationSuccess(id: UUID) -> Bool {
+        let confirmed: Bool
+        if case .preparing(let progress, _) = preparationState { confirmed = progress >= 1 }
+        else { confirmed = false }
+        guard isPreparationPresented,
+              preparationPresentation.acknowledgeSuccess(id: id, confirmed: confirmed) else { return false }
+        return true
+    }
+
+    private var preparationTerminalOutcome: (key: String, message: String)? {
+        switch preparationState {
+        case .preparing(let progress, _) where progress >= 1:
+            return ("success", "Filters updated.".lavaLocalized)
+        case .failed(let failure):
+            return ("failure:\(failure)", "We couldn't update your filter".lavaLocalized + " " + failure.lavaLocalized)
+        default: return nil
+        }
+    }
+    private func ownsPreparation(_ id: UUID) -> Bool {
+        guard preparationPresentation.id == id, let epoch = preparationReplacementEpoch else { return false }
+        return context?.isCurrentPreparationReplacement(epoch) == true
+    }
+    /// Both the renderer request and the bounded native fallback claim this one
+    /// attempt-scoped announcement owner. Neither can announce another attempt.
+    @discardableResult func announcePreparationOutcome(id: UUID) -> Bool {
+        guard ownsPreparation(id), isPreparationPresented, let outcome = preparationTerminalOutcome else { return false }
+        if preparationPresentation.claimAnnouncement(id: id, outcome: outcome.key) {
+            LavaAccessibilityAnnouncer.announce(outcome.message)
+        }
+        return true
+    }
+    func noteRenderedPreparationSuccess(id: UUID) -> Bool {
+        guard ownsPreparation(id), isPreparationPresented, preparationTerminalOutcome?.key == "success" else { return false }
+        return preparationPresentation.noteRenderedSuccess(id: id, now: ProcessInfo.processInfo.systemUptime)
+    }
+    private func schedulePreparationTerminalFallback() {
+        guard let id = preparationPresentation.id, let outcome = preparationTerminalOutcome else {
+            preparationTerminalFallback?.cancel(); return
+        }
+        guard preparationPresentation.beginTerminal(id: id, outcome: outcome.key, now: ProcessInfo.processInfo.systemUptime) else { return }
+        preparationTerminalFallback?.cancel()
+        preparationTerminalFallback = Task { [weak self] in
+            guard let self else { return }
+            while ownsPreparation(id), isPreparationPresented {
+                if preparationPresentation.shouldUseTerminalFallback(id: id, now: ProcessInfo.processInfo.systemUptime) {
+                    announcePreparationOutcome(id: id)
+                    return
+                }
+                do { try await Task.sleep(nanoseconds: 50_000_000) } catch { return }
+            }
+        }
+    }
+
+    /// A late RN mount must still show the final fill before native dismissal.
+    /// This is after commit and the existing success hold; silent operations never
+    /// enter it. Check replacement ownership while waiting as a silent native
+    /// replacement does not publish another preparation identity.
+    func waitForPreparationSuccessPresentation(id: UUID?, stillOwnsOperation: () -> Bool) async {
+        guard let id else { return }
+        while preparationPresentation.id == id, isPreparationPresented,
+              !preparationPresentation.successWasPresented, stillOwnsOperation() {
+            if preparationPresentation.shouldUseTerminalFallback(id: id, now: ProcessInfo.processInfo.systemUptime) {
+                announcePreparationOutcome(id: id)
+                return
+            }
+            do { try await Task.sleep(nanoseconds: 50_000_000) }
+            catch { return }
+        }
+    }
 
     var detailTargetID: String? { sessions.detailTargetID }
 

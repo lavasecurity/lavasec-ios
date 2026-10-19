@@ -166,7 +166,6 @@ targets:
       - path: LavaSecApp/AccountController.swift
       - path: LavaSecApp/AccountSessionKeychainStore.swift
       - path: LavaSecApp/ActivityViewController.swift
-      - path: LavaSecApp/AdminQAView.swift
       - path: LavaSecApp/AppViewModel.swift
       - path: LavaSecApp/LavaAppPlatformServices.swift
       - path: LavaSecApp/QAMetricKitCollector.swift
@@ -217,15 +216,12 @@ targets:
       - path: LavaSecApp/DiagnosticsDateControls.swift
       - path: LavaSecApp/DiagnosticsLocalLogSupport.swift
       - path: LavaSecApp/DiagnosticsNetworkActivity.swift
-      - path: LavaSecApp/BlocklistPickerView.swift
-      - path: LavaSecApp/FilterLibraryView.swift
       - path: LavaSecApp/FilterPreparationPresentation.swift
       - path: LavaSecApp/FilterReviewFlowView.swift
       - path: LavaSecApp/FilterSharedViews.swift
       - path: LavaSecApp/LavaDesignSystem/LavaCondensedList.swift
       - path: LavaSecApp/LavaDesignSystem/LavaComponents.swift
       - path: LavaSecApp/LavaDesignSystem/LavaConfirmationDialog.swift
-      - path: LavaSecApp/LavaDesignSystem/LavaIcon.swift
       - path: LavaSecApp/LavaDesignSystem/LavaScaffold.swift
       - path: LavaSecApp/LavaDesignSystem/LavaSelectableRow.swift
       - path: LavaSecApp/LavaDesignSystem/LavaTokens.swift
@@ -234,7 +230,6 @@ targets:
       - path: LavaSecApp/LavaSecurityPlusController.swift
       - path: LavaSecApp/LavaSecurityPlusStore.swift
       - path: LavaSecApp/LavaStrings.swift
-      - path: LavaSecApp/OnboardingFlowView.swift
       - path: LavaSecApp/ProtectionConnectivityPresentation.swift
       - path: LavaSecApp/ProtectionPlatformSeams.swift
       - path: LavaSecApp/RageShakeDetector.swift
@@ -242,21 +237,18 @@ targets:
       - path: LavaSecApp/RootView.swift
       - path: LavaSecApp/SecurityController.swift
       - path: LavaSecApp/AccountBackupSettingsView.swift
-      - path: LavaSecApp/BugReportSettingsView.swift
+      - path: LavaSecApp/LavaSheetLockMask.swift
       - path: LavaSecApp/CustomizationSettingsView.swift
-      - path: LavaSecApp/DNSResolverSettingsView.swift
       - path: LavaSecApp/LegalVersionSettingsView.swift
       - path: LavaSecApp/PrivacySecuritySettingsView.swift
       - path: LavaSecApp/SettingsCommon.swift
       - path: LavaSecApp/SettingsView.swift
       # Own file, like AdminQAView, so the gated page stays OUT of the settings source
       # aggregate the production tier/subpage pins read.
-      - path: LavaSecApp/VPNChainingSettingsView.swift
       - path: LavaSecApp/UpgradeSettingsView.swift
-      - path: LavaSecApp/ShareableFilterCard.swift
+      - path: LavaSecApp/ShareableFilterCardSupport.swift
       - path: LavaSecApp/ShareableFilterImageDecoder.swift
       - path: LavaSecApp/ShareableFiltersUI.swift
-      - path: LavaSecApp/SudokuEasterEggView.swift
       - path: LavaSecApp/ProtectionShortcuts.swift
       - path: LavaSecApp/SwitchFilterShortcut.swift
       - path: LavaSecApp/TemporaryProtectionPauseController.swift
@@ -371,11 +363,14 @@ targets:
           PRODUCT_BUNDLE_IDENTIFIER: com.lavasec.app
         Release:
           ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+          # Keep every icon/appearance; trade access-speed compression for package size.
+          ASSETCATALOG_COMPILER_OPTIMIZATION: space
           PRODUCT_BUNDLE_IDENTIFIER: com.lavasec.app
           PROVISIONING_PROFILE_SPECIFIER: "$(LAVASEC_APP_PROFILE)"
           SWIFT_ACTIVE_COMPILATION_CONDITIONS: RELEASE
         QA:
           ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon-QA
+          ASSETCATALOG_COMPILER_OPTIMIZATION: space
           PRODUCT_BUNDLE_IDENTIFIER: com.lavasec.dev.qa
           PROVISIONING_PROFILE_SPECIFIER: "$(LAVASEC_APP_PROFILE)"
           LAVA_KEYCHAIN_SHARING_GROUP: com.lavasec.dev.qa.chained-upstream

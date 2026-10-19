@@ -9,7 +9,7 @@ import type {VPNEditorState} from '../app/contract';
 import Input from '../specs/LavaTextFieldNativeComponent';
 import {useReview} from './ReviewContext';
 import {FlowSheet,FormPanel,FormField,FormDivider,FormActions,useSheetEditorViewport} from './form-scaffold';
-import {Info,InputRow,Quiet,toolbarButton,useToolbar} from './scaffold';
+import {Info,InputRow,Quiet,toolbarAction,useToolbar} from './scaffold';
 
 const noSubscribe=()=>()=>{};
 
@@ -88,7 +88,7 @@ export function VPNEditorFlow({id,state,dismissAttempt,onEntryFailed}:{id:string
     });return()=>lifecycle.remove();
   },[app,id,live?.security.readRevision,presentationAuthority]);
   useEffect(()=>{if(attempt.current!==dismissAttempt){attempt.current=dismissAttempt;close();}},[dismissAttempt]);
-  useToolbar({title:'WireGuard Configuration',headerBackVisible:false,unstable_headerLeftItems:()=>[toolbarButton('Cancel','xmark',close,saving)],unstable_headerRightItems:()=>[]},[saving,state.dirty,name]);
+  useToolbar({title:'WireGuard Configuration',headerBackVisible:false,unstable_headerLeftItems:()=>[toolbarAction('Cancel','close',close,saving)],unstable_headerRightItems:()=>[]},[saving,state.dirty,name]);
   const save=async()=>{if(!app||pending.current||!state.canSave||!currentOwnerMayEdit())return;pending.current=true;setSaving(true);
     try{await app.command({type:'vpnEditor.name',id,name});await app.command({type:'vpnEditor.save',id});}
     catch(error){report(error);}finally{pending.current=false;if(mounted.current)setSaving(false);}

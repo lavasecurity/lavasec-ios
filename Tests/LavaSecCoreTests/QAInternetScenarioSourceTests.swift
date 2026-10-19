@@ -2,14 +2,12 @@ import XCTest
 
 final class QAInternetScenarioSourceTests: XCTestCase {
     func testPhoneQAMenuUsesOneSearchableCatalogAndGuidedDestinations() throws {
-        let source = try readSource(.adminQAView)
-        XCTAssertTrue(source.contains("ForEach(sections)"))
-        XCTAssertTrue(source.contains("LocalLogSearchField(text: $search, placeholder: \"Search Device QA\")"))
-        XCTAssertTrue(source.contains(".sheet(item: $condition)"))
-        XCTAssertTrue(source.contains(".sheet(item: $suite)"))
-        XCTAssertTrue(source.contains("condition.testerSteps.enumerated()"))
-        XCTAssertFalse(source.contains("Device QA uses atomic modes"))
-        XCTAssertFalse(source.contains("title: message,\n                    systemImage: \"checkmark.circle.fill\""))
+        let source = try readSource(.reactNativeAppQA)
+        XCTAssertTrue(source.contains("private var sections: [PhoneQASection]"))
+        XCTAssertTrue(source.contains("condition.testerSteps.map"))
+        XCTAssertTrue(source.contains("LavaQAVisitAdmissions.lifetime.admit(id: id, ticket: ticket)"))
+        XCTAssertTrue(source.contains("ownerBeforeAuthentication.admits(action, input: input)"))
+        XCTAssertTrue(source.contains("guard owner.admits(action, input: input)"))
         for catalog in ["QAInternetScenarioSuite", "QAInternetNetworkCondition", "QAInternetDNSSetup", "QAInternetBlocklistLoad", "PhoneQAHapticPreview", "AdminQAAction", "AdminQAVPNProfileAction"] {
             XCTAssertTrue(source.contains("\(catalog).allCases"), catalog)
         }

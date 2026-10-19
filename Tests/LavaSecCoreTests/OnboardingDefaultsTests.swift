@@ -65,10 +65,9 @@ final class OnboardingDefaultsTests: XCTestCase {
     }
 
     func testOnboardingFallbackViewSeedsSavedStateAndUsesNarrowPersistBoundary() throws {
-        let flow = try readSource(.onboardingFlowView)
-        XCTAssertTrue(flow.contains("useEncryptedFallback = viewModel.configuration.usesEncryptedDeviceDNSFallback"))
-        XCTAssertTrue(flow.contains("if !isMock && !hasLoadedConnectionChoice {"))
-        XCTAssertFalse(flow.contains("@State private var fallbackResolverPresetID"))
+        let flow = try readSource(.reactNativeAppOnboarding)
+        XCTAssertTrue(flow.contains("state = OnboardingVisitState(encryptedFallback: mock ? true : LavaAppBridge.shared.model.configuration.usesEncryptedDeviceDNSFallback)"))
+        XCTAssertTrue(flow.contains("model.applyOnboardingConnectionPreferences(useEncryptedFallback: state.encryptedFallback, persistImmediately: persistImmediately)"))
         let app = try readAppViewModelSource()
         let apply = try sourceBlock(in: app, startingAt: "func applyOnboardingConnectionPreferences(", endingBefore: "func selectOnboardingBlocklists(")
         XCTAssertTrue(apply.contains("configuration.applyOnboardingEncryptedFallback(useEncryptedFallback)"))

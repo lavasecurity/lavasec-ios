@@ -1,8 +1,9 @@
-// Reference exported from SudokuPuzzle.generate(seed: 648), the production
-// -lava-sudoku-ui-test fixture. The review keeps all progress in its React session.
-export type SudokuPuzzle = {readonly givens: readonly number[]; readonly solution: readonly number[]};
+// Reference exported from SudokuPuzzle.generate(seed: 648).
+// The isolated review keeps progress in its React session; the full app uses native persistence.
+export type SudokuPuzzle = {readonly givens: readonly number[]; readonly solution: readonly number[]; readonly revealVersion?: 1 | 2};
 export type SudokuGame = {readonly puzzle: SudokuPuzzle; readonly values: readonly number[]; readonly notes: readonly (readonly number[])[]};
 export const referencePuzzle: SudokuPuzzle = {
+  revealVersion: 2,
   givens: '032000601090602030000500000360800000910200080070000096020090070100020900450703800'.split('').map(Number),
   solution: '532987641791642538846531729364819257915276384278354196623198475187425963459763812'.split('').map(Number),
 };
@@ -13,6 +14,33 @@ export const workingBoard = (game: SudokuGame) => game.puzzle.givens.map((given,
 export const isSolved = (game: SudokuGame) => workingBoard(game).every((value,index) => value === game.puzzle.solution[index]);
 export const isComplete = (game: SudokuGame) => workingBoard(game).every(value => value !== 0);
 export const remainingCount = (game: SudokuGame, digit: number) => Number.isInteger(digit)&&digit>=1&&digit<=9 ? Math.max(0,9-workingBoard(game).filter(value => value === digit).length) : 0;
+
+const digits=Array.from({length:9},(_,index)=>index+1);
+const units=Array.from({length:9},(_,unit)=>[
+  digits.map((_,column)=>unit*9+column),
+  digits.map((_,row)=>row*9+unit),
+  digits.map((_,offset)=>(Math.floor(unit/3)*3+Math.floor(offset/3))*9+(unit%3)*3+offset%3),
+]).flat();
+
+/** Empty cells provable by a naked or hidden single, without exposing the digit.
+ * Pencil marks are user annotations, not constraints. The saved solution only
+ * guards against misleading deductions from a wrong entry; it never picks a hint.
+ */
+export function hintCellIndices(game:SudokuGame):ReadonlySet<number> {
+  const board=workingBoard(game),hints=new Set<number>();
+  if(board.some((value,index)=>value!==0&&value!==game.puzzle.solution[index]))return hints;
+  const candidates=board.map(value=>new Set(value?[]:digits));
+  for(const unit of units){
+    const placed=unit.map(index=>board[index]!).filter(Boolean);
+    for(const index of unit)for(const digit of placed)candidates[index]!.delete(digit);
+  }
+  candidates.forEach((values,index)=>{if(values.size===1)hints.add(index);});
+  for(const unit of units)for(const digit of digits){
+    const locations=unit.filter(index=>candidates[index]!.has(digit));
+    if(locations.length===1)hints.add(locations[0]!);
+  }
+  return hints;
+}
 export function editCell(game: SudokuGame, index: number, digit: number, notesMode = false): SudokuGame {
   if (!Number.isInteger(index) || index < 0 || index >= 81 || game.puzzle.givens[index] || isSolved(game)
       || !Number.isInteger(digit) || digit < 0 || digit > 9) return game;
@@ -50,7 +78,7 @@ export function freshPuzzle(previous: SudokuPuzzle, random = Math.random): Sudok
     const rotate = (digit: number) => digit === 0 ? 0 : digit%9+1;
     givens = givens.map(rotate); solution = solution.map(rotate);
   }
-  return {givens,solution};
+  return {givens,solution,revealVersion:2};
 }
 
 // Hidden challenge boards (native challenge target: 28 clues, always < 30) for the
@@ -58,11 +86,11 @@ export function freshPuzzle(previous: SudokuPuzzle, random = Math.random): Sudok
 // 1, 7 and 42 with `challenge: true`; the connected app instead asks
 // `sudoku.new {challenge:true}` so production draws a fresh board.
 export const challengePuzzles: readonly SudokuPuzzle[] = [
-  {givens: '050002960321004000900850300030000008600000003400080010080005400000420000005109700'.split('').map(Number),
+  {revealVersion: 2, givens: '050002960321004000900850300030000008600000003400080010080005400000420000005109700'.split('').map(Number),
    solution: '854372961321694875976851324537916248618247593492583617189765432763428159245139786'.split('').map(Number)},
-  {givens: '350914067000000000920000003030800094080040000000352800700001000000400020100000748'.split('').map(Number),
+  {revealVersion: 2, givens: '350914067000000000920000003030800094080040000000352800700001000000400020100000748'.split('').map(Number),
    solution: '358914267617523489924768153231876594586149372479352816742681935895437621163295748'.split('').map(Number)},
-  {givens: '000405000000017800037600012642000000019000405705004200100090000000000690098700000'.split('').map(Number),
+  {revealVersion: 2, givens: '000405000000017800037600012642000000019000405705004200100090000000000690098700000'.split('').map(Number),
    solution: '821435976956217843437689512642953187319872465785164239163598724574321698298746351'.split('').map(Number)},
 ];
 export function freshChallengePuzzle(previous?: SudokuPuzzle, random = Math.random): SudokuPuzzle {

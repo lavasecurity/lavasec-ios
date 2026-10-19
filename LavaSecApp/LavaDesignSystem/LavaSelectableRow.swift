@@ -9,7 +9,7 @@ enum LavaRowSelectionState: Equatable {
 }
 
 /// The single selection glyph shared by every single- and multi-select list in the
-/// app: a trailing filled check circle for chosen rows,
+/// app: a plain trailing checkmark for chosen rows,
 /// a lock for gated rows, and a reserved-width blank otherwise so row content stays
 /// aligned whether or not a row is selected.
 struct LavaSelectionAccessory: View {
@@ -24,7 +24,7 @@ struct LavaSelectionAccessory: View {
         Group {
             switch state {
             case .selected:
-                Image(systemName: "checkmark.circle.fill")
+                Image(systemName: "checkmark")
                     .font(.system(size: LavaNavigationRowMetrics.glyphPointSize, weight: .regular))
                     .foregroundStyle(isEnabled && environmentEnabled ? LavaStyle.safeGreen : LavaStyle.secondaryText)
             case .locked:

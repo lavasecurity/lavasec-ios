@@ -42,10 +42,10 @@ final class ShareableFiltersSourceTests: XCTestCase {
         for mutation in ["configuration =", "library.", "persistSharedState", "applyCatalogSyncResult", "catalogSourcesByID ="] {
             XCTAssertFalse(refresh.contains(mutation), mutation)
         }
-        let ui = try readSource(.shareableFiltersUI)
+        let ui = try readSource(.reactNativeAppImport)
         XCTAssertTrue(ui.contains("try await viewModel.refreshCatalogForSharedImport(configuration)"))
-        XCTAssertTrue(ui.contains(".disabled(checkingCatalog || catalogCheckFailed || plan.applied.isEmpty)"))
-        XCTAssertTrue(ui.contains("Text(Self.unavailableListsMessage(completion.unavailableListCount))"))
+        XCTAssertTrue(ui.contains("!checkingCatalog, !catalogCheckFailed"))
+        XCTAssertTrue(ui.contains("importUnavailableMessage(owner.completion.unavailableListCount)"))
     }
 
     // MARK: Filters screen entry points
@@ -118,7 +118,7 @@ final class ShareableFiltersSourceTests: XCTestCase {
         let bridge = try readSource(.reactNativeAppQueries)
         let query = try sourceBlock(in: bridge, startingAt: "func query(_ name: String",
                                     endingBefore: "func canReadPresentation(")
-        let epoch = try XCTUnwrap(query.range(of: "let shareModuleEpoch = policy == .share ? shareCardModuleEpoch : nil"))
+        let epoch = try XCTUnwrap(query.range(of: "let shareModuleEpoch = policy == .share || policy == .activityShare ? shareCardModuleEpoch : nil"))
         let shareAuth = try XCTUnwrap(query.range(of: "try await authorize(.filterEditing, \"Share Filter\", fresh: false)"))
         let revalidate = try XCTUnwrap(query.range(of: "guard shareModuleEpoch == shareCardModuleEpoch"))
         let ticket = try XCTUnwrap(query.range(of: "let ticket = try presentationCache.beginRead("))
@@ -133,27 +133,16 @@ final class ShareableFiltersSourceTests: XCTestCase {
     // MARK: Import flow — code entry + scanner
 
     func testImportFlowHasFreeformCodeEntryAndScanner() throws {
-        let source = try readSource(.shareableFiltersUI)
-
-        // Freeform scaffold entry with a Continue button and chevron back / skip.
-        XCTAssertTrue(source.contains("struct ImportFiltersFlow: View"))
-        XCTAssertTrue(source.contains("LavaTextEditorInputRow("))
-        XCTAssertTrue(source.contains("Button(\"Continue\")"))
-        XCTAssertTrue(source.contains("systemName: \"chevron.left\""))
-        XCTAssertTrue(source.contains("Button(\"Skip\", action: onSkip)"))
-        // Camera scanner.
-        XCTAssertTrue(source.contains("struct QRCodeScannerRepresentable: UIViewControllerRepresentable"))
-        XCTAssertTrue(source.contains("output.metadataObjectTypes = [.qr]"))
-        // The capture session powers down on resign-active (app switcher), not just
-        // on navigation away, so the camera never runs behind the privacy shield —
-        // including when App Unlock is off.
-        XCTAssertTrue(source.contains("UIApplication.willResignActiveNotification"))
-        XCTAssertTrue(source.contains("UIApplication.didBecomeActiveNotification"))
-        XCTAssertTrue(source.contains("@objc private func appWillResignActive()"))
-        XCTAssertTrue(source.contains("private func stopSession()"))
-        // Additive import: the preview offers Add-as-new + Replace (no blanket replace).
-        XCTAssertTrue(source.contains("Add as a new filter"))
-        XCTAssertTrue(source.contains("Replace a filter instead"))
+        let ui = try readSource(.reactNativeImportFlow)
+        XCTAssertTrue(ui.contains("export function ImportFlow("))
+        XCTAssertTrue(ui.contains("FormField title=\"Setup code\""))
+        XCTAssertTrue(ui.contains("button('Continue'"))
+        XCTAssertTrue(ui.contains("Add as a new filter"))
+        XCTAssertTrue(ui.contains("Replace a filter instead"))
+        let native = try readSource(.shareableFiltersUI)
+        XCTAssertTrue(native.contains("output.metadataObjectTypes = [.qr]"))
+        XCTAssertTrue(native.contains("UIApplication.willResignActiveNotification"))
+        XCTAssertTrue(native.contains("private func stopSession()"))
     }
 
     func testImportIsAdditiveWithAddNewAndReplacePaths() throws {
@@ -211,26 +200,18 @@ final class ShareableFiltersSourceTests: XCTestCase {
 
         // Onboarding no longer imports at all: setup must be the user's own choice,
         // so a shared configuration can neither complete it nor stand in for it.
-        let onboarding = try readSource(.onboardingFlowView)
+        let onboarding = try [readSource(.reactNativeOnboardingFlow), readSource(.reactNativeAppOnboarding)].joined(separator: "\n")
+        XCTAssertTrue(onboarding.contains("export function OnboardingFlow()"))
         XCTAssertFalse(onboarding.contains("ImportFiltersFlow"),
                        "Onboarding must not embed the importer.")
         XCTAssertFalse(onboarding.contains("allowsAddingNewFilter"),
                        "The onboarding-only add-as-new suppression is gone with the route.")
 
-        // The UI offers Add (paywall at the cap) + Replace (filter picker), no blanket replace.
-        XCTAssertTrue(ui.contains("if viewModel.canCreateFilter {"))
-        XCTAssertTrue(ui.contains("showingPaywall = true"))
-        XCTAssertTrue(ui.contains("LavaPlusUpgradeSheet(context: \"fullImport\")"))
-        XCTAssertTrue(ui.contains("struct ImportChooseReplaceTargetView"))
-        XCTAssertFalse(ui.contains("case nameNew("),
-                       "The naming stage is gone: imported filters are named by AppViewModel.")
-        XCTAssertTrue(ui.contains("case chooseReplace(ShareableFilterConfiguration)"))
-        // Canary: the negative pins above key on these identifiers - if a rename removes
-        // one from the pinned source, those pins pass vacuously. Fail here instead, then
-        // re-anchor both sides to the new name.
-        XCTAssertTrue(app.contains("importPlan"))
-        XCTAssertTrue(app.contains("prepareFilterSnapshot"))
-        XCTAssertTrue(app.contains("persistSharedState"))
+        let session = try readSource(.reactNativeAppImport)
+        XCTAssertTrue(session.contains("if viewModel.canCreateFilter { addNew(configuration) }"))
+        XCTAssertTrue(session.contains("LavaPlusUpgradeSheet(context: \"fullImport\")"))
+        XCTAssertTrue(session.contains("case chooseReplace(ShareableFilterConfiguration)"))
+        XCTAssertFalse(ui.contains("case nameNew("))
     }
 
     func testFilterNamesAreUniqueAcrossCreateRenameImport() throws {
@@ -253,11 +234,12 @@ final class ShareableFiltersSourceTests: XCTestCase {
         XCTAssertTrue(rename.contains("FilterIdentityPolicy.nameForEdit(name, savedName: saved.name)"))
         XCTAssertTrue(rename.contains("$0.name = resolvedName"))
 
-        // The create/rename sheets disable their confirm action on a duplicate name.
-        let filtersView = try readSource(.filterLibraryView)
-        XCTAssertTrue((try readSource(.reactNativeAppFlows)).contains("library.isFilterNameAvailable($0, excluding: id)"))
-        XCTAssertTrue(filtersView.contains("private var isDuplicate: Bool"))
-        XCTAssertTrue(filtersView.contains("FilterIdentityPolicy.nameForEdit(name, savedName: savedName)"))
+        // RN identity commands validate the current native library session.
+        let flows = try readSource(.reactNativeAppFlows)
+        XCTAssertTrue(flows.contains("flow.library.map { $0.isFilterNameAvailable(FilterIdentityPolicy.normalizedName(name), excluding: flow.filterID) }"))
+        XCTAssertTrue(flows.contains("FilterIdentityPolicy.nameForEdit(name, savedName: flow.filterName"))
+        XCTAssertTrue(flows.contains("library.renameFilter(id: id, to: name, emoji: emoji)"))
+
     }
 
     func testScannerHandlesMultiLensAndAdjustableFocus() throws {
@@ -299,98 +281,51 @@ final class ShareableFiltersSourceTests: XCTestCase {
     }
 
     func testImportApplyIsGatedBehindFilterEditingAuth() throws {
-        let source = try readSource(.reactNativeAppFlows)
-        XCTAssertTrue(source.contains("authorizeImport: { await security.requireFreshAuthentication(for: .filterEditing, reason: \"Import filter\") }"))
+        let source = try readSource(.reactNativeAppImport)
+        XCTAssertTrue(source.contains("security.requireFreshAuthentication(for: .filterEditing, reason: \"Import filter\")"))
     }
 
     func testRetainedScannerOwnsOneVisibleAttemptAndRefreshesCallbacks() throws {
-        let source = try readSource(.shareableFiltersUI)
-        let scanner = try sourceBlock(in: source, startingAt: "struct QRCodeScannerRepresentable:", endingBefore: "// MARK: Preview / confirm")
-        XCTAssertFalse(scanner.contains("lastValue"))
-        XCTAssertFalse(source.contains("@State private var hasHandledMatch"))
-        XCTAssertTrue(scanner.contains("controller.onScan = onScan"))
-        XCTAssertTrue(scanner.contains("controller.onAttemptBegan = onAttemptBegan"))
+        let scanner = try readSource(.shareableFiltersUI)
+        let adapter = try readSource(.reactNativeAppImport)
+        XCTAssertTrue(adapter.contains("camera.onScan ="))
+        XCTAssertTrue(adapter.contains("camera.onAttemptBegan ="))
         XCTAssertTrue(scanner.contains("attempt.appear(active:"))
         XCTAssertTrue(scanner.contains("attempt.disappear()"))
         XCTAssertTrue(scanner.contains("attempt.setActive(false)"))
         XCTAssertTrue(scanner.contains("self.attempt.permitsDelivery(generation: generation)"))
-        XCTAssertTrue(scanner.contains("MainActor.assumeIsolated"))
         XCTAssertTrue(scanner.contains("if attempt.generation == generation { attempt = next }"))
     }
 
     func testScannerSurfacesCameraDeniedRecovery() throws {
-        let source = try readSource(.shareableFiltersUI)
+        let source = try readSource(.reactNativeAppImport)
         XCTAssertTrue(source.contains("onCameraAuthorizationDenied"))
-        XCTAssertTrue(source.contains("Camera access is off"))
         XCTAssertTrue(source.contains("UIApplication.openSettingsURLString"))
-        // Returning from Settings re-checks authorization so the scanner remounts.
-        XCTAssertTrue(source.contains("onChange(of: scenePhase)"))
         XCTAssertTrue(source.contains("AVCaptureDevice.authorizationStatus(for: .video) == .authorized"))
+        XCTAssertTrue(try readSource(.reactNativeImportFlow).contains("Camera access is off"))
     }
 
     func testImportPreviewWarnsAndListsUnsupportedEntries() throws {
-        let source = try readSource(.shareableFiltersUI)
-        let preview = try sourceBlock(
-            in: source,
-            startingAt: "private struct ImportPreviewView: View",
-            endingBefore: "private struct ImportReplacementReviewView"
-        )
-
-        // Additive import: the preview is neutral (no "replaces your filter" warning) and offers
-        // both Add-as-new and Replace.
-        XCTAssertFalse(preview.contains("LavaInfoPanel("))
-        XCTAssertFalse(preview.contains("Import this filter"))
-        XCTAssertFalse(preview.contains("This replaces your filter"))
-        XCTAssertTrue(preview.contains("onAddNew"))
-        XCTAssertTrue(preview.contains("onReplace"))
-        // The preview breaks down the actual content being imported (resolved
-        // names + domains), not bare counts — and reflects the planned subset.
-        XCTAssertTrue(preview.contains("LavaSectionGroup(\"Lava blocks these\")"))
-        XCTAssertTrue(preview.contains("LavaCondensedList {"))
-        XCTAssertEqual(preview.components(separatedBy: "LazyVStack(alignment: .leading, spacing: 0)").count - 1, 2,
-                       "Both full domain lists must build rows lazily inside the sheet scroll view")
-        XCTAssertTrue(preview.contains("LavaFilterContentRow(title: row.title"))
-        // Each preview row leads with its outcome's stroke-only mark.
-        XCTAssertTrue(preview.contains("outcome: .blocked"))
-        XCTAssertTrue(preview.contains("outcome: .allowed"))
-        XCTAssertTrue(preview.contains("LavaCondensedDivider()"))
-        XCTAssertFalse(preview.contains("LavaSectionGroup(\"Curated blocklists\")"))
-        XCTAssertFalse(preview.contains("LavaSectionGroup(\"Custom blocklists\")"))
-        XCTAssertTrue(preview.contains("Lava lets these through"))
-        XCTAssertTrue(preview.contains("No allowed exceptions"))
-        XCTAssertTrue(preview.contains("viewModel.blocklistName(for:"))
-        XCTAssertTrue(preview.contains("plan.applied.customBlocklists"))
-        XCTAssertTrue(preview.contains("plan.applied.blockedDomains"))
-        // Every domain remains visible in the review.
-        XCTAssertFalse(preview.contains("blockedDomainPreviewLimit"))
-        XCTAssertTrue(preview.contains("blockedDomains.map"))
-        // Unsupported entries get an alert row treatment.
-        XCTAssertTrue(preview.contains("if plan.hasUnsupportedEntries"))
-        XCTAssertTrue(preview.contains("unsupportedSection(for: plan)"))
-        XCTAssertTrue(source.contains("struct ImportAlertRow: View"))
-        XCTAssertTrue(preview.contains(".buttonStyle(LavaSecondaryActionButtonStyle())"))
-        XCTAssertFalse(source.contains("private struct ImportContentRow"))
+        let ui = try readSource(.reactNativeImportFlow)
+        let native = try readSource(.reactNativeAppImport)
+        for copy in ["Lava blocks these", "Lava lets these through", "No allowed exceptions", "Not imported on this device"] { XCTAssertTrue(ui.contains(copy)) }
+        XCTAssertTrue(ui.contains("outcome=\"blocked\""))
+        XCTAssertTrue(ui.contains("outcome=\"allowed\""))
+        XCTAssertTrue(native.contains("plan.applied.customBlocklists"))
+        XCTAssertTrue(native.contains("plan.applied.blockedDomains.sorted().map"))
+        XCTAssertFalse(native.contains("blockedDomainPreviewLimit"))
+        XCTAssertTrue(ui.contains("review.warnings.map"))
     }
 
     func testImportPreviewReadsOnlyKnownWarmCountsAndKeepsCustomIdentity() throws {
-        let preview = try sourceBlock(in: readSource(.shareableFiltersUI),
-            startingAt: "private struct ImportPreviewView: View", endingBefore: "private struct ImportReplacementReviewView")
-        XCTAssertTrue(preview.contains("source.entryCount > 0"))
-        XCTAssertTrue(preview.contains("viewModel.cachedBlockRuleSets[sourceID]?.count"))
-        XCTAssertTrue(preview.contains("$0.sourceURL == customSource.sourceURL"))
-        XCTAssertTrue(preview.contains("$0.parseFormat == customSource.parseFormat"))
-        XCTAssertTrue(preview.contains("else { return nil }"))
-        XCTAssertTrue(preview.contains("return count.map"))
-        XCTAssertTrue(preview.contains("verbatimTitle: true"))
-        XCTAssertTrue(preview.contains("verbatimMetadata: true"))
-        // The preview checks metadata publication; it still never downloads list payloads to count them.
-        let counts = try sourceBlock(in: preview, startingAt: "private func warmRuleCountText(",
-            endingBefore: "private struct ImportDisplayEntry")
+        let native = try readSource(.reactNativeAppImport)
+        let counts = try sourceBlock(in: native, startingAt: "func count(_ id:", endingBefore: "var rows:")
+        XCTAssertTrue(counts.contains("source.entryCount > 0"))
+        XCTAssertTrue(counts.contains("model.cachedBlockRuleSets[id]?.count"))
+        XCTAssertTrue(counts.contains("$0.sourceURL == custom.sourceURL"))
+        XCTAssertTrue(counts.contains("$0.parseFormat == custom.parseFormat"))
         XCTAssertFalse(counts.contains("await"))
-        XCTAssertTrue(preview.contains("refreshCatalogForSharedImport(configuration)"))
-        XCTAssertFalse(preview.contains("catalog.sync"))
-        XCTAssertFalse(preview.contains("refreshable"))
-        XCTAssertFalse(preview.contains("Pending refresh"))
+        XCTAssertTrue(native.contains("refreshCatalogForSharedImport(configuration)"))
     }
 
     func testViewModelComputesRobustImportPlan() throws {
@@ -413,13 +348,13 @@ final class ShareableFiltersSourceTests: XCTestCase {
 
         // The import flow carries the EXACT previewed plan (importPlan(for:) convenience) into both
         // apply methods, so the preview and the applied result never diverge.
-        let uiSource = try readSource(.shareableFiltersUI)
+        let uiSource = try readSource(.reactNativeAppImport)
         XCTAssertTrue(uiSource.contains("viewModel.importPlan(for: config).applied"))
         XCTAssertTrue(uiSource.contains("addImportedShareableConfigurationAsNewFilter(applied)"))
         XCTAssertTrue(uiSource.contains("replaceFilterWithImportedShareableConfiguration("))
         XCTAssertTrue(uiSource.contains("id: filter.id,"))
         // The preview uses the same importPlan convenience (worst-case headroom).
-        XCTAssertTrue(uiSource.contains("viewModel.importPlan(for: configuration)"))
+        XCTAssertTrue(uiSource.contains("model.importPlan(for: configuration)"))
     }
 
     func testInfoPlistDeclaresCameraUsage() throws {
@@ -428,40 +363,6 @@ final class ShareableFiltersSourceTests: XCTestCase {
     }
 
     // MARK: Onboarding — fine-tune step removed, additional setup added
-
-    func testOnboardingRemovesCustomizeStep() throws {
-        let source = try readSource(.onboardingFlowView)
-
-        XCTAssertFalse(source.contains("case customize"))
-        XCTAssertFalse(source.contains("private var customizePage"))
-        XCTAssertFalse(source.contains("title: \"Customize Lava\""))
-        XCTAssertFalse(source.contains("OnboardingPrimaryButton(title: \"Finish Setup\")"))
-
-        // The standalone "Decide how Lava works" step is gone entirely.
-        XCTAssertFalse(source.contains("title: \"Decide how Lava works\""))
-        XCTAssertFalse(source.contains("private var settingsPage"))
-        XCTAssertFalse(source.contains("case settings"))
-        XCTAssertFalse(source.contains("OnboardingPrimaryButton(title: \"Use These Settings\")"))
-        // Its recommended defaults are now applied silently as setup wraps up.
-        XCTAssertTrue(source.contains("if !isMock && nextPage == .done {\n            viewModel.applyOnboardingRecommendedDefaults(protectionLevel: protectionLevel)"))
-        // Canary: the negative pins above key on these identifiers - if a rename removes
-        // one from the pinned source, those pins pass vacuously. Fail here instead, then
-        // re-anchor both sides to the new name.
-        XCTAssertTrue(source.contains("OnboardingPrimaryButton"))
-    }
-
-    func testOnboardingCompletionOffersOnlyGuard() throws {
-        let source = try readSource(.onboardingFlowView)
-        XCTAssertTrue(source.contains("Button(action: openGuard)"))
-        XCTAssertTrue(source.contains(".accessibilityLabel(\"Open Guard\")"))
-        XCTAssertFalse(source.contains("OnboardingAdditionalSetupSheet"))
-        XCTAssertFalse(source.contains("Additional setup"))
-        XCTAssertFalse(source.contains("ImportFiltersFlow"))
-        let root = try readSource(.rootView)
-        XCTAssertFalse(root.contains("onRequestOpenSettings:"))
-    }
-
-    // MARK: View model wiring
 
     func testViewModelExposesShareAndImportEntryPoints() throws {
         let source = try readAppViewModelSource()

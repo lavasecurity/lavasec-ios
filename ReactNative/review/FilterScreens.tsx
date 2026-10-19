@@ -18,7 +18,7 @@ import NativeReview from '../specs/NativeLavaReview';
 import {LavaActionButton, LavaCard, LavaIconButton} from '../src';
 import {colors} from '../src/colors.ios';
 import {Copy, Metric, Row, Screen, Section, Symbol} from './primitives';
-import {AccessorySlot, DomainInput, Link, AddAction, Group, Info, InputRow, ListRow, Panel, Quiet, QuietFooter, Search, Sheet, toolbarButton, useToolbar} from './scaffold';
+import {AccessorySlot, DomainInput, Link, AddAction, Group, Info, InputRow, ListRow, Panel, Quiet, QuietFooter, Search, Sheet, toolbarAction, useToolbar} from './scaffold';
 import {lavaTokens} from '../src/generated/tokens';
 import {useReview} from './ReviewContext';
 import {addPreviewDomain, initialPreviewDraft, previewDiff} from './preview-model';
@@ -32,7 +32,7 @@ export function FiltersScreen() {
   const saved=live?.filters.find(filter=>filter.id===live.session.activeFilterID);
   const preview=!app?filterFixtures.find(filter=>filter.name===session.activeFilter):undefined;
   const available=!!(saved??preview);
-  useToolbar({unstable_headerRightItems:()=>[toolbarButton('Import','square.and.arrow.down',()=>{if(app)void app.command({type:'native.flow',flow:'import'}).catch(error=>Alert.alert('Lava',error.message));else nav.navigate('Import');})]},[app]);
+  useToolbar({unstable_headerRightItems:()=>[toolbarAction('Import','import',()=>{if(app)void app.command({type:'native.flow',flow:'import'}).catch(error=>Alert.alert('Lava',error.message));else nav.navigate('Import');})]},[app]);
   const open=()=>{
     if(!available)return;
     if(app&&saved){void app.command({type:'filter.open',id:saved.id}).then(()=>nav.navigate('Filter',{id:saved.id})).catch(error=>Alert.alert('Lava',error.message));return;}
@@ -71,8 +71,8 @@ export function LibraryScreen() {
   };
   const confirm=()=>{if(!app){previewNotice();return;}void perform(async()=>{if(await app.command<boolean>({type:'library.form',form:'delete',ids:staged}))finishEditing();});};
   useToolbar({headerBackVisible:!editing,gestureEnabled:!editing,
-    unstable_headerLeftItems:editing?()=>[toolbarButton('Close edit mode','xmark',close,busy)]:undefined,
-    unstable_headerRightItems:()=>editing?[toolbarButton('Review changes','checkmark',confirm,busy||!hasChanges,'confirm')]:[toolbarButton('Edit','square.and.pencil',begin,busy)],
+    unstable_headerLeftItems:editing?()=>[toolbarAction('Close edit mode','close',close,busy)]:undefined,
+    unstable_headerRightItems:()=>editing?[toolbarAction('Review changes','confirm',confirm,busy||!hasChanges,'confirm')]:[toolbarAction('Edit','edit',begin,busy)],
   },[editing,staged,hasChanges,busy,app,live]);
   const share=(filter:typeof filters[number])=>{
     if(!('shareable' in filter)||!filter.shareable)return;
@@ -143,8 +143,8 @@ export function FilterScreen() {
   };
   const share=()=>{if(!filter||app&&(!('shareable' in filter)||!filter.shareable))return;if(!app)setSession({...session,shareFilter:filter.name});nav.navigate('ShareDetail',{id:id??filter.name});};
   useToolbar({title:'',headerBackVisible:!editing,gestureEnabled:!editing,
-    unstable_headerLeftItems:editing?()=>[toolbarButton('Cancel editing','xmark',cancel)]:undefined,
-    unstable_headerRightItems:()=>editing?[toolbarButton('Save','checkmark',save,busy||!!live?.filterEditing?.validation&&!live?.filterEditing?.upgradeReason)]:[...(!live||id===live.session.activeFilterID?[toolbarButton('Refresh now','arrow.clockwise',()=>{if(live)run({type:'filter.refresh',id:id!});else previewNotice();},!app||!ready||live?.filterEditing?.refreshing)]:[]),toolbarButton('Share my filter','square.and.arrow.up',share,!ready||!filter||!!app&&(!('shareable' in filter)||!filter.shareable)),toolbarButton('Edit','square.and.pencil',edit,!ready)],
+    unstable_headerLeftItems:editing?()=>[toolbarAction('Cancel editing','close',cancel)]:undefined,
+    unstable_headerRightItems:()=>editing?[toolbarAction('Save','confirm',save,busy||!!live?.filterEditing?.validation&&!live?.filterEditing?.upgradeReason)]:[...(!live||id===live.session.activeFilterID?[toolbarAction('Refresh now','reload',()=>{if(live)run({type:'filter.refresh',id:id!});else previewNotice();},!app||!ready||live?.filterEditing?.refreshing)]:[]),toolbarAction('Share my filter','share',share,!ready||!filter||!!app&&(!('shareable' in filter)||!filter.shareable)),toolbarAction('Edit','edit',edit,!ready)],
   },[session,draft,savedDraft,ready,id,filter,live?.filterEditing,busy],true);
   const remove=(decision:'blocked'|'allowed',domain:string)=>{if(app&&live)run({type:'filter.domain',id:id!,decision,domain,remove:true});else setDraft({...draft,[decision]:draft[decision].filter(d=>d!==domain)});};
   const changeButton=(name:string,undo:boolean,onPress:()=>void)=><LavaIconButton title={undo?'Undo':'Remove'} item={name} testID={`filter.edit.${name}`} icon={undo?'undo':'remove'} role={undo?'neutral':'destructive'} onPress={onPress}/>;
@@ -252,7 +252,7 @@ export function AddBlocklistScreen() {
     try {if(app&&live)await app.command({type:'filter.lists',id:id!,ids:selected});else setSession({...session,blocklists:selected});nav.goBack();}
     catch(error){Alert.alert('Lava',(error as Error).message);}finally{savingRef.current=false;setSaving(false);}
   };
-  useToolbar({title:'Choose Blocklists',unstable_headerRightItems:()=>[toolbarButton('Bring your own list','plus',()=>{if(!ready)return;if(!app||!live){previewNotice();return;}if(!live.limits.allowsCustomBlocklists){upgrade('customBlocklist',async()=>{const token=await app.command<string>({type:'filter.customList',id:id!,ids:selected});return {name:'CustomEntry',params:{id:token,kind:'blocklist'}};});return;}void app.command<string>({type:'filter.customList',id:id!,ids:selected}).then(id=>nav.navigate('CustomEntry',{id,kind:'blocklist'})).catch(error=>Alert.alert('Lava',error.message));})]},[app,live,selected,ready,id]);
+  useToolbar({title:'Choose Blocklists',unstable_headerRightItems:()=>[toolbarAction('Bring your own list','add',()=>{if(!ready)return;if(!app||!live){previewNotice();return;}if(!live.limits.allowsCustomBlocklists){upgrade('customBlocklist',async()=>{const token=await app.command<string>({type:'filter.customList',id:id!,ids:selected});return {name:'CustomEntry',params:{id:token,kind:'blocklist'}};});return;}void app.command<string>({type:'filter.customList',id:id!,ids:selected}).then(id=>nav.navigate('CustomEntry',{id,kind:'blocklist'})).catch(error=>Alert.alert('Lava',error.message));})]},[app,live,selected,ready,id]);
   return <CatalogSheet sections={sections.map(section=>({title:section.title,items:section.sources}))} categoryTitles={catalog.map(section=>section.title)}
     search={search} onSearch={setSearch} searchLabel="Search lists or categories"
     footer={<View style={{gap:9}}>{!query.error&&<BudgetBar fraction={fraction} indeterminate={indeterminate||!totalsReady} available={!app||!!query.value} warning={exceeded||query.value?.atOrOverBudget}/>}<Copy verbatim role="caption" center color={query.error||exceeded?colors.lavaOrangeText:colors.secondaryText}>{summary}</Copy><LavaActionButton title={freeOverLimit?'Upgrade':saving?'Saving…':'Save Selection'} disabled={saving||!totalsReady||!freeOverLimit&&(!changed||exceeded)} onPress={()=>void save()} /></View>}
@@ -318,7 +318,7 @@ export function ShareDetailScreen() {
   // A revealed sharing page follows the same native off choice as every other
   // painted page. A new code or a concealment boundary still retires its reveal.
   useEffect(()=>{const subscription=AppState.addEventListener('change',state=>{setExportActive(state==='active');if(state!=='active'&&!mayRetainPresentationFrame(displayPolicy.current)){setRevealed(false);setCopied(false);}});return()=>subscription.remove();},[]);
-  useToolbar({unstable_headerRightItems:()=>[toolbarButton('Share filter card','square.and.arrow.up',()=>{if(app&&filter&&content?.card&&cardReady)void app.command({type:'share.card',id:filter.id,token:content.card.token}).catch(error=>Alert.alert('Lava',error.message));else if(!app&&content)void Share.share({message:content.url});},app?(!content?.card||!cardReady||!exportActive||!focused):!content?.image)]},[content,app,filter?.id,cardReady,exportActive,focused]);
+  useToolbar({unstable_headerRightItems:()=>[toolbarAction('Photo','share',()=>{if(app&&filter&&content?.card&&cardReady)void app.command({type:'share.card',id:filter.id,token:content.card.token}).catch(error=>Alert.alert('Lava',error.message));else if(!app&&content)void Share.share({message:content.url});},app?(!content?.card||!cardReady||!exportActive||!focused):!content?.image,'lava.toolbar.labeled.photo')]},[content,app,filter?.id,cardReady,exportActive,focused]);
   return <Sheet>
     {app&&content?.card&&exportActive&&focused&&<FilterShareCard key={content.card.token} content={content.card} onReady={setCardReady}/>}
     <SettingsIntro summary="Your filter is shared as-is. Review your blocklists, blocked sites, and allowed exceptions before sharing. Anyone with the code can see them." />
@@ -328,7 +328,7 @@ export function ShareDetailScreen() {
 }
 export function ImportScreen() {
   const nav=useReviewNavigation();const [stage,setStage]=useState<'method'|'code'>('method');const [code,setCode]=useState('');
-  useToolbar({title:stage==='code'?'Enter a code':'Import a filter',unstable_headerLeftItems:stage==='code'?()=>[toolbarButton('Back','chevron.left',()=>setStage('method'))]:()=>[],unstable_headerRightItems:stage==='method'?()=>[toolbarButton('Close','xmark',()=>nav.goBack())]:()=>[]},[stage]);
+  useToolbar({title:stage==='code'?'Enter a code':'Import a filter',unstable_headerLeftItems:stage==='code'?()=>[toolbarAction('Back','back',()=>setStage('method'))]:()=>[],unstable_headerRightItems:stage==='method'?()=>[toolbarAction('Close','close',()=>nav.goBack())]:()=>[]},[stage]);
   return stage==='method'?<Sheet><Panel warning><Copy role="supporting">Check who shared this filter and review its contents carefully before importing. Shared filters aren’t reviewed by Lava.</Copy></Panel><SettingsSurface><Row intent="page" icon="qrcode.viewfinder" title="Scan a QR code" onPress={previewNotice} /><Row intent="page" icon="photo.on.rectangle" title="Import from Photo" onPress={previewNotice} /><Row intent="page" icon="character.cursor.ibeam" title="Enter a code" onPress={()=>setStage('code')} /></SettingsSurface></Sheet>
     :<Sheet footer={<LavaActionButton title="Continue" disabled={!code.trim()} onPress={previewNotice} />}><Info icon="character.cursor.ibeam" title="Enter a setup code" description={'Paste the setup code someone shared with you. It usually starts with "LF1-".'} /><InputRow title="Setup code"><SetupCodeField onChange={setCode}/></InputRow></Sheet>;
 }

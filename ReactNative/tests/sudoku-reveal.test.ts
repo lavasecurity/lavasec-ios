@@ -10,15 +10,27 @@ import {
   revealLineHeight,
   revealTileOffset,
 } from '../review/sudoku-reveal';
+import {referencePuzzle} from '../review/sudoku-model';
 
 const side = 360;
 const cell = side / 9;
 
 test('the frozen emoji list is unique, single-grapheme and non-empty', () => {
   const segmenter = new Intl.Segmenter('en', {granularity: 'grapheme'});
-  expect(REVEAL_EMOJI.length).toBeGreaterThan(0);
+  expect(REVEAL_EMOJI).toHaveLength(84);
   expect(new Set(REVEAL_EMOJI).size).toBe(REVEAL_EMOJI.length);
   for (const emoji of REVEAL_EMOJI) expect([...segmenter.segment(emoji)]).toHaveLength(1);
+});
+
+test('legacy puzzles retain their original reveal while new puzzles use the expanded pool', () => {
+  expect(revealEmojiFor(referencePuzzle.givens)).toBe('🦋');
+  expect(revealEmojiFor(referencePuzzle.givens, 1)).toBe('🦋');
+  expect(revealEmojiFor(referencePuzzle.givens, 2)).toBe('❤️');
+  const revealed = new Set(Array.from({length: 4096}, (_, seed) => {
+    const givens = Array.from({length: 81}, (_, index) => Math.floor(seed / 10 ** (index % 4)) % 10);
+    return revealEmojiFor(givens, 2);
+  }));
+  expect(revealed).toEqual(new Set(REVEAL_EMOJI));
 });
 
 test('the frozen list holds its curated range and heart selection', () => {
@@ -41,7 +53,7 @@ test('the reveal emoji is a stable image per game and varies across puzzles', ()
   // Changing one clue is a different game, so the list must not collapse to one.
   const variants = Array.from({length: 20}, (_, row) =>
     givens.map((value, index) => (index === 0 ? (row % 9) + 1 : value)));
-  expect(new Set(variants.map(revealEmojiFor)).size).toBeGreaterThan(1);
+  expect(new Set(variants.map(givens => revealEmojiFor(givens, 2))).size).toBeGreaterThan(1);
 });
 
 test('the glyph is a fixed fraction of the board side', () => {

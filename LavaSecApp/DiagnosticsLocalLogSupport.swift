@@ -2,38 +2,6 @@ import SwiftUI
 import LavaSecKit
 import UIKit
 
-private struct LocalLogSubpageChrome: ViewModifier {
-    let title: String
-    let canClear: Bool
-    let clear: () -> Void
-
-    func body(content: Content) -> some View {
-        content
-            .navigationTitle(title.lavaLocalized)
-            .navigationBarTitleDisplayMode(.large)
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    NativeToolbarIconButton(systemName: "trash", accessibilityLabel: "Clear", role: .destructive, action: clear)
-                        .disabled(!canClear)
-                }
-                .lavaToolbarChrome()
-            }
-            // Every local-log subpage (Network Activity, Domain History, Top Domains) is a
-            // Workshop-depth power-user surface, so they all declare the technical tier here.
-            .lavaTier(.technical)
-    }
-}
-
-extension View {
-    func localLogSubpageChrome(
-        title: String,
-        canClear: Bool,
-        clear: @escaping () -> Void
-    ) -> some View {
-        modifier(LocalLogSubpageChrome(title: title, canClear: canClear, clear: clear))
-    }
-}
-
 struct LocalLogSearchField: View {
     @Binding var text: String
     var placeholder: String = "Search domains"

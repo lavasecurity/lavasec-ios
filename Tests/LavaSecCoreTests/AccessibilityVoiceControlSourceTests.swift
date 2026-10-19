@@ -37,12 +37,8 @@ final class AccessibilityVoiceControlSourceTests: XCTestCase {
     // MARK: Toggling label — the copy-phrase button stays addressable after it flips to "Copied"
 
     func testBackupCopyPhraseButtonPinsStableSpokenCommands() throws {
-        let source = try readSource(.backupSetupView)
-        // Stable aliases first (surfaced), then the current visible label appended so "tap Copied"
-        // still works after the label flips — the copy button must stay addressable in both states.
-        XCTAssertTrue(
-            source.contains(".accessibilityInputLabels([\"Copy phrase\".lavaLocalized, \"Copy\".lavaLocalized] + (consent.copiedRecoveryPhrase ? [\"Copied\".lavaLocalized] : []))"),
-            "The copy-phrase button must surface stable commands first and keep the current label addressable."
-        )
+        let source = try readSource(.reactNativeBackupCredentials)
+        XCTAssertTrue(source.contains(".accessibilityInputLabels([\"Copy phrase\".lavaLocalized, \"Copy\".lavaLocalized] + (session.consent.copiedRecoveryPhrase ? [\"Copied\".lavaLocalized] : []))"))
     }
+
 }

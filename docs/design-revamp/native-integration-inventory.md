@@ -19,45 +19,39 @@ Default info panels no longer draw an implicit border. Deliberate warning or
 selected-Guard accent outlines use inset strokes, so their width is not clipped
 by the surface boundary. Semantic danger red and orange caution remain distinct.
 
-## Native journeys retained by the full app
+## App journeys and retained native elements
 
-The dispatch source is `ReactNative/native-app/LavaAppFlows.swift`. These remain
-real controllers with their existing authentication and persistence gates.
+The supported app root is React Native. All app-owned screen composition and
+stage navigation live in RN, including preparation, import, account/backup,
+passcode, DNS help and internal QA. See the [ownership contract](../architecture/rn-only-app.md)
+for the reusable modules and Android adapter boundary.
 
-| Native destination | Shared presentation | Functional acceptance needed |
+| Journey | RN owns | Native retains |
 | --- | --- | --- |
-| Filter preparation | Existing `FilterPreparationScreen`, shared palette/actions | Prepare, publish, cancel/fail and real tunnel result. |
-| Import: camera, photo, code and deep link | Existing import stage machine and shared task scaffold; completed import uses `LavaSuccessScreen` | Cancel/reopen scanner, review, add/replace, authentication cancellation, confirmed result and Done. |
-| Create filter | Existing `CreateFilterSheet` / shared fields | Actual library creation, limits, duplicate-name handling and cancellation. |
-| Rename filter | Existing `RenameFilterSheet` / shared fields and circular controls | Persisted name, validation and cancellation. |
-| Library changes / deletion | Existing `DeleteFiltersConfirmationSheet` / shared review/footer | Only reviewed changes committed; cancel retains the library. |
-| Custom blocklist | Existing `BringYourOwnListView` / shared fields | Source validation, existing filter identity checks and entitlements. |
-| Account connections | Existing `AccountSheet` / shared list and chrome | Apple/Google sign-in, connection status, sign-out and account deletion safeguards. |
-| Backup setup | Existing passkey/recovery/controller; shared success after confirmed local setup | Passkey validation, recovery handling, cancellation and upload state in Account & Backup. |
-| Backup restore | Existing prepare/review/confirm controller; shared success after confirmed restore | Correct review, resolver consent, restore failure/cancellation and resulting settings. |
-| Passcode setup/authentication | Existing security controller and shared native chrome | Correct native presentation above RN sheets and protected-surface access. |
-| Automation instructions | Existing `AutoSwitchHowToSheet` / shared sheet | Existing shortcut/Focus instructions and external transitions. |
-| Feedback | Existing submission controller; shared success retains report ID and Copy ID | Real backend acceptance, retry, privacy mask, diagnostics opt-in and return. |
-| Custom DNS | Existing `DNSResolverSettingsView` | Validation, persistence, DNS apply/reconnect and errors. |
-| VPN chaining | RN `VPNChainingScreen` on the shared `Screen` scaffold, like DNS; the WireGuard editor is the native `vpnConfiguration` flow | Configuration/key handling, entitlement, authorized access, enable/disable and actual forwarding. |
-| Legal notices | Existing notices view | Full attribution and usable navigation. |
-| Device QA / QA sheet | Existing conditional QA tools | Visible only in the existing eligible QA/developer context. |
+| Filter preparation | Phase/progress, Guardian, success/failure, recovery controls | Current attempt, real compilation/apply, recovery capabilities, haptics, completion/dismiss authority |
+| Filter import | Method/code/scanner instructions, review/replacement, applying/completion | Photo picker, camera capture, bounded decode, fresh authentication, reviewed transaction and once-only completion |
+| Account connections | Connections, sign-out and delete-account presentation | Provider authentication, server operations, initiating-account checks |
+| Backup setup/restore | Steps, explanations, consent, review, progress and completion | Passkey prompts, recovery credential atoms, cryptography, reviewed commit, account-bound persistence and upload |
+| Passcode setup/authentication | Titles, messages, typography choices, body layout and navigation commands | System authentication bar, measured system Text and input/digit atoms, credential bytes, verification/storage, biometric prompts and scene security window |
+| Custom DNS/blocklist and VPN configuration | Existing RN forms and editor | Native buffer for private configuration, validation, persistence, file picker and apply |
+| DNS help and automation | Instructions and destination actions | Opening system Settings/Shortcuts/browser |
+| Device QA | Search, rows, forms, results, guided checks and modal stages | Eligible-build gate, privileged QA actions, confidential configuration atom and system control atoms |
+| Sharing/export/calendar | App-owned selection/detail presentation | System share/file sheets and calendar date controls |
 
-Success is a presentation change after the real operation, never simulated state.
-Import now waits for Done before delivering its completion callback, with a
-once-only guard; it cannot dismiss interactively during apply or the completed
-stage. Replacement preserves the target's existing name. Backup setup confirms
-local encrypted setup only: its existing controller starts cloud upload
-asynchronously, so the success copy deliberately makes no cloud-upload claim.
+Native hosts retain UIKit containment, detents, navigation chrome, keyboard
+integration and privacy overlays. Small native UI atoms may render platform
+controls; a whole retired SwiftUI task is not retained behind an RN wrapper.
 
-Install-over compatibility also belongs to the native owner. The candidate reads
-the same Keychain deletion-intent record as RC13: pending remote/local cleanup
-blocks backup writers, and completed Off overrides stale local preferences.
-Remote deletion and upload retries remain bound to the initiating account.
-Explicit setup/restore may replace completed Off only after local persistence
-succeeds; restore rechecks its account after applying the reviewed configuration.
-These paths are tested with isolated service/storage doubles, without uploading
-or deleting a person's real backup. They still require native build qualification.
+Import waits for Done before delivering its completion callback, with a once-only
+guard. Applying/completed stages cannot dismiss interactively. Replacement
+preserves the existing target name. Backup setup confirms local encrypted setup;
+cloud upload remains asynchronous and the completion copy makes no upload claim.
+
+Install-over compatibility remains with the native owner. Pending account deletion
+blocks backup writers, completed Off overrides stale preferences, and retries
+stay bound to the initiating account. Setup/restore can replace completed Off only
+after local persistence succeeds. Native service tests and RN behavior tests cover
+those boundaries; source assertions alone do not qualify visual/device behavior.
 
 ## Truthful connection and Guard data
 

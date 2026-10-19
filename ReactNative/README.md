@@ -86,6 +86,10 @@ The native jobs remain serial when both are requested.
 Dependency/SDK, native navigation, presentation or accessibility changes warrant
 an explicit journey run and the relevant device checks.
 
+For iPhone Duo, follow the [full-app preview guide](docs/iphone-duo-preview.md).
+Its native adaptive bars require a 27.1-linked build; installing the 27.1 runtime
+alone does not update an existing app's SDK or navigation behavior.
+
 `scripts/build-full-app.sh --containment` retains the scaffold report and a
 `validation.json` receipt with `fullAppCompiled: false` and
 `journeysExecuted: false`. It produces no complete app or journey evidence.
@@ -97,6 +101,11 @@ without arguments preserves the existing journey default. None of these modes si
 uploads a device release; those continue through lavasec-runner.
 
 ## Shared API and iOS implementation
+
+The [component portability guide](docs/component-portability.md) documents the
+semantic contracts, shared control behavior, retained compatibility exports and
+Android binding responsibilities. The reorganization preserves the existing iOS
+renderers and native wire identities.
 
 Consumers import from `src/index.ts`. `contracts.ts` expresses text/surface/action
 roles, localized strings, values, and callbacks. It exposes no platform color names,

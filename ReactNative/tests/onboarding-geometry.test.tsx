@@ -1,7 +1,7 @@
 import {act,fireEvent,render,renderHook,screen,within} from '@testing-library/react-native';
 import {Animated,AppState,Dimensions,ScrollView,View,type AppStateStatus} from 'react-native';
 import {useOnboardingMeasurements,type Anchor} from '../review/onboarding-geometry';
-import {OnboardingChoice,OnboardingCurtain,OnboardingFooter,OnboardingPageScroll,OnboardingProgress,OnboardingStageLayout,OnboardingStep} from '../review/onboarding-scaffold';
+import {OnboardingSetupAction,OnboardingCurtain,OnboardingFooter,OnboardingPageScroll,OnboardingProgress,OnboardingStageLayout,OnboardingStep} from '../review/onboarding-scaffold';
 
 jest.mock('@react-navigation/native',()=>({useNavigation:()=>({}),useIsFocused:()=>true}));
 jest.mock('../specs/LavaDecorationNativeComponent',()=>({__esModule:true,default:require('react-native').View}));
@@ -99,7 +99,7 @@ test('landscape keeps progress below the measured mascot and frees the content h
     const landscape=width>height;
     const progress=<OnboardingProgress page={2} visited={[0,1,2,3,4]} busy={busy} vpnInstalled={vpnInstalled} onPage={page} duration={320} smooth={false}/>;
     return <View><OnboardingStageLayout source={source} progress={landscape?progress:null} width={width} height={height} left={59} right={59}>
-      <OnboardingPageScroll landscape={landscape}><OnboardingStep title="First, let’s get Lava ready to help." showTitle={!landscape}><OnboardingChoice title="Install local VPN" symbol="shield" selected={false} disabled={busy} onPress={choose} testID="onboarding.install-vpn"/></OnboardingStep></OnboardingPageScroll>
+      <OnboardingPageScroll landscape={landscape}><OnboardingStep title="First, let’s get Lava ready to help." showTitle={!landscape}><OnboardingSetupAction title="Install local VPN" symbol="shield" completed={false} disabled={busy} onPress={choose} testID="onboarding.install-vpn"/></OnboardingStep></OnboardingPageScroll>
     </OnboardingStageLayout><OnboardingFooter page={2} busy={busy} vpnInstalled={vpnInstalled} bottom={21} progress={landscape?null:progress} onNext={next}/></View>;
   };
   render(content(402,874));

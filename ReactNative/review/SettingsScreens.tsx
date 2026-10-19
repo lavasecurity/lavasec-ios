@@ -21,6 +21,7 @@ import {previewNotice, useReviewNavigation} from './navigation';
 import {connectionStages} from './connection-model';
 import {ConnectionPanel,StoryColumns,StoryStack} from './story-scaffold';
 import {SettingsControl,SettingsDisclosure,SettingsGlyph,SettingsGroup,SettingsGuardRow,SettingsGuardPreview,SettingsGuardSpotlight,SettingsInset,SettingsIntro,SettingsLoading,SettingsMessage,SettingsPrice,SettingsStack,SettingsStatus,SettingsSubscriptionStatus,SettingsSurface,SettingsTextPreview,SettingsTextSlider,settingsStyles} from './settings-scaffold';
+import {useLocalLogActions} from './local-log-actions';
 
 export function SettingsScreen() {
   const nav = useReviewNavigation(); const {live,app,session} = useReview(); const run=useAppAction();
@@ -184,17 +185,7 @@ export {DNSScreen,DNSPickerScreen} from './DNSScreen';
 
 export function PrivacyScreen() {
   const {session,setSession,app,live} = useReview(); const run=useAppAction(); const [showDelete,setShowDelete] = useState(false);
-  const [exportError,setExportError]=useState<string>();
-  const exportPending=useRef(false); const [isExporting,setIsExporting]=useState(false);
-  const exportBusy=isExporting||!!live?.logExportBusy;
-  const exportLogs=()=>{
-    if(exportPending.current||live?.logExportBusy)return;
-    setExportError(undefined);
-    if(!app){previewNotice();return;}
-    exportPending.current=true;setIsExporting(true);
-    void app.command({type:'logs.export',domains:false}).catch(error=>{if(error.message!=='Authentication cancelled.')setExportError(localizedFormat('Could not export local logs: %@',localized(error.message)));})
-      .finally(()=>{exportPending.current=false;setIsExporting(false);});
-  };
+  const {exportLogs,exportAllLogs,exportBusy,exportError,clearAllLogs,clearBusy}=useLocalLogActions();
   const disableLogs:Record<string,{title:string;message:string;action:string}>={
     'Filtering Counts':{title:'Turn off local filtering counts?',message:'Saved filtering counts will be cleared and new allowed, blocked, and local protection uptime counts will not be saved.',action:'Turn Off and Clear Counts'},
     'Domain logs':{title:'Turn off local domain history?',message:'Saved domain names will be cleared and new domain names will not be saved.',action:'Turn Off and Clear History'},
@@ -217,6 +208,7 @@ export function PrivacyScreen() {
       }},
     ]);
   const clearLog=(kind:string)=>{
+    if(kind==='Clear all logs'){clearAllLogs();return;}
     const contract=live?.confirmations?.[kind];
     if(contract){Alert.alert(contract.title,contract.message,[{text:'Cancel',style:'cancel'},{text:contract.action,style:'destructive',onPress:()=>run({type:'logs.clear',kind})}]);return;}
     if(kind==='Clear Lava Guard progress'){clearProgress();return;}
@@ -225,13 +217,14 @@ export function PrivacyScreen() {
   return <Screen>
     <SettingsIntro summary="Domain history and network activity stay on this device for 7 days. Counts and Guard progress last longer."/>
     <SettingsGroup title="Local Logs">{logNames.map(title=><Toggle key={title} title={title} value={session.logs[title]===true} optimistic={false} onChange={next=>setLog(title,next)}/>)}</SettingsGroup>
-    <SettingsSurface footer="Anyone with this ZIP can read its diagnostics and settings.">
-      <ListRow action icon="square.and.arrow.up" title="Export local logs" accessibilityHint="Anyone with this ZIP can read its diagnostics and settings." disabled={exportBusy} onPress={exportLogs}/>
+    <SettingsSurface footer="Anyone with an exported ZIP can read its contents. Full logs include domain history.">
+      <ListRow action icon="square.and.arrow.up" title="Export diagnostics" accessibilityHint="Exports diagnostics and settings without domain history." disabled={exportBusy} onPress={exportLogs}/>
+      <ListRow action icon="square.and.arrow.up" title="Export all logs" accessibilityHint="Includes all retained domain history." disabled={exportBusy} onPress={exportAllLogs}/>
     </SettingsSurface>
-    {!isExporting&&!!(exportError||live?.logExportError)&&<SettingsMessage warning>{exportError||live?.logExportError}</SettingsMessage>}
+    {!!exportError&&<SettingsMessage warning>{exportError}</SettingsMessage>}
     <SettingsDisclosure title="Delete Local Logs" icon="trash" testID="privacy.delete-options" expanded={showDelete} onChange={setShowDelete}>
       <SettingsSurface>{['Clear filtering counts','Clear domain history','Clear network activity','Clear Lava Guard progress'].map(title=><ListRow key={title} action title={title} color={colors.errorText} icon="trash" onPress={()=>clearLog(title)}/>)}
-      <ListRow action title="Clear all logs" color={colors.errorText} icon="trash" onPress={()=>clearLog('Clear all logs')}/></SettingsSurface>
+      <ListRow action title="Clear all logs" color={colors.errorText} icon="trash" disabled={clearBusy} onPress={()=>clearLog('Clear all logs')}/></SettingsSurface>
     </SettingsDisclosure>
   </Screen>;
 }

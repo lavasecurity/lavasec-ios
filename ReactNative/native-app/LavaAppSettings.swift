@@ -41,7 +41,8 @@ extension LavaAppBridge {
             "needsRepair": wireGuardCleanupPending || status.hasConfigurationWithoutKey || status.storeUnavailableReason != nil,
             "setup": model.configuration.wireGuardSetupEnabled, "enabled": model.configuration.chainedUpstreamEnabled,
             "canEnable": model.canEnableChainedUpstream(from: status), "canEdit": ChainedSetupPolicy.canEditConfiguration(inputs),
-            "fallback": presentation.canChangeFallback && model.configuration.chainedTierOneFallbackEnabled,
+            // Consent survives profile changes; runtime egress still checks routing policy.
+            "fallback": model.configuration.chainedTierOneFallbackEnabled,
             "canChangeFallback": presentation.canChangeFallback, "needsPlus": state == .notEntitled,
             "busy": model.isStagingChainedUpstreamForQA, "restriction": restriction?.lavaLocalized ?? "",
             "error": model.chainedSettingsApplyError ?? "", "unavailable": status.storeUnavailableReason != nil,
@@ -102,7 +103,6 @@ extension LavaAppBridge {
                 model.setChainedUpstreamEnabled(value)
                 applied = model.configuration.chainedUpstreamEnabled == value
             case "fallback":
-                guard model.dnsSettingsPresentation(from: status).canChangeFallback else { throw CommandError("DNS fallback is unavailable with an active full-tunnel VPN.".lavaLocalized) }
                 model.setChainedTierOneFallbackEnabled(value)
                 applied = model.configuration.chainedTierOneFallbackEnabled == value
             default: throw WireGuardChainFailure.changed

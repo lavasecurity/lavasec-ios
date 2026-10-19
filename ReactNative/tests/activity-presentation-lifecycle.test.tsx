@@ -24,9 +24,9 @@ jest.mock('@react-navigation/native',()=>({useNavigation:()=>({}),useIsFocused:(
 jest.mock('../review/navigation',()=>({useReviewNavigation:()=>({navigate:jest.fn()})}));
 jest.mock('../src',()=>({LavaChoice:require('react-native').View}));
 jest.mock('../review/primitives',()=>({Screen:require('react-native').View,Copy:require('react-native').Text,Row:require('react-native').View}));
-jest.mock('../review/scaffold',()=>({QuietFooter:require('react-native').View}));
+jest.mock('../review/scaffold',()=>({QuietFooter:require('react-native').View,useToolbar:jest.fn(),toolbarButton:jest.fn(),toolbarAction:jest.fn()}));
 jest.mock('../review/story-scaffold',()=>({StorySurface:require('react-native').View}));
-jest.mock('../review/settings-scaffold',()=>({SettingsSurface:require('react-native').View}));
+jest.mock('../review/settings-scaffold',()=>({SettingsSurface:require('react-native').View,SettingsMessage:require('react-native').Text}));
 jest.mock('../review/activity-scaffold',()=>({ActivityCharts:(props:object)=>{
   const React=require('react');return React.createElement(require('react-native').View,{...props,testID:'activity.accepted-range'});
 }}));

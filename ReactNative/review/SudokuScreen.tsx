@@ -172,7 +172,7 @@ function SudokuContent() {
   // ONE image per game: derived from the puzzle's givens, not drawn per open,
   // so the same solved board always reveals the same glyph (across overlay
   // opens, resets and relaunches) and only a new puzzle changes it.
-  const revealEmoji = revealEmojiFor(game.puzzle.givens);
+  const revealEmoji = revealEmojiFor(game.puzzle.givens,game.puzzle.revealVersion);
   const cancelRevealTiles=()=>{
     // Report whether a pending accessible-activation clear was discarded, so
     // callers that can set state (background) can finish the job; unmount and
@@ -535,7 +535,7 @@ function SudokuContent() {
         canEnter={canEnter} canErase={canErase} onEnter={enterDigit} onErase={eraseCell} panHandlers={keypadPan.panHandlers}/>
     </View>
     : <>
-      <SudokuRail tools={tools} onClose={()=>navigation.goBack()} flash={{id:'sudoku-refresh',opacity:challengeFlash}}/>
+      <SudokuRail tools={tools} onClose={()=>navigation.goBack()} availableWidth={frame.width-insets.left-insets.right} flash={{id:'sudoku-refresh',opacity:challengeFlash}}/>
       <ScrollView ref={scrollRef} showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false} bounces={side+portraitChrome>portraitBand} scrollEnabled={side+portraitChrome>portraitBand}
         contentInsetAdjustmentBehavior="never" automaticallyAdjustKeyboardInsets={false}
         contentContainerStyle={[styles.content,{minHeight:portraitBand}]}>

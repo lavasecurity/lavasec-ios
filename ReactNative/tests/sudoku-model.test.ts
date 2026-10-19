@@ -1,5 +1,15 @@
 import {cellAt, cellLabel, challengePuzzles, editCell, freshChallengePuzzle, freshPuzzle, isComplete, isSolved, keyAt, keyAtColumn, keypadColumnGeometry, keypadGeometry, keypadShortSide, newGame, referencePuzzle, remainingCount, workingBoard} from '../review/sudoku-model';
 
+test('editing and resetting preserve the reveal version; new rounds use the expanded pool', () => {
+  const puzzle = {...referencePuzzle, revealVersion: 1 as const};
+  const edited = editCell(newGame(puzzle), 0, 5);
+  expect(edited.puzzle.revealVersion).toBe(1);
+  expect(newGame(edited.puzzle).puzzle.revealVersion).toBe(1);
+  expect(newGame().puzzle.revealVersion).toBe(2);
+  expect(freshPuzzle(puzzle).revealVersion).toBe(2);
+  expect(freshChallengePuzzle(puzzle).revealVersion).toBe(2);
+});
+
 test('locked clues and invalid input cannot mutate the board',()=>{
   const game=newGame();
   for(const [index,digit] of [[1,5],[-1,5],[81,5],[0,10],[0,1.5]]) expect(editCell(game,index!,digit!)).toBe(game);

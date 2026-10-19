@@ -1,17 +1,81 @@
 {
   "_comment": "Copy written in production RN source that is looked up but intentionally not in the catalog. Every entry needs a category that explains why. UI copy never belongs here.",
-  "properNames": ["Lava", "Quad9"],
-  "seededFilterNames": ["Core", "Balanced", "Extra"],
-  "protocolAcronyms": ["DoH", "DoT", "IP"],
+  "properNames": [
+    "Lava",
+    "Quad9"
+  ],
+  "seededFilterNames": [
+    "Core",
+    "Balanced",
+    "Extra"
+  ],
+  "protocolAcronyms": [
+    "DoH",
+    "DoT",
+    "IP"
+  ],
   "nativeDiagnosticEventIdentifiers": [
     "enable-begin, enable-finished, reconnect-requested",
     "startTunnel-ready, network-path-changed, resolver-reset"
   ],
-  "exampleDomains": ["example.com", "trusted.example.com"],
+  "exampleDomains": [
+    "example.com",
+    "trusted.example.com"
+  ],
   "reviewHostOnly": [
-    "Lava · UI preview", "UI review build", "Device QA",
+    "Lava · UI preview",
+    "UI review build",
+    "Device QA",
     "This build previews Lava’s interface. It does not start a VPN, change production filters, authenticate, make purchases, or send reports. Changes in this review session are discarded when you close it.",
     "Optional diagnostics include anonymized data like VPN status, network logs, and your active filter. They help the Lava team figure out what went wrong."
   ],
-  "galleryFixtureTitles": ["back", "close", "confirm", "delete", "undo", "heading", "section", "body", "supporting", "caption"]
+  "galleryFixtureTitles": [
+    "back",
+    "close",
+    "confirm",
+    "delete",
+    "undo",
+    "heading",
+    "section",
+    "body",
+    "supporting",
+    "caption",
+    "title"
+  ],
+  "_internalDeviceQAComment": "Existing internal debug copy retains its native English fallback during presentation migration; no product copy or translations are changed.",
+  "internalDeviceQA": [
+    "192-168-1-20.sslip.io",
+    "Apply test settings",
+    "Applying settings does not verify protection or complete a network check.",
+    "Arm Leak Canary",
+    "Confirm the active tunnel uses these settings, selected rules have finished loading, and the allowed probe works. A timeout alone does not prove blocking.",
+    "Custom Probe Suffix",
+    "DNS Leak Canary",
+    "Disarm",
+    "Expected result",
+    "Guided network check",
+    "I verified the setup and positive control",
+    "Lava prepares probes and settings. You must create the network condition and verify the active tunnel, downloads, and probes.",
+    "No matching checks",
+    "Observed result and evidence",
+    "Open Hosted QA Site",
+    "Open a check, apply its settings, and record the observed outcome. Results here are reported by the tester and last for this session.",
+    "Passed",
+    "Paste [Interface] + [Peer]; commits one rotation",
+    "Phone QA",
+    "Physical-path leak (#8 positive control). Fires ONE cleartext DNS query to this resolver at the next chained connect — watch for it in your off-device capture (Pi-hole log / tcpdump). Arm shows the --canary-nonce to pass the analyzer.",
+    "Prepare test settings, check app features, and run guided network checks.",
+    "Procedure",
+    "QA result",
+    "Search Device QA",
+    "Settings changed. Apply the test settings again before recording a result.",
+    "Stage a configuration for the next test connection. Secrets remain in this build's own store.",
+    "Stage upstream",
+    "Stage upstream from .conf",
+    "Test Lava on this device",
+    "Use this for LAN or sslip.io physical-device checks.",
+    "View QA result",
+    "WireGuard configuration",
+    "resolver IP (e.g. 192.168.11.2)"
+  ]
 }

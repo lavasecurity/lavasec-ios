@@ -305,7 +305,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
             block.range(of: "for: switchConfiguration")?.lowerBound)
         let rebuildGateIdx = try XCTUnwrap(
             block.range(
-                of: "guard configurationReplacementGate.isCurrent(switchToken) else {",
+                of: "guard configurationReplacementGate.isCurrent(switchToken),",
                 range: rebuildIdx..<block.endIndex
             )?.lowerBound)
         let commitConfigurationIdx = try XCTUnwrap(
@@ -349,7 +349,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         // persistSharedState ends in an artifact-actor await; a superseded switch must re-check the
         // gate AFTER it, before the derived-cache tail, or it desyncs caches vs the newer owner's config.
         let postPersistRegion = String(block[persistIdx..<applyCatalogIdx])
-        XCTAssertTrue(postPersistRegion.contains("guard configurationReplacementGate.isCurrent(switchToken) else {"),
+        XCTAssertTrue(postPersistRegion.contains("guard configurationReplacementGate.isCurrent(switchToken),"),
                       "The switch must re-check the gate after the persist await, before applyCatalogSyncResult.")
         // Per-filter drafts: a switch no longer discards the previously-active filter's draft
         // (it lives under its own key and can't misattribute), it just drops the detail target.
@@ -367,7 +367,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         // if a newer replacement superseded it. Cover ownership follows presentsPreparationCover —
         // a user switch owns the cover; a silent Focus reconcile apply does not.
         XCTAssertTrue(block.contains("let switchToken = configurationReplacementGate.begin(ownsPreparationCover: presentsPreparationCover)"))
-        let supersedeCommitIdx = try XCTUnwrap(successPart.range(of: "guard configurationReplacementGate.isCurrent(switchToken) else {")?.lowerBound)
+        let supersedeCommitIdx = try XCTUnwrap(successPart.range(of: "guard configurationReplacementGate.isCurrent(switchToken),")?.lowerBound)
         let successCommitIdx = try XCTUnwrap(successPart.range(of: "library.setActiveFilter(id: id)")?.lowerBound)
         XCTAssertLessThan(supersedeCommitIdx, successCommitIdx, "A superseded switch must bail before committing.")
         // The target may have been deleted OR frozen (Plus lapsed) during the async prepare —
@@ -391,7 +391,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         let catchStart = try XCTUnwrap(block.range(of: "} catch {")?.upperBound)
         let catchBlock = String(block[catchStart...])
         // A superseded failed switch must not roll back over a newer replacement that committed.
-        XCTAssertTrue(catchBlock.contains("guard configurationReplacementGate.isCurrent(switchToken) else {"),
+        XCTAssertTrue(catchBlock.contains("guard configurationReplacementGate.isCurrent(switchToken),"),
                       "The rollback path must also gate on the replacement token.")
         XCTAssertTrue(catchBlock.contains("filterPreparationState = .failed("))
         XCTAssertTrue(
@@ -812,7 +812,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
                       "A fresh draft apply must reset retryability so an edit failure still offers Try Again.")
         XCTAssertTrue(draftBlock.contains("let draftToken = configurationReplacementGate.begin(ownsPreparationCover: true)"))
         let draftCommitIdx = try XCTUnwrap(draftBlock.range(of: "configuration = nextConfiguration")?.lowerBound)
-        let draftPrecheckIdx = try XCTUnwrap(draftBlock.range(of: "guard configurationReplacementGate.isCurrent(draftToken) else {")?.lowerBound)
+        let draftPrecheckIdx = try XCTUnwrap(draftBlock.range(of: "guard configurationReplacementGate.isCurrent(draftToken),")?.lowerBound)
         XCTAssertLessThan(draftPrecheckIdx, draftCommitIdx, "Draft apply must re-check the gate before committing.")
         let draftPersistIdx = try XCTUnwrap(draftBlock.range(of: "try await persistSharedState(preparedSnapshot: prepared.snapshot)")?.lowerBound)
         let draftApplyIdx = try XCTUnwrap(draftBlock.range(of: "applyCatalogSyncResult(prepared.catalogResult)")?.lowerBound)
@@ -821,12 +821,12 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         guard draftPersistIdx < draftApplyIdx else {
             return XCTFail("Draft apply must defer derived-cache apply past the persist.")
         }
-        XCTAssertTrue(String(draftBlock[draftPersistIdx..<draftApplyIdx]).contains("guard configurationReplacementGate.isCurrent(draftToken) else {"),
+        XCTAssertTrue(String(draftBlock[draftPersistIdx..<draftApplyIdx]).contains("guard configurationReplacementGate.isCurrent(draftToken),"),
                       "Draft apply must re-check the gate after the persist await, before its tail.")
         // The catch must ALSO re-check (like switchToFilter's catch): a superseded apply that throws
         // must not stomp the winner's preparation cover with a spurious .failed + haptic.
         let draftCatch = String(draftBlock[(try XCTUnwrap(draftBlock.range(of: "} catch {")?.upperBound))...])
-        let draftCatchGuardIdx = try XCTUnwrap(draftCatch.range(of: "guard configurationReplacementGate.isCurrent(draftToken) else {")?.lowerBound)
+        let draftCatchGuardIdx = try XCTUnwrap(draftCatch.range(of: "guard configurationReplacementGate.isCurrent(draftToken),")?.lowerBound)
         let draftCatchFailedIdx = try XCTUnwrap(draftCatch.range(of: "filterPreparationState = .failed(")?.lowerBound)
         XCTAssertLessThan(draftCatchGuardIdx, draftCatchFailedIdx,
                           "The draft-apply catch must bail when superseded before touching the shared cover.")
@@ -1212,7 +1212,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
             endingBefore: "func removeAllowedDomainFromDraft("
         )
         XCTAssertTrue(stage.contains("if hasUnsavedActiveFilterDraft {"))
-        XCTAssertTrue(stage.contains("activeFilterDraft = FilterEditDraft(configuration: result.configuration)"))
+        XCTAssertTrue(stage.contains("activeFilterDraft = FilterEditDraft(configuration: result)"))
 
         // deleteFilter just drops the deleted filter's keyed draft.
         let delete = try sourceBlock(
@@ -1350,14 +1350,14 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
 
         // Domain History applies through the shared review flow with its own origin, and its cover
         // gates on that origin so the always-mounted Filters cover can't steal the presentation.
-        let review = try readSource(.filterReviewFlowView)
+        let review = try readSource(.reactNativeAppPreparation)
         let bridge = try readSource(.reactNativeAppFilters)
         XCTAssertTrue(bridge.contains("prepareAndApplyFilterDraft(origin: standaloneToken == nil ? .filters : .domainHistory)"))
         XCTAssertTrue(bridge.contains("standaloneDomainReviews"))
 
         // A confirmed upgrade can make a frozen switch target available again. Deleted targets
         // still cannot be retried, and switches still have no editor/review return.
-        XCTAssertTrue(review.contains("else if drafts.preparationFailureIsRetryable || viewModel.filterPreparationCanResumeAfterUpgrade {"))
+        XCTAssertTrue(review.contains("return drafts.preparationFailureIsRetryable || model.filterPreparationCanResumeAfterUpgrade"))
         let recovery = try readSource(.appViewModelFilterEditingDrafts)
         let upgradeReason = try sourceBlock(
             in: recovery,
@@ -1370,7 +1370,7 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
         XCTAssertTrue(recovery.contains("guard configuration.hasLavaSecurityPlus, let id = pendingSwitchFilterID else { return false }"))
         XCTAssertTrue(recovery.contains("return library.filter(id: id) != nil && !isFilterFrozen(id)"),
                       "Upgrade recovery must still reject a deleted or frozen target.")
-        XCTAssertTrue(review.contains("if viewModel.filterPreparationFailureOffersEditReturn {"),
+        XCTAssertTrue(review.contains("\"editReturn\": state == \"failed\" && model.filterPreparationFailureOffersEditReturn"),
                       "Back to Edit/Review must be hidden when there's no editor (a filter switch).")
         XCTAssertTrue(app.contains("var filterPreparationFailureOffersEditReturn: Bool {"))
         XCTAssertTrue(app.contains("pendingSwitchFilterID == nil"),

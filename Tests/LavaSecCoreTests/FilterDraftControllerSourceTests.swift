@@ -12,8 +12,24 @@ final class FilterDraftControllerSourceTests: XCTestCase {
         XCTAssertTrue(controller.contains("@Published private(set) var sessions = FilterDraftSessionState()"))
         XCTAssertTrue(app.contains("filterDrafts.objectWillChange.sink { [weak self] _ in"))
         XCTAssertTrue(app.contains("self?.objectWillChange.send()"))
-        XCTAssertTrue(controller.contains("guard !isPreparationPresented, !preparationState.isPreparing else { return }"))
-        XCTAssertFalse(controller.contains("Task {"), "Dismissing presentation cannot cancel accepted native work.")
+        let endViewing = try sourceBlock(in: controller, startingAt: "func endViewing(", endingBefore: "func resetSessions()")
+        XCTAssertTrue(sourceContainsInOrder([
+            "guard !isPreparationPresented, !preparationState.isPreparing else { return }",
+            "sessions.endViewing(activeFilterID: activeFilterID, hasChanges: hasChanges)"
+        ], in: endViewing))
+        XCTAssertFalse(endViewing.contains("Task {"))
+        XCTAssertFalse(endViewing.contains(".cancel()"), "Dismissing presentation cannot cancel accepted native work.")
+        XCTAssertFalse(endViewing.contains("preparationState ="))
+        XCTAssertFalse(endViewing.contains("isPreparationPresented ="))
+        // Only the bounded announcement fallback belongs to the presentation
+        // owner. Its cancellation must never become accepted-operation cleanup.
+        XCTAssertEqual(sourceOccurrenceCount(of: "Task {", in: sourceWithoutCommentLines(controller)), 1)
+        XCTAssertTrue(controller.contains("private var preparationTerminalFallback: Task<Void, Never>?"))
+        let fallback = try sourceBlock(in: controller, startingAt: "private func schedulePreparationTerminalFallback()", endingBefore: "func waitForPreparationSuccessPresentation(")
+        XCTAssertTrue(fallback.contains("preparationTerminalFallback = Task { [weak self] in"))
+        let cancellations = sourceWithoutCommentLines(controller).split(separator: "\n").filter { $0.contains(".cancel()") }
+        XCTAssertFalse(cancellations.isEmpty)
+        XCTAssertTrue(cancellations.allSatisfy { $0.contains("preparationTerminalFallback?.cancel()") })
     }
 
     func testEditingScreenObservesTheOwnerAndRestoreRollsBackItsWholeSnapshot() throws {

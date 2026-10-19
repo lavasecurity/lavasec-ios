@@ -10,7 +10,7 @@ import {mayInteractWithPresentation} from '../app/read-cache';
 import {usePresentationAuthority} from '../app/use-presentation-readiness';
 import {useReview} from './ReviewContext';
 import {Copy,Section,Symbol} from './primitives';
-import {Group,Info,Link,Toggle,toolbarButton,useToolbar,ListRow} from './scaffold';
+import {Group,Info,Link,Toggle,toolbarAction,useToolbar,ListRow} from './scaffold';
 import {FlowSheet,FormPanel,FormField,FormDivider,FormSteps,SelectableCode,CharacterCounter,FormIntro,FormParagraph,FormReviewValue,FormCardTitle,DiagnosticValue} from './form-scaffold';
 
 export function FeedbackFlow({id,state,dismissAttempt}:{id:string;state:FeedbackState;dismissAttempt:number}){
@@ -79,7 +79,7 @@ export function FeedbackFlow({id,state,dismissAttempt}:{id:string;state:Feedback
   useEffect(()=>{if(attempts.current!==dismissAttempt){attempts.current=dismissAttempt;close();}},[dismissAttempt]);
   useEffect(()=>{if(state.sent&&!sent.current){sent.current=true;nav.setOptions({title:localized('Feedback sent')});}},[state.sent]);
   useToolbar({title:previews?'Information Sent':state.sent?'Feedback sent':'Feedback',headerBackVisible:false,
-    unstable_headerLeftItems:()=>state.sent?[]:[toolbarButton(previews?'Back':'Cancel',previews?'chevron.left':'xmark',close,busy)],
+    unstable_headerLeftItems:()=>state.sent?[]:[toolbarAction(previews?'Back':'Cancel',previews?'back':'close',close,busy)],
     unstable_headerRightItems:()=>[]},[busy,state.dirty,state.sent,!!previews,fields]);
   const change=(field:keyof typeof fields,value:string)=>{
     currentFields.current={...currentFields.current,[field]:value};

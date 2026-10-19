@@ -1,3 +1,5 @@
+// QA's independent native navigator is qualified by device-qa-presentation-lifecycle.
+jest.mock('../review/QAFlowAdapter.ios',()=>{const {View}=require('react-native');return {QAFlowAdapter:({id}:any)=><View testID="qa-flow-adapter" nativeVisitID={id}/>};});
 import type {PropsWithChildren} from 'react';
 import {View} from 'react-native';
 import {act, fireEvent, render, screen} from '@testing-library/react-native';
@@ -14,7 +16,6 @@ const mockNavigation = {navigate: mockNavigate, goBack: mockGoBack, setOptions: 
 jest.mock('@react-navigation/native', () => ({useNavigation: () => mockNavigation, useIsFocused: () => true, usePreventRemove: jest.fn(), useScrollToTop: jest.fn()}));
 jest.mock('react-native-safe-area-context', () => ({SafeAreaInsetsContext:require('react').createContext(null),useSafeAreaInsets: () => ({top: 59, bottom: 34, left: 0, right: 0})}));
 jest.mock('../specs/LavaDecorationNativeComponent', () => ({__esModule: true, default: require('react-native').View}));
-jest.mock('../specs/LavaNativePageNativeComponent', () => ({__esModule: true, default: require('react-native').View}));
 jest.mock('../specs/LavaChoiceNativeComponent', () => require('./native-choice-mock'));
 jest.mock('../specs/LavaSliderNativeComponent', () => ({__esModule: true, default: require('react-native').View}));
 jest.mock('../specs/NativeLavaReview', () => ({__esModule: true, default: {getGuardAccents: () => '{}', close: jest.fn()}}));
@@ -56,14 +57,13 @@ test('Settings Feedback opens its native sheet while Device QA preserves its set
   expect(command.mock.calls).toHaveLength(2);
 });
 
-test.each([
-  [DeviceQAScreen, 'device-qa-page', 'phoneQA'],
-] as const)('native Settings page %s returns through its owning React stack', (Component, id, page) => {
-  render(<Provider app={{command: jest.fn()} as unknown as AppStore}><Component /></Provider>);
-  const nativePage = screen.getByTestId(id);
-  expect(nativePage.props.page).toBe(page);
-  fireEvent(nativePage, 'back');
-  expect(mockGoBack).toHaveBeenCalledTimes(1);
+test('Device QA delegates to one RN visit while the owning React stack retains Back',()=>{
+  const view=render(<Provider app={{command:jest.fn()} as unknown as AppStore}><DeviceQAScreen/></Provider>);
+  const id=screen.getByTestId('qa-flow-adapter').props.nativeVisitID;
+  expect(id).toMatch(/^device-qa-/);
+  view.rerender(<Provider live={undefined} app={{command:jest.fn()} as unknown as AppStore}><DeviceQAScreen/></Provider>);
+  expect(screen.getByTestId('qa-flow-adapter').props.nativeVisitID).toBe(id);
+  expect(mockGoBack).not.toHaveBeenCalled();
 });
 
 test('preview feedback returns through its React sheet and has no native page body',()=>{

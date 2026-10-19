@@ -494,28 +494,6 @@ final class LavaNotificationDelegate: NSObject, UIApplicationDelegate, @preconcu
     }
 }
 
-#if DEBUG
-/// Exercises a real passcode keyboard inset without changing the production Sudoku input path.
-private struct SudokuKeyboardUITestControls: View {
-    @State private var code = ""
-    @State private var isFocused = false
-
-    var body: some View {
-        HStack {
-            Button { isFocused = true } label: { Text(verbatim: "Show keyboard") }
-                .accessibilityIdentifier("sudoku-test-show-keyboard")
-            Button { isFocused = false } label: { Text(verbatim: "Hide keyboard") }
-                .accessibilityIdentifier("sudoku-test-hide-keyboard")
-        }
-        .background {
-            SecurityHiddenPasscodeField(code: $code, isFocused: $isFocused)
-                .frame(width: 1, height: 1)
-                .accessibilityHidden(true)
-        }
-    }
-}
-#endif
-
 @main
 struct LavaSecApp: App {
     @UIApplicationDelegateAdaptor(LavaNotificationDelegate.self) private var notificationDelegate
@@ -581,18 +559,7 @@ private struct LavaAppWindowRoot: View {
     @ViewBuilder
     private var appRoot: some View {
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-lava-sudoku-ui-test") {
-            SudokuEasterEggView(initialPuzzleSeed: 648)
-                .environmentObject(viewModel)
-                // Explicit presentation preference makes dark-mode screenshot tests independent
-                // of Simulator defaults; this launch route is compiled only in DEBUG builds.
-                .preferredColorScheme(ProcessInfo.processInfo.arguments.contains("-lava-sudoku-dark-ui-test") ? .dark : .light)
-                .overlay(alignment: .top) {
-                    if ProcessInfo.processInfo.arguments.contains("-lava-sudoku-keyboard-ui-test") {
-                        SudokuKeyboardUITestControls()
-                    }
-                }
-        } else if ProcessInfo.processInfo.arguments.contains("-lava-mascot-demo") {
+        if ProcessInfo.processInfo.arguments.contains("-lava-mascot-demo") {
             MascotAnimationDemoView()
         } else {
             productionRoot

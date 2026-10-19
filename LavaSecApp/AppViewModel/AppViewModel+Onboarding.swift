@@ -81,8 +81,8 @@ extension AppViewModel {
         // hook runs unsuppressed; a persist that fails before the pair lands keeps the durable marker
         // so the next launch still suppresses over the un-replaced on-disk reseed instead of
         // clobbering the last good server copy (Codex P1 round 4 on #376). Unlike restoreFiltersToDefault,
-        // this runs inside OnboardingFlowView.go(to: .done) right after the leaving step's choice is
-        // applied — so that choice is folded into THIS single persist (go(to:) passes
+        // this runs inside LavaOnboardingVisit.navigate(to: .done) right after the leaving step's choice is
+        // applied — so that choice is folded into THIS single persist (navigate(to:) passes
         // persistImmediately: false) rather than firing a sibling fire-and-forget persist that could
         // land the seeded pair ahead of this one's deferred marker clear (Codex P2 on #386).
         // pinned: RebootFirstUnlockGuardSourceTests.testExplicitReseedDefersDurableMarkerDropUntilPersistLands
@@ -102,7 +102,7 @@ extension AppViewModel {
     ///   persist instead of firing its own. A separate fire-and-forget persist here would be a
     ///   second task that can land the seeded pair while the durable reseed marker is still
     ///   present; a kill before the deferred clear then relaunches the onboarded defaults as a
-    ///   suppressed reseed (Codex P2 on #386). See `OnboardingFlowView.go(to:)`.
+    ///   suppressed reseed (Codex P2 on #386). See `LavaOnboardingVisit.navigate(to:revisit:skipFailedDNSProfile:)`.
     /// - pinned: RebootFirstUnlockGuardSourceTests.testOnboardingCompletionCoalescesToASingleMarkerClearingPersist
     func applyOnboardingConnectionPreferences(useEncryptedFallback: Bool, persistImmediately: Bool = true) {
         configuration.applyOnboardingEncryptedFallback(useEncryptedFallback)

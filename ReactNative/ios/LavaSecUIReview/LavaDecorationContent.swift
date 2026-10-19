@@ -47,6 +47,7 @@ final class LavaDecorationContent: UIView {
     private var revealCenter = CGPoint.zero
     private var revealRadius: CGFloat = 22
     private let material = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterial))
+    private let sheetScrollEdge = LavaSheetScrollEdge()
     private var symbol = ""
     private var guardian: UIHostingController<AnyView>?
     private var renderedSize: CGFloat = -1
@@ -55,9 +56,17 @@ final class LavaDecorationContent: UIView {
     private var staticExport = false
     private var drawingTint = UIColor.clear
     private var drawingPointSize: CGFloat = 0
+    private var drawingWeight: Font.Weight = .regular
+    private static let swiftUISymbolPrefix = "swiftui.sf:"
+    private var swiftUISymbol: String? {
+        guard drawingPointSize.isFinite, drawingPointSize > 0,
+              symbol.hasPrefix(Self.swiftUISymbolPrefix) else { return nil }
+        let name = String(symbol.dropFirst(Self.swiftUISymbolPrefix.count))
+        return name.isEmpty ? nil : name
+    }
     private var isFormSeparator: Bool { symbol == "form.separator" }
     private var isCatalogControl: Bool { symbol == "catalog.control.material" }
-    private var showsDrawing: Bool { isFormSeparator || symbol.isEmpty || symbol == "share.qr" || symbol == "lava.shield.fill" || symbol == LavaGlyphSymbol.ranking }
+    private var showsDrawing: Bool { swiftUISymbol != nil || isFormSeparator || symbol.isEmpty || symbol == "share.qr" || symbol == "lava.shield.fill" || symbol == LavaGlyphSymbol.ranking }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -91,7 +100,7 @@ final class LavaDecorationContent: UIView {
     required init?(coder: NSCoder) { nil }
 
     @objc func setGuardianGestures(_ enabled: Bool) {
-        guardianGesturesEnabled = enabled && !isFormSeparator && !isCatalogControl
+        guardianGesturesEnabled = enabled && !isFormSeparator && !isCatalogControl && swiftUISymbol == nil
         guardianHold.isEnabled = guardianGesturesEnabled && window != nil
         guardianTap.isEnabled = guardianGesturesEnabled && window != nil
     }
@@ -117,6 +126,7 @@ final class LavaDecorationContent: UIView {
     // Retaining an off-window route preserves its drawing, but Fabric recycling
     // ends that identity. Discard animation/QR state before another owner uses it.
     @objc func resetForRecycle() {
+        sheetScrollEdge.reset()
         setGuardianGestures(false)
         guardianHold.finishContact()
         if let guardian { LavaNativeContainment.remove(guardian) }
@@ -129,6 +139,7 @@ final class LavaDecorationContent: UIView {
         overrideUserInterfaceStyle = .unspecified
         drawingTint = .clear
         drawingPointSize = 0
+        drawingWeight = .regular
         isUserInteractionEnabled = true
         accessibilityElementsHidden = false
         symbolView.image = nil
@@ -149,12 +160,18 @@ final class LavaDecorationContent: UIView {
         self.staticExport = staticExport
         overrideUserInterfaceStyle = staticExport ? .light : .unspecified
         if isFormSeparator { overrideUserInterfaceStyle = colorScheme == "dark" ? .dark : .light }
-        isUserInteractionEnabled = !isFormSeparator && !isCatalogControl
-        accessibilityElementsHidden = isFormSeparator || isCatalogControl
         drawingPointSize = CGFloat(fontPointSize)
+        drawingWeight = switch fontWeight {
+        case "regular": .regular
+        case "medium": .medium
+        case "bold": .bold
+        default: .semibold
+        }
+        isUserInteractionEnabled = !isFormSeparator && !isCatalogControl && swiftUISymbol == nil
+        accessibilityElementsHidden = isFormSeparator || isCatalogControl || swiftUISymbol != nil
         drawingTint = LavaSymbolPalette.color(for: tone, colorScheme: colorScheme)
         let drawing = showsDrawing
-        let isSheetHeader = symbol == "sheet.header.material"
+        let isSheetHeader = symbol == "sheet.header.material" || symbol == "sheet.list-header.material"
         material.isHidden = symbol != "privacy.material" && !isSheetHeader && !isCatalogControl
         if !material.isHidden {
             if isSheetHeader || isCatalogControl { overrideUserInterfaceStyle = colorScheme == "dark" ? .dark : .light }
@@ -168,7 +185,8 @@ final class LavaDecorationContent: UIView {
                 material.effect = UIBlurEffect(style: isSheetHeader ? .systemChromeMaterial : .systemUltraThinMaterial)
             }
         }
-        symbolView.isHidden = drawing || !material.isHidden
+        updateSheetScrollEdge()
+        symbolView.isHidden = drawing || isSheetHeader || !material.isHidden
         guardian?.viewIfLoaded?.isHidden = !drawing
         if drawing {
             updateGuardian()
@@ -221,11 +239,22 @@ final class LavaDecorationContent: UIView {
         material.layer.cornerRadius = bounds.height / 2
     }
 
+    private func updateSheetScrollEdge() {
+        guard symbol == "sheet.list-header.material" else {
+            sheetScrollEdge.reset()
+            return
+        }
+        // iOS 26+ owns one continuous edge effect for the native bar and the
+        // pinned controls. Older systems retain the shared chrome material.
+        material.isHidden = sheetScrollEdge.update(from: self)
+    }
+
     override func layoutSubviews() {
         super.layoutSubviews()
         symbolView.frame = bounds
         revealSymbolView.frame = bounds
         material.frame = bounds
+        updateSheetScrollEdge()
         if isCatalogControl { material.layer.cornerRadius = bounds.height / 2 }
         // The separator's hosting view follows the whole RN rectangle. Its
         // flexible SwiftUI width also updates when rotation keeps the same
@@ -236,11 +265,13 @@ final class LavaDecorationContent: UIView {
 
     override func didMoveToSuperview() {
         super.didMoveToSuperview()
+        updateSheetScrollEdge()
         updateContainment()
     }
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
+        updateSheetScrollEdge()
         if window == nil { cancelGuardianContact() }
         else { setGuardianGestures(guardianGesturesEnabled) }
         updateContainment()
@@ -300,7 +331,15 @@ final class LavaDecorationContent: UIView {
         let style = GuardianShieldStyle(rawValue: look) ?? .original
         let size = min(bounds.width, bounds.height)
         let drawing: AnyView
-        if isFormSeparator {
+        if let swiftUISymbol {
+            // Preserve SwiftUI's native SF Image placement inside the RN-owned
+            // slot; centering a UIImage can round the same glyph differently.
+            drawing = AnyView(Image(systemName: swiftUISymbol)
+                .font(.system(size: drawingPointSize, weight: drawingWeight))
+                .foregroundStyle(Color(uiColor: drawingTint))
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                .accessibilityHidden(true))
+        } else if isFormSeparator {
             // SwiftUI's semantic Divider paint can differ from UIKit's
             // separatorColor. RN allocates the hairline and owns the form;
             // this passive leaf keeps the actual native divider appearance.
@@ -341,14 +380,14 @@ final class LavaDecorationContent: UIView {
         }
         let exportedDrawing = staticExport ? AnyView(drawing.environment(\.colorScheme, .light)) : drawing
         if let guardian {
-            guardian.safeAreaRegions = isFormSeparator ? [] : .all
+            guardian.safeAreaRegions = isFormSeparator || swiftUISymbol != nil ? [] : .all
             guardian.rootView = exportedDrawing
             guardian.viewIfLoaded?.isHidden = false
         } else {
             let controller = UIHostingController(rootView: exportedDrawing)
-            // This is a paint leaf inside an already-inset RN row, rather than
-            // a page. Safe-area padding must not consume its hairline bounds.
-            if isFormSeparator { controller.safeAreaRegions = [] }
+            // Row paint leaves already have an RN-owned viewport. Safe-area
+            // padding must not consume a separator or a system symbol's slot.
+            if isFormSeparator || swiftUISymbol != nil { controller.safeAreaRegions = [] }
             guardian = controller
             updateContainment()
         }

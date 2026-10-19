@@ -59,7 +59,10 @@ final class WireGuardSetupSourceTests: XCTestCase {
         XCTAssertTrue(refresh.contains("BOOL editable = [self admitsWireGuardNameEdit]"))
         XCTAssertFalse(refresh.contains("becomeFirstResponder"))
         let props = try sourceBlock(in: field, startingAt: "- (void)updateProps:", endingBefore: "- (void)didMoveToWindow")
-        XCTAssertTrue(props.contains("next.kind == \"search\" || next.kind == \"wireGuardName\""), "Name keeps ordinary seed/reset/keyboard behavior")
+        let ordinary = try sourceBlock(in: props, startingAt: "const BOOL ordinary =", endingBefore: ";")
+        for kind in ["plain", "prose", "search", "localLogSearch", "wireGuardName"] {
+            XCTAssertTrue(ordinary.contains("next.kind == \"\(kind)\""), "\(kind) keeps ordinary seed/reset/keyboard behavior")
+        }
         XCTAssertTrue(props.contains("const BOOL ordinaryReseed = ordinary && (!_ordinarySeeded || next.ownerID != previous.ownerID || next.resetRevision != previous.resetRevision);"), "A recycled ordinary buffer reseeds for its current owner and reset revision")
         XCTAssertTrue(props.contains("!_wireGuardNameSuspended && mayEditWireGuardName(next)"))
         XCTAssertTrue(props.contains("_field.enabled = next.editable && nameEditable"))
@@ -133,7 +136,8 @@ final class WireGuardSetupSourceTests: XCTestCase {
 
     func testConsumerVPNWiringIsAvailableWithoutDebugOrQAFlags() throws {
         let sources: [(SourceFile, [String])] = [
-            (.vpnChainingSettingsView, ["struct VPNChainingSettingsView", "struct VPNChainingConfigurationEditor"]),
+            (.reactNativeVPNChainingScreen, ["export function VPNChainingScreen"]),
+            (.reactNativeVPNEditorFlow, ["export function VPNEditorFlow"]),
             (.settingsView, ["case vpnChaining", "case .vpnChaining:"]),
             (.rootView, ["case .vpnChaining: screen = \"vpnChaining\""]),
             (.appViewModelCore, ["@Published var dnsSettingsProfileStatus", "@Published var isStagingChainedUpstreamForQA"]),
@@ -147,7 +151,9 @@ final class WireGuardSetupSourceTests: XCTestCase {
                 "if name.hasPrefix(\"vpn.\")"]),
             (.reactNativeAppSettings, ["func vpnSettingsState()", "func vpnCommand("]),
             (.reactNativeAppQueries, ["let status = model.chainedUpstreamSurfaceStatus"]),
-            (.reactNativeAppFlows, ["case \"vpnConfiguration\":"]),
+            (.reactNativeAppFlows, ["if flow.name == \"vpnConfiguration\" { result[\"vpnEditor\"] = wireGuardEditorProjection(flow)",
+                "LavaAppForegroundContent(id: flow.id.uuidString)"]),
+            (.reactNativeAppWireGuardEditor, ["func wireGuardEditorProjection(", "case \"vpnEditor.save\":"]),
         ]
         for (file, phrases) in sources {
             let source = try readSource(file)
@@ -167,7 +173,7 @@ final class WireGuardSetupSourceTests: XCTestCase {
         let remove = try sourceBlock(in: commands, startingAt: "func removeWireGuardHop(",
                                      endingBefore: "#endif")
         XCTAssertTrue(remove.contains("guard LavaSecAppGroup.chainedUpstreamStoreIdentity != .production"))
-        for file in [SourceFile.vpnChainingSettingsView, .reactNativeAppSettings] {
+        for file in [SourceFile.reactNativeAppSettings] {
             let editor = try readSource(file)
             XCTAssertTrue(editor.contains("ChainedUpstreamConfParser.rotation(from: $0)"))
             XCTAssertFalse(editor.contains("ChainedUpstreamStagingRequest("),
@@ -176,38 +182,27 @@ final class WireGuardSetupSourceTests: XCTestCase {
     }
 
     func testVPNPresentationUsesCachedMetadataAndRefreshesAtEntryResumeAndMutations() throws {
-        let view = try readSource(.vpnChainingSettingsView)
-        let body = try sourceBlock(in: view, startingAt: "var body: some View {", endingBefore: "private func pageContent(")
-        XCTAssertTrue(body.contains("if let status = viewModel.dnsSettingsProfileStatus"))
-        XCTAssertFalse(body.contains("viewModel.chainedUpstreamSurfaceStatus"))
-        XCTAssertTrue(body.contains(".onAppear { viewModel.refreshDNSSettingsPresentation() }"))
-        XCTAssertTrue(body.contains(".onChange(of: scenePhase)"))
-        XCTAssertTrue(body.contains(".onChange(of: viewModel.configuration)"))
-        let editGate = try sourceBlock(in: view, startingAt: "private var canEditConfiguration", endingBefore: "// MARK: - Actions")
-        XCTAssertTrue(editGate.contains("viewModel.dnsSettingsProfileStatus"))
-        XCTAssertFalse(editGate.contains("viewModel.chainedUpstreamSurfaceStatus"))
-        let save = try sourceBlock(in: view, startingAt: "private func saveDraftConfiguration()", endingBefore: "validationMessage = savePendingDraft")
-        XCTAssertTrue(sourceContainsInOrder(["viewModel.refreshDNSSettingsPresentation()", "guard canSaveDraft"], in: save))
+        let source = try readSource(.reactNativeAppSettings)
+        let metadata = try sourceBlock(in: source, startingAt: "func vpnSettingsState()", endingBefore: "private func wireGuardDraftMetadata")
+        XCTAssertTrue(metadata.contains("guard let status = model.dnsSettingsProfileStatus"))
+        XCTAssertFalse(metadata.contains("model.chainedUpstreamSurfaceStatus"))
+        let entry = try sourceBlock(in: source, startingAt: "if action == \"vpn.enter\"", endingBefore: "// Discard belongs")
+        XCTAssertTrue(entry.contains("model.refreshDNSSettingsPresentation()"))
+        let command = try sourceBlock(in: source, startingAt: "func vpnCommand(", endingBefore: "func dnsChoice(")
+        XCTAssertTrue(command.contains("defer { model.refreshDNSSettingsPresentation() }"))
+        XCTAssertTrue(command.contains("let status = model.chainedUpstreamSurfaceStatus"))
     }
 
     func testVPNNativeSurfacesReauthorizeAndFenceWritesAfterSettingsGrantRevocation() throws {
-        let view = try readSource(.vpnChainingSettingsView)
-        XCTAssertTrue(view.contains("VPNSettingsAuthorization(reason: \"Open VPN chaining settings\""))
-        XCTAssertTrue(view.contains("VPNSettingsAuthorization(reason: \"Edit VPN chaining\""))
-        let authorization = try sourceBlock(in: view, startingAt: "private struct VPNSettingsAuthorization",
-            endingBefore: "private struct VPNChainingPageDestinations")
-        XCTAssertTrue(authorization.contains("revision: security.viewAuthenticationRevision"))
-        XCTAssertTrue(authorization.contains(".allowsHitTesting(canInteract)"))
-        XCTAssertTrue(authorization.contains("security.hasCurrentAuthorization(for: .appSettings)"))
-        XCTAssertTrue(authorization.contains(".onDisappear { isPresented = false }"))
-        XCTAssertTrue(authorization.contains("!managedByParent"))
-        XCTAssertTrue(try readSource(.reactNativePageContent).contains("authorizationIsOwnedByParent: true"))
-        XCTAssertTrue(sourceContainsInOrder(["guard request.visible, request.phase == .active", "await security.requireAuthentication",
-            "guard !Task.isCancelled, context == request", "if !accepted { onDenied() }"], in: authorization))
-        let commit = try sourceBlock(in: view, startingAt: "private func commitPageEdit()", endingBefore: "private func stagePageRow(")
-        XCTAssertTrue(sourceContainsInOrder(["guard canModifySettings", "try viewModel.commitWireGuardPage"], in: commit))
-        let editGate = try sourceBlock(in: view, startingAt: "private var canEditConfiguration", endingBefore: "// MARK: - Actions")
-        XCTAssertTrue(editGate.contains("security.hasCurrentAuthorization(for: .appSettings)"))
+        let source = try readSource(.reactNativeAppWireGuardEditor)
+        let command = try sourceBlock(in: source, startingAt: "func wireGuardEditorCommand(", endingBefore: "@MainActor")
+        XCTAssertTrue(sourceContainsInOrder(["try await authorize(.appSettings, \"Edit VPN chaining\")", "guard self.flow?.id == flow.id, visit.canEdit"], in: command))
+        let admission = try sourceBlock(in: source, startingAt: "var canEdit: Bool", endingBefore: "var canSave:")
+        XCTAssertTrue(admission.contains("bridge.canReadPresentation(.appSettings)"))
+        XCTAssertTrue(admission.contains("draft.revision == draftRevision"))
+        XCTAssertTrue(admission.contains("bridge.flow?.id == id"))
+        let commit = try sourceBlock(in: readSource(.reactNativeAppSettings), startingAt: "func vpnCommand(", endingBefore: "func dnsChoice(")
+        XCTAssertTrue(sourceContainsInOrder(["try await authorize(.appSettings", "guard UIApplication.shared.applicationState == .active", "try model.commitWireGuardPage(&draft)"], in: commit))
     }
 
     func testRNVPNRouteAdmissionUsesTheCurrentNativeGrantWithoutMutatingOrRetiringItsDraft() throws {
@@ -261,62 +256,38 @@ final class WireGuardSetupSourceTests: XCTestCase {
     }
 
     func testEditorRetainsOnlyAnExplicitlyRevealedAllOffDraftAcrossProtectedDataLoss() throws {
-        let view = try readSource(.vpnChainingSettingsView)
-        let editor = String(view[try XCTUnwrap(view.range(of: "struct VPNChainingConfigurationEditor")).lowerBound...])
-        XCTAssertTrue(editor.contains("@EnvironmentObject private var security: SecurityController"))
-        XCTAssertTrue(editor.contains("SecurityPrivacyPolicy.requiresPrivateDraftCover("))
-        XCTAssertTrue(editor.contains("backgroundCoverRequired: security.backgroundPrivacyCoverRequired"))
-        XCTAssertTrue(editor.contains("if security.backgroundPrivacyCoverRequired { draftRevealed = false }"))
-        XCTAssertTrue(editor.contains("UIApplication.protectedDataWillBecomeUnavailableNotification"))
-        XCTAssertTrue(editor.contains("security.protectedDataWillBecomeUnavailable()"))
-        let preLock = try sourceBlock(in: editor,
-            startingAt: ".onReceive(NotificationCenter.default.publisher(for: UIApplication.protectedDataWillBecomeUnavailableNotification))",
-            endingBefore: ".onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification))")
-        XCTAssertTrue(preLock.contains("if security.backgroundPrivacyCoverRequired { draftRevealed = false }"))
-        let editing = try sourceBlock(in: editor, startingAt: "private var canEditConfiguration", endingBefore: "// MARK: - Actions")
-        XCTAssertTrue(editing.contains("security.protectedDataIsAvailableForPresentation"))
-        let importing = try sourceBlock(in: editor, startingAt: "private func handleImport", endingBefore: "private enum ConfigurationReadFailure")
-        XCTAssertTrue(sourceContainsInOrder([
-            "guard canEditConfiguration else { return }", "validationMessage = nil",
-            "await Task.detached", "guard security.viewAuthenticationRevision == authorizationRevision, canEditConfiguration",
-            "draftConfiguration = text"
-        ], in: importing))
-        XCTAssertTrue(importing.contains("guard importToken == token else { return }"))
-        XCTAssertTrue(editor.contains(".onDisappear { importToken = UUID(); isReadingConfiguration = false }"))
-        XCTAssertFalse(editor.contains("keychainStore.load"))
+        let source = try readSource(.reactNativeAppWireGuardEditor)
+        XCTAssertTrue(source.contains("SecurityPrivacyPolicy.requiresPrivateDraftCover("))
+        XCTAssertTrue(source.contains("backgroundCoverRequired: LavaAppBridge.shared.security.backgroundPrivacyCoverRequired"))
+        XCTAssertTrue(source.contains("UIApplication.protectedDataWillBecomeUnavailableNotification"))
+        let importing = try sourceBlock(in: source, startingAt: "func documentPicker(", endingBefore: "extension LavaAppBridge")
+        XCTAssertTrue(sourceContainsInOrder(["guard canEdit", "await Task.detached", "guard let self, importToken == token", "security.viewAuthenticationRevision == authorization, canEdit", "configuration = text"], in: importing))
+        XCTAssertTrue(source.contains("func retire() { importToken = UUID(); reading = false; configuration = \"\""))
+        XCTAssertFalse(source.contains("keychainStore.load"))
     }
 
     func testPickedVPNDocumentsAreBoundedBeforeDecodingRegardlessOfReportedSize() throws {
-        let view = try readSource(.vpnChainingSettingsView)
-        let read = try sourceBlock(in: view, startingAt: "nonisolated private static func readConfiguration(at",
-                                  endingBefore: "private func saveDraftConfiguration()")
-        XCTAssertFalse(read.contains("Data(contentsOf:"))
-        XCTAssertTrue(read.contains("Self.maximumConfigurationBytes + 1 - data.count"))
-        XCTAssertTrue(read.contains("handle.read(upToCount: min(8 * 1024, remaining))"))
-        XCTAssertTrue(sourceContainsInOrder(["guard data.count <= Self.maximumConfigurationBytes", "String(data: data, encoding: .utf8)"], in: read))
-        XCTAssertTrue(read.contains("defer { try? handle.close() }"))
-        XCTAssertTrue(read.contains("url.stopAccessingSecurityScopedResource()"))
+        let source = try readSource(.wireGuardConfigurationFile)
+        XCTAssertFalse(source.contains("Data(contentsOf:"))
+        XCTAssertTrue(source.contains("maximumBytes + 1 - data.count"))
+        XCTAssertTrue(source.contains("handle.read(upToCount: min(8 * 1024, remaining))"))
+        XCTAssertTrue(sourceContainsInOrder(["guard data.count <= maximumBytes", "String(data: data, encoding: .utf8)"], in: source))
+        XCTAssertTrue(source.contains("defer { try? handle.close() }"))
+        XCTAssertTrue(source.contains("url.stopAccessingSecurityScopedResource()"))
+        XCTAssertTrue(try readSource(.reactNativeAppWireGuardEditor).contains("WireGuardConfigurationFile.read(at: url)"))
     }
 
     func testSetupAndRoutingHaveIndependentControlsAndSavingDoesNotEnable() throws {
         let bridge = try readSource(.reactNativeAppSettings)
         let toggle = try sourceBlock(in: bridge, startingAt: "if action == \"vpn.toggle\"", endingBefore: "if action == \"vpn.rowToggle\"")
-        XCTAssertTrue(sourceContainsInOrder([
-            "case \"setup\":", "guard !value || model.hasLavaSecurityPlus",
-            "model.setWireGuardSetupEnabled(value)", "case \"enabled\":"
-        ], in: toggle), "Setup ON must revalidate native entitlement before persistence; OFF must stay available")
-        let view = try readSource(.vpnChainingSettingsView)
-        XCTAssertTrue(sourceContainsInOrder([
-            "I have a WireGuard configuration", "if setupEnabled {", "configurationRow(status)",
-            "LavaQuietFooter(chainingExplanation)", "\"DNS fallback\""
-        ], in: view))
-        XCTAssertTrue(view.contains("validationMessage = savePendingDraft(name,"))
-        let editor = String(view[try XCTUnwrap(view.range(of: "struct VPNChainingConfigurationEditor")).lowerBound...])
-        XCTAssertFalse(editor.contains("viewModel.saveWireGuardHop("))
-        XCTAssertTrue(editor.contains("lavaConfirmInteractiveDismiss(hasUnsavedChanges)"))
-        XCTAssertTrue(editor.contains("lavaConfirmationAlert"))
-        XCTAssertTrue(editor.contains("requestDismiss()"))
-        XCTAssertTrue(view.contains("try viewModel.commitWireGuardPage(&draft)"))
+        XCTAssertTrue(sourceContainsInOrder(["case \"setup\":", "guard !value || model.hasLavaSecurityPlus", "model.setWireGuardSetupEnabled(value)", "case \"enabled\":"], in: toggle))
+        let view = try readSource(.reactNativeVPNChainingScreen)
+        XCTAssertTrue(sourceContainsInOrder(["I have a WireGuard configuration", "{setup&&<>", "vpn.configuration-panel", "DNS fallback"], in: view))
+        let editor = try readSource(.reactNativeAppWireGuardEditor)
+        XCTAssertTrue(editor.contains("visit.error = save(visit.name, visit.configuration.isEmpty ? nil : visit.configuration)"))
+        XCTAssertFalse(editor.contains("model.saveWireGuardHop("))
+        XCTAssertTrue(try readSource(.reactNativeVPNEditorFlow).contains("Discard changes?"))
+        XCTAssertTrue(bridge.contains("try model.commitWireGuardPage(&draft)"))
         let source = try readAppViewModelSource()
         let stage = try sourceBlock(in: source, startingAt: "if !enablesChaining {",
                                     endingBefore: "let generation = try store.commit")

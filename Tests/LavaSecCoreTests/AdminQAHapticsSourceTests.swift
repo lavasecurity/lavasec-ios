@@ -2,11 +2,11 @@ import XCTest
 
 final class AdminQAHapticsSourceTests: XCTestCase {
     func testPhoneQAIncludesStandaloneProtectionHapticPreviews() throws {
-        let source = try readSource(.adminQAView)
+        let source = try readSource(.reactNativeAppQA)
         let phoneQABlock = try sourceBlock(
             in: source,
-            startingAt: "struct PhoneQAView: View",
-            endingBefore: "private struct PhoneQAProtectionMask"
+            startingAt: "final class LavaQASession: ObservableObject",
+            endingBefore: "private enum PhoneQAHapticPreview"
         )
         let previewBlock = try sourceBlock(
             in: source,

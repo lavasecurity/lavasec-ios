@@ -20,8 +20,10 @@ native-confirmed `backgroundPrivacyCoverRequired: false`; no inactive or blocked
 reply can replace it. Returning to the app retains that same display-only frame
 until a fresh authorized foreground snapshot arrives. Waiting for the refresh is
 not a reason to show a security cover. Reads, actions and accessibility remain
-revoked during this wait. Every query-backed page can retain its already painted
-values in this same all-off frame; they are not reusable cache entries
+revoked during this wait. Action rows retain their accepted colors while input is
+locked; the domain checker renews its proof before re-enabling actions. Every
+query-backed page can retain its already painted values in this same all-off frame;
+they are not reusable cache entries
 or authority to read again. After foreground authorization returns, the same
 page retains these values until its fresh query completes. This avoids emptying
 populated charts and numbers into loading placeholders on an ordinary resume.

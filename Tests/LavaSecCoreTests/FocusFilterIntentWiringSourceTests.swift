@@ -130,46 +130,19 @@ final class FocusFilterIntentWiringSourceTests: XCTestCase {
     }
 
     func testHowToPageCoversAutomationAndFocusWithDeepLinks() throws {
-        let source = try readSource(.filterLibraryView)
-        XCTAssertTrue((try readSource(.reactNativeAppFlows)).contains("AutoSwitchHowToSheet()"),
-                      "The how-to destination must use the native page stack.")
-        let sheet = try sourceBlock(
-            in: source,
-            startingAt: "struct AutoSwitchHowToContent: View {"
-        )
-
-        // Automation and Focus share a concise introduction, with no duplicate hero.
-        XCTAssertTrue(sheet.contains("Switch filters on a schedule or with a Focus."))
-        XCTAssertTrue(sheet.contains(".navigationTitle(\"Auto-switch filters\".lavaLocalized)"))
-        XCTAssertFalse(sheet.contains("systemImage: \"moon\""))
-
-        // Two sections, Automation BEFORE Focus mode (task order).
-        let automationIdx = try XCTUnwrap(sheet.range(of: "title: \"Automation\"")?.lowerBound,
-                                          "The how-to must have an Automation section.")
-        let focusIdx = try XCTUnwrap(sheet.range(of: "title: \"Focus mode\"")?.lowerBound,
-                                     "The how-to must have a Focus mode section.")
-        XCTAssertLessThan(automationIdx, focusIdx, "Automation must come before Focus mode.")
-
-        // Deep links (supersedes Codex #29's no-Settings-button stance): Shortcuts app for the Automation
-        // section, the Settings app for the Focus section, both opened via the openURL environment action.
-        XCTAssertTrue(sheet.contains("@Environment(\\.openURL) private var openURL"),
-                      "The how-to must read the openURL action to drive its deep links.")
-        XCTAssertTrue(sheet.contains("URL(string: \"shortcuts://\")"),
-                      "The Automation section must deep-link into the Shortcuts app (shortcuts://).")
-        XCTAssertTrue(sheet.contains("URL(string: UIApplication.openSettingsURLString)"),
-                      "The Focus section must deep-link into the Settings app (openSettingsURLString).")
-        XCTAssertTrue(sheet.contains("openURL(url)"),
-                      "The section link button must open its URL via the openURL action.")
-
-        // The numbered steps still guide the manual paths: the Focus section keeps the Settings › Focus
-        // walkthrough, and the Automation section names the discoverable Switch Filter action.
-        XCTAssertTrue(sheet.contains("Open the Settings app, then tap Focus."),
-                      "The Focus section must keep the manual Settings -> Focus walkthrough.")
-        XCTAssertTrue(sheet.contains("Add the Lava Switch Filter action, then pick a filter."),
-                      "The Automation section must name the discoverable Switch Filter action.")
+        let source = try readSource(.reactNativeHelpScreens)
+        XCTAssertTrue(source.contains("Switch filters on a schedule or with a Focus."))
+        let automation = try XCTUnwrap(source.range(of: "title=\"Automation\""))
+        let focus = try XCTUnwrap(source.range(of: "title=\"Focus mode\""))
+        XCTAssertLessThan(automation.lowerBound, focus.lowerBound)
+        XCTAssertTrue(source.contains("open('shortcuts')"))
+        XCTAssertTrue(source.contains("open('settings')"))
+        XCTAssertTrue(source.contains("Open the Settings app, then tap Focus."))
+        XCTAssertTrue(source.contains("Add the Lava Switch Filter action, then pick a filter."))
+        let native = try readSource(.reactNativeAppBridge)
+        XCTAssertTrue(native.contains("shortcuts://"))
+        XCTAssertTrue(native.contains("UIApplication.openSettingsURLString"))
     }
-
-    // MARK: - Build wiring (root cause of the original metadata-export failure)
 
     func testConstValueProtocolsIncludeQueryProtocols() throws {
         let pbxproj = try readSource(.xcodeProject)

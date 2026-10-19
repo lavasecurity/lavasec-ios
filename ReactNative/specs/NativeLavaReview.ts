@@ -10,6 +10,7 @@ export type ActivityDates = {
 export interface Spec extends TurboModule {
   close(): void;
   chooseFilterAction(name: string, canSwitch: boolean, canShare: boolean): Promise<string | null>;
+  chooseActivityExport(canShareChart: boolean): Promise<string | null>;
   speakDemo(text: string, locale: string): Promise<boolean>;
   stopDemo(): void;
   getLegalNotices(): string;

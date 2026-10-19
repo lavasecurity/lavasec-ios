@@ -51,6 +51,77 @@
     [button addTarget:self action:@selector(handleBarButtonItemPress:) forControlEvents:UIControlEventTouchUpInside];
     self.customView = button;
   }
+  // PhoneQAView's NativeToolbarIconButton keeps its explicit foreground even
+  // when result availability disables it. Match that bounded native control;
+  // ordinary UIBarButtonItem disabled tinting must not wash out its glyph.
+  if ([dict[@"identifier"] isEqualToString:@"lava.toolbar.qa.result"]) {
+    UIColor *foreground = self.tintColor ?: [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits) {
+      return traits.userInterfaceStyle == UIUserInterfaceStyleDark ? UIColor.whiteColor : UIColor.blackColor;
+    }];
+    UIImage *symbol = [UIImage systemImageNamed:@"info.circle"
+        withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:22
+                                                                          weight:UIImageSymbolWeightRegular
+                                                                           scale:UIImageSymbolScaleMedium]];
+    UIButtonConfiguration *configuration;
+    if (@available(iOS 26.0, *)) {
+      self.hidesSharedBackground = YES;
+      configuration = [UIButtonConfiguration glassButtonConfiguration];
+    } else {
+      configuration = [UIButtonConfiguration plainButtonConfiguration];
+    }
+    configuration.buttonSize = UIButtonConfigurationSizeLarge;
+    configuration.cornerStyle = UIButtonConfigurationCornerStyleCapsule;
+    configuration.image = symbol;
+    configuration.baseForegroundColor = foreground;
+    configuration.imageColorTransformer = ^UIColor *(UIColor *color) { return foreground; };
+    configuration.contentInsets = NSDirectionalEdgeInsetsMake(
+        (__LAVA_MODE_TARGET__ - symbol.size.height) / 2, (__LAVA_MODE_TARGET__ - symbol.size.width) / 2,
+        (__LAVA_MODE_TARGET__ - symbol.size.height) / 2, (__LAVA_MODE_TARGET__ - symbol.size.width) / 2);
+    UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
+    button.configuration = configuration;
+    // Like LavaToolbarSymbol's confirmation image, resolve the actual pixels:
+    // UIKit can recolor/reconfigure a symbolic UIImage inside disabled glass.
+    // Re-resolve dynamic navigation ink under this button's current traits;
+    // retaining a first-mount raster would freeze the wrong appearance.
+    __block UIColor *renderedForeground = nil;
+    __block CGFloat renderedScale = 0;
+    __block UIImage *renderedImage = nil;
+    button.configurationUpdateHandler = ^(UIButton *current) {
+      [current.traitCollection performAsCurrentTraitCollection:^{
+        UIColor *resolved = [foreground resolvedColorWithTraitCollection:current.traitCollection];
+        UIGraphicsImageRendererFormat *format = [UIGraphicsImageRendererFormat preferredFormat];
+        if (current.traitCollection.displayScale > 0) { format.scale = current.traitCollection.displayScale; }
+        BOOL sameForeground = renderedForeground == resolved || [renderedForeground isEqual:resolved];
+        if (!renderedImage || !sameForeground || renderedScale != format.scale) {
+          UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:symbol.size format:format];
+          renderedImage = [[renderer imageWithActions:^(UIGraphicsImageRendererContext *context) {
+            [[symbol imageWithTintColor:resolved renderingMode:UIImageRenderingModeAlwaysOriginal] drawAtPoint:CGPointZero];
+          }] imageWithRenderingMode:UIImageRenderingModeAlwaysOriginal];
+          renderedForeground = resolved;
+          renderedScale = format.scale;
+          // UIKit may copy/configure its image. Only a changed render key may
+          // assign configuration; image identity cannot prove an update is due.
+          UIButtonConfiguration *updated = current.configuration;
+          updated.image = renderedImage;
+          current.configuration = updated;
+        }
+      }];
+    };
+    if (@available(iOS 17.0, *)) {
+      [button registerForTraitChanges:@[UITraitUserInterfaceStyle.class, UITraitAccessibilityContrast.class, UITraitDisplayScale.class]
+          withHandler:^(id<UITraitEnvironment> environment, UITraitCollection *previousTraits) {
+            [(UIButton *)environment setNeedsUpdateConfiguration];
+          }];
+    }
+    [button setNeedsUpdateConfiguration];
+    button.enabled = self.enabled;
+    button.accessibilityLabel = self.accessibilityLabel;
+    button.accessibilityIdentifier = dict[@"identifier"];
+    [button.widthAnchor constraintEqualToConstant:__LAVA_MODE_TARGET__].active = YES;
+    [button.heightAnchor constraintEqualToConstant:__LAVA_MODE_TARGET__].active = YES;
+    [button addTarget:self action:@selector(handleBarButtonItemPress:) forControlEvents:UIControlEventTouchUpInside];
+    self.customView = button;
+  }
   // Confirmation actions retain their existing platform-owned sizing.
   if (!isMode && [dict[@"variant"] isEqualToString:@"prominent"] &&
       [dict[@"sfSymbolName"] isEqualToString:@"checkmark"]) {

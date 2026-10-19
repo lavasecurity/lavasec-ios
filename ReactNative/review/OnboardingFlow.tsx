@@ -18,9 +18,9 @@ import {useReview} from './ReviewContext';
 import {useOnboardingDestination} from './onboarding-geometry';
 import {OnboardingTravel,OnboardingPhaseCommands,onboardingPageMotion} from './onboarding-motion';
 import {useCrossFadePreference,useReducedMotionPreference} from './navigation-scaffold';
-import {OnboardingChoice,OnboardingCurtain,OnboardingFeature,OnboardingFooter,OnboardingPageScroll,OnboardingProgress,OnboardingStageLayout,OnboardingStep,OnboardingWelcome,onboardingPageTitle} from './onboarding-scaffold';
+import {OnboardingChoice,OnboardingSetupAction,OnboardingCurtain,OnboardingFeature,OnboardingFooter,OnboardingPageScroll,OnboardingProgress,OnboardingStageLayout,OnboardingStep,OnboardingWelcome,onboardingPageTitle} from './onboarding-scaffold';
 import {Copy} from './primitives';
-import {toolbarButton,useToolbar} from './scaffold';
+import {toolbarAction,useToolbar} from './scaffold';
 
 const easeInOut=Easing.bezier(.42,0,.58,1);
 export function OnboardingFlow(){
@@ -156,8 +156,8 @@ export function OnboardingFlow(){
   const landscape=size.width>size.height;
   const sourceInset=landscape?128*windowScale:0;
   useToolbar({title:setup&&landscape?onboardingPageTitle(setup.page):'',headerTitleStyle:landscape&&setup?.page===0?{color:'white'}:undefined,headerBackVisible:false,
-    unstable_headerLeftItems:()=>setup?.history.length&&!['opening','released'].includes(setup.phase)?[toolbarButton('Back','chevron.left',()=>void command({type:'onboarding.back',id:setup.id}),!!setup.busy)]:[],
-    unstable_headerRightItems:()=>setup?.mock?[toolbarButton('Close','xmark',close,!!setup.busy)]:[]},[setup?.id,setup?.page,setup?.history.length,setup?.busy,setup?.phase,landscape]);
+    unstable_headerLeftItems:()=>setup?.history.length&&!['opening','released'].includes(setup.phase)?[toolbarAction('Back','back',()=>void command({type:'onboarding.back',id:setup.id}),!!setup.busy)]:[],
+    unstable_headerRightItems:()=>setup?.mock?[toolbarAction('Close','close',close,!!setup.busy)]:[]},[setup?.id,setup?.page,setup?.history.length,setup?.busy,setup?.phase,landscape]);
   if(!setup)return null;
   const busy=!!setup.busy||['opening','released'].includes(setup.phase);const opening=setup.phase==='opening'||setup.phase==='released';
   const position=setup.page===5&&travel.current?travel.current.position(animationNow()):sourceFrame?{x:sourceFrame.x+sourceFrame.width/2,y:sourceFrame.y+sourceFrame.height/2}:undefined;
@@ -239,8 +239,8 @@ function OnboardingPageBody({setup,command,showTitle}:{setup:OnboardingSetup;com
   if(setup.page===0)return <OnboardingWelcome showTitle={showTitle}/>;
   if(setup.page===1)return <OnboardingStep title={onboardingPageTitle(1)} showTitle={showTitle}><OnboardingFeature symbol="shield" title="Lava blocks your device's access to malicious domains"/><OnboardingFeature symbol="lock" title="Local filter makes it safe, private and free"/><OnboardingFeature symbol="slider.horizontal.3" title="You're in full control of what gets logged locally"/></OnboardingStep>;
   if(setup.page===2)return <OnboardingStep title={onboardingPageTitle(2)} showTitle={showTitle}>
-    <OnboardingChoice title={setup.vpnInstalled?'VPN installed':'Install local VPN'} symbol="shield" selected={setup.vpnInstalled} busy={setup.busy==='vpn'} disabled={busy||setup.vpnInstalled} testID="onboarding.install-vpn" onPress={setup.vpnInstalled?undefined:()=>void command({type:'onboarding.vpn',id:setup.id})}/>
-    <OnboardingChoice title={setup.notifications?'Notifications enabled (optional)':'Enable notifications (optional)'} symbol="bell" selected={setup.notifications} busy={setup.busy==='notifications'} disabled={busy||setup.notifications} testID="onboarding.notifications" onPress={setup.notifications?undefined:()=>void command({type:'onboarding.notifications',id:setup.id})}/>
+    <OnboardingSetupAction title={setup.vpnInstalled?'VPN installed':'Install local VPN'} symbol="shield" completed={setup.vpnInstalled} busy={setup.busy==='vpn'} disabled={busy||setup.vpnInstalled} testID="onboarding.install-vpn" onPress={setup.vpnInstalled?undefined:()=>void command({type:'onboarding.vpn',id:setup.id})}/>
+    <OnboardingSetupAction title={setup.notifications?'Notifications enabled (optional)':'Enable notifications (optional)'} symbol="bell" completed={setup.notifications} busy={setup.busy==='notifications'} disabled={busy||setup.notifications} testID="onboarding.notifications" onPress={setup.notifications?undefined:()=>void command({type:'onboarding.notifications',id:setup.id})}/>
     {!!setup.error&&<Copy verbatim role="supporting">{setup.error}</Copy>}
   </OnboardingStep>;
   if(setup.page===3)return <OnboardingStep title={onboardingPageTitle(3)} showTitle={showTitle}><View style={{gap:16}}>{([

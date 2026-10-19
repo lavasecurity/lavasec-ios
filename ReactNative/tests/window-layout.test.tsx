@@ -1,8 +1,9 @@
-import {fireEvent,render,screen} from '@testing-library/react-native';
+import {act,fireEvent,render,screen} from '@testing-library/react-native';
 import {useState} from 'react';
-import {Animated,KeyboardAvoidingView,StyleSheet,TextInput,View,ScrollView} from 'react-native';
+import {Animated,KeyboardAvoidingView,PlatformColor,StyleSheet,TextInput,View,ScrollView} from 'react-native';
+import {colors} from '../src/colors';
 import {SafeAreaInsetsContext} from 'react-native-safe-area-context';
-import {PresentationContext,Text} from '../app/presentation';
+import {PresentationContext,Text,localized} from '../app/presentation';
 import {useTextScale} from '../app/text-metrics';
 import {windowLayout,scaleWindowStyle,scaleScaffoldStyle,WindowSizeContext,pageContentWidth,pageHeaderInset} from '../src/window-layout';
 import {Screen} from '../review/primitives';
@@ -15,6 +16,10 @@ import {FlowSheet} from '../review/form-scaffold';
 import {LavaActionButton,LavaIconButton} from '../src/components.ios';
 import {DetailField} from '../review/detail-scaffold';
 import {foundation} from '../src/foundation';
+import {PreparationFlow} from '../review/PreparationFlow';
+import {PreparationScreen} from '../src/flows/preparation/PreparationScreen';
+import {ReviewContext,type ReviewState} from '../review/ReviewContext';
+import {initialSession} from '../review/session';
 
 let mockWindow={width:390,height:844,scale:3,fontScale:1};
 const mockNavigation={setOptions:jest.fn(),addListener:()=>()=>{}};
@@ -238,4 +243,43 @@ test('detail input floors grow with their form and retain the phone baseline',()
 test('fixed export or measured game text can retain its independent pixel geometry',()=>{
   render(<WindowSizeContext.Provider value={{width:1032,height:1376}}><Text responsive={false} allowFontScaling={false} testID="fixed" style={{fontSize:25}}>5</Text></WindowSizeContext.Provider>);
   expect(screen.getByTestId('fixed')).toHaveStyle({fontSize:25});
+});
+
+test('native preparation semantic text keeps its phone size in a wide window and still applies user text scales once',async()=>{
+  const id='preparation-typography';
+  const live={session:initialSession(),security:{readRevision:0},preparation:{id,origin:'filters',state:'failed',progress:0,
+    title:"We couldn't update your filter",message:'Network failed',busy:false,
+    recovery:{retry:true,editReturn:false,keepCurrent:true,upgrade:null}}};
+  const content=(textScales:Record<string,number>|null=null)=><ReviewContext.Provider value={{live} as unknown as ReviewState}>
+    <PresentationContext.Provider value={{locale:'en',textScales}}><PreparationFlow id={id}/></PresentationContext.Provider>
+  </ReviewContext.Provider>;
+  const view=render(content());await act(async()=>{});
+  const title=()=>screen.getByTestId('preparation.failure.title',{includeHiddenElements:true});
+  const copy=(value:string)=>screen.getByText(value,{includeHiddenElements:true});
+  const originalTitle=title();
+  expect(title()).toHaveStyle({fontSize:28,color:PlatformColor('label')});
+  mockWindow={...mockWindow,width:1032,height:1376};
+  view.rerender(content());await act(async()=>{});
+  expect(title()).toBe(originalTitle);
+  expect(title()).toHaveStyle({fontSize:28});
+  expect(title()).toHaveProp('allowFontScaling',true);
+  expect(copy('Network failed')).toHaveStyle({fontSize:17,color:colors.secondaryText});
+  expect(copy('Your previous filter is still active.')).toHaveStyle({fontSize:15,color:colors.secondaryText});
+  expect(copy(localized('Keep Current Filter'))).toHaveStyle({fontSize:15,color:colors.secondaryText});
+  expect(screen.getByTestId('preparation.retry',{includeHiddenElements:true})).toHaveStyle({minHeight:44,borderRadius:16});
+  expect(copy(localized('Try Again'))).toHaveStyle({fontSize:17});
+  expect(screen.UNSAFE_getByType(PreparationScreen).props.successGlyph.props).toMatchObject({size:68,pointSize:56,weight:'bold',responsive:false});
+  const failureGlyph=screen.UNSAFE_getAllByType(View).find(node=>node.props.symbol==='exclamationmark.triangle.fill');
+  expect(failureGlyph).toBeDefined();
+  expect(failureGlyph!.props.fontPointSize).toBe(56);
+  expect(failureGlyph!.props.fontWeight).toBe('bold');
+  expect(StyleSheet.flatten(failureGlyph!.props.style)).toMatchObject({width:70,height:191/3});
+  view.rerender(content({title1:1.5,body:1.2,subheadline:1.1}));await act(async()=>{});
+  expect(title()).toHaveStyle({fontSize:42});
+  expect(copy('Network failed')).toHaveStyle({fontSize:20.4});
+  expect(copy('Your previous filter is still active.')).toHaveStyle({fontSize:16.5});
+  expect(copy(localized('Keep Current Filter'))).toHaveStyle({fontSize:16.5});
+  Object.assign(live.preparation,{state:'preparing',title:'Saving the filter',progress:.75});
+  view.rerender(content());await act(async()=>{});
+  expect(screen.getByTestId('preparation.title',{includeHiddenElements:true})).toHaveStyle({fontSize:28,color:PlatformColor('label')});
 });

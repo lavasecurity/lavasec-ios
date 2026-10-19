@@ -75,7 +75,7 @@ final class PresentationCacheBoundarySourceTests: XCTestCase {
     func testEveryNativeQueryDeclaresAStoragePolicyAndFinalBridgeDeliveryValidates() throws {
         let source = try readSource(.reactNativeAppQueries)
         let body = try sourceBlock(in: source, startingAt: "private func freshQuery(", endingBefore: "func setActivityVisibility(")
-        let regex = try NSRegularExpression(pattern: #"\"([a-z]+\.(?:query|stage))\""#)
+        let regex = try NSRegularExpression(pattern: #"\"([a-z]+(?:\.[a-z]+)*\.(?:query|stage))\""#)
         let queries = Set(regex.matches(in: body, range: NSRange(body.startIndex..<body.endIndex, in: body)).compactMap { match -> String? in
             guard let range = Range(match.range(at: 1), in: body) else { return nil }
             return String(body[range])

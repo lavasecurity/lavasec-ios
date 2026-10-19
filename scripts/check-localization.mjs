@@ -63,6 +63,7 @@ const allowedUntranslatedCoreEntries = new Set([
 // to each catalog key and language so it cannot hide untranslated sentences.
 const sharedAppTerms = new Set([
   "fr:Actions",
+  "fr:Photo",
   "it:Account",
   "it:Password",
   "de:Filter",

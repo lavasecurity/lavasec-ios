@@ -18,7 +18,7 @@
     "test": "npm run i18n:check && npm run test:i18n && node scripts/configure-native-tabs.mjs && npm run tokens:check && npm run test:tokens && npm run test:host-policy && npm run host:check && npm run design:check && npm run test:design && npm run typecheck && npm run test:layout && npm run test:components",
     "bundle:ios": "node scripts/bundle-gallery.mjs",
     "bundle:review": "node scripts/bundle-gallery.mjs --review && node scripts/verify-review-bundle.mjs",
-    "test:host-policy": "node --test tests/review-host-policy.test.mjs tests/native-build-modes.test.mjs tests/preview-source-integrity.test.mjs tests/native-preparation.test.mjs tests/native-impact.test.mjs tests/native-navigation-patch.test.mjs tests/native-scroll-owner.test.mjs tests/native-tab-baseline.test.mjs tests/discovery-symbol.test.mjs tests/toolbar-adapter.test.mjs",
+    "test:host-policy": "node --test tests/review-host-policy.test.mjs tests/native-build-modes.test.mjs tests/preview-source-integrity.test.mjs tests/native-preparation.test.mjs tests/native-impact.test.mjs tests/native-navigation-patch.test.mjs tests/native-scroll-owner.test.mjs tests/native-tab-baseline.test.mjs tests/discovery-symbol.test.mjs tests/toolbar-adapter.test.mjs tests/ios-bundle.test.mjs",
     "host:check": "node scripts/check-review-host.mjs",
     "design:check": "node scripts/check-design-system.mjs",
     "test:design": "node --test tests/design-system.test.mjs",
@@ -69,9 +69,14 @@
         "LavaSlider": "LavaSliderView",
         "LavaContextMenu": "LavaContextMenuView",
         "LavaSwitch": "LavaSwitchView",
-        "LavaNativePage": "LavaNativePageView",
         "LavaShareCardSurface": "LavaShareCardSurfaceView",
-        "LavaShareQr": "LavaShareQrView"
+        "LavaShareQr": "LavaShareQrView",
+        "LavaBackupCredentials": "LavaBackupCredentialsView",
+        "LavaPasscodeInput": "LavaPasscodeInputView",
+        "LavaImportScanner": "LavaImportScannerView",
+        "LavaQAConfiguration": "LavaQAConfigurationView",
+        "LavaSystemButton": "LavaSystemButtonView",
+        "LavaInlineSymbolText": "LavaInlineSymbolTextView"
       }
     }
   }

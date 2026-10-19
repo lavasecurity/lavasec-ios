@@ -9,7 +9,7 @@ import {foundation} from '../src/foundation';
 import {Copy, Section, Row, RowContent, RowAccessory, Symbol,usePageInspectionLock} from './primitives';
 import {LavaActionButton,LavaCard,LavaIconButton,LavaIconButtonGroup} from '../src';
 import {LavaDiscoveryDot} from '../src/LavaDiscoveryDot';
-import {CatalogControlMaterial,Group,Quiet,StableVariants,Sheet,Search} from './scaffold';
+import {CatalogControlMaterial,Group,Quiet,StableVariants,Sheet,Search,useSheetHeaderInset} from './scaffold';
 import {SettingsControl} from './settings-scaffold';
 import NativeTextField from '../specs/LavaTextFieldNativeComponent';
 import Decoration from '../specs/LavaDecorationNativeComponent';
@@ -41,7 +41,7 @@ export function StoryInset({children}:PropsWithChildren){
 // Discovery replaces the chevron in that slot without shifting the heading.
 export function StoryNavigationLine({children,testID,attention=false}:PropsWithChildren<{testID?:string;attention?:boolean}>){
   const s=useScaffoldStyles(windowBase_s);
-  return <View style={s.summaryHeading}><View style={s.flex}>{children}</View><RowAccessory intent="page" testID={testID}>{attention?<LavaDiscoveryDot testID={testID?`${testID}.new`:undefined}/>:undefined}</RowAccessory></View>;
+  return <View style={s.summaryHeading}><View style={s.flex}>{children}</View><RowAccessory intent="page" testID={testID} attention={attention} attentionTestID={testID?`${testID}.new`:undefined}/></View>;
 }
 export function StoryStack({children}:PropsWithChildren){
   const s=useScaffoldStyles(windowBase_s);return <View style={s.stack}>{children}</View>;}
@@ -61,10 +61,11 @@ export function StoryColumns({primary,secondary}: {primary:ReactNode;secondary:R
   </View>;
 }
 // The route owns the green surface. Explanation and controls remain together
-// below it in a separate shared neutral group.
+// below it in a separate shared neutral group. The inset body is one region;
+// each following control row uses the group's standard divider pipeline.
 export function ExplorePlayground({scene,transport,children,footer}:PropsWithChildren<{scene:ReactNode;transport?:ReactNode;footer?:ReactNode}>){
   return <StoryStack><StorySurface tone="green" testID="explore.diagram.panel">{scene}</StorySurface>
-    <Group separators={false} testID="explore.detail.panel"><StoryInset>{children}</StoryInset>{transport}{footer}</Group>
+    <Group testID="explore.detail.panel"><StoryInset>{children}</StoryInset>{transport}{footer}</Group>
   </StoryStack>;
 }
 export function ExploreDescriptions({selected,descriptions}:{selected:number;descriptions:readonly {id:string;title:string;caption:string}[]}){
@@ -149,7 +150,7 @@ export function FilterOverview({name,emoji,rules,counts,onOpen,disabled=false}:{
     accessibilityState={{disabled}} disabled={disabled} onPress={onOpen} style={({pressed})=>[s.surface,s.green,s.tileInset,pressed&&s.dim]}>
     <StoryNavigationLine testID="filters.current.accessory"><Copy role="caption" color={colors.secondaryText}>Now filtering</Copy></StoryNavigationLine>
     <View style={s.titleStack}><Copy verbatim role="heading"><FilterEmoji emoji={emoji} context="identity"/>{` ${name}`}</Copy>{rules&&<Copy verbatim role="body" color={colors.secondaryText}>{rules}</Copy>}</View>
-    <View style={s.heroCopy}>{counts.map((item,index)=><CountLegend key={item.label} label={item.label} count={item.value} tone={index===0?'blocked':index===1?'personal':'allowed'}/>)}</View>
+    <View style={s.heroCopy}>{counts.map((item,index)=><CountLegend semantic key={item.label} label={item.label} count={item.value} tone={index===0?'blocked':index===1?'personal':'allowed'}/>)}</View>
   </Pressable>;
 }
 export function FilterEmoji({emoji,context='list'}:{emoji?:string;context?:'list'|'identity'}) {
@@ -314,16 +315,17 @@ export function CatalogSheet<T>({sections,categoryTitles=sections.map(section=>s
   renderRow:(item:T,section:string)=>ReactNode;footer?:ReactNode;empty?:ReactNode;
 }) {
   const scroll=useRef<ScrollViewInstance>(null);const positions=useRef<Record<string,number>>({});
+  const headerInset=useSheetHeaderInset();
   const previousSearch=useRef(search);
   useLayoutEffect(()=>{
     if(previousSearch.current===search)return;
     previousSearch.current=search;
     // New results begin below the pinned controls, including the empty state.
     // Ordinary selection updates and returning from a child retain their offset.
-    scroll.current?.scrollTo({y:0,animated:false});
-  },[search]);
-  return <Sheet showsVerticalScrollIndicator scrollMode="list" scrollRef={scroll} headerMaterial={false} header={<View testID="catalog.controls" style={{gap:12}}>
-    <CategoryLinks titles={categoryTitles} onSelect={title=>{if(sections.some(section=>section.title===title))scroll.current?.scrollTo({y:positions.current[title]??0,animated:true});}}/>
+    scroll.current?.scrollTo({y:-headerInset,animated:false});
+  },[search,headerInset]);
+  return <Sheet showsVerticalScrollIndicator scrollMode="list" scrollRef={scroll} header={<View testID="catalog.controls" style={{gap:12}}>
+    <CategoryLinks titles={categoryTitles} onSelect={title=>{if(sections.some(section=>section.title===title))scroll.current?.scrollTo({y:(positions.current[title]??0)-headerInset,animated:true});}}/>
     <Search surface="catalog" value={search} onChange={onSearch} label={searchLabel}/>
   </View>} footer={footer}>
     {sections.map(section=><View key={section.title} onLayout={event=>{positions.current[section.title]=event.nativeEvent.layout.y;}}>

@@ -5,12 +5,14 @@ import {colors} from './colors.ios';
 import {lavaTokens} from './generated/tokens';
 
 /** Continuous fill/clip and a sibling outline share bounds without clipping the outline twice. */
-export function LavaSurface({children, role='card', borderColor, plain=false, style, contentStyle, testID}: PropsWithChildren<{
-  role?:'card'|'panel'; borderColor?:ColorValue; plain?:boolean; style?:StyleProp<ViewStyle>; contentStyle?:StyleProp<ViewStyle>; testID?:string;
+export function LavaSurface({children, role='card', borderColor, cornerRadius, plain=false, style, contentStyle, testID}: PropsWithChildren<{
+  role?:'card'|'panel'; borderColor?:ColorValue|null; cornerRadius?:number; plain?:boolean; style?:StyleProp<ViewStyle>; contentStyle?:StyleProp<ViewStyle>; testID?:string;
 }>) {
-  const shape=scaleWindowStyle(windowShape,useWindowLayout().scale);
+  const shape=scaleWindowStyle(cornerRadius===undefined?windowShape:{...windowShape,borderRadius:cornerRadius},useWindowLayout().scale);
   const fill=plain?'transparent':colors[role==='panel'?lavaTokens.surface.panelBackground:lavaTokens.surface.cardBackground];
-  const stroke=borderColor??(role==='panel'?colors[lavaTokens.surface.panelStroke]:undefined);
+  // Explicit null retains a native information panel's optional border. An
+  // omitted value preserves the ordinary RN panel's existing default outline.
+  const stroke=borderColor===null?undefined:borderColor??(role==='panel'?colors[lavaTokens.surface.panelStroke]:undefined);
   return <View testID={testID} style={style}>
     <View testID={testID?`${testID}.content`:undefined} style={[shape,{overflow:'hidden',backgroundColor:fill},contentStyle]}>{children}</View>
     {/* Fabric uses Core Animation's continuous border only on a clipping layer.

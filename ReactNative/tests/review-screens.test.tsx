@@ -1,3 +1,5 @@
+// QA's independent native navigator is qualified by device-qa-presentation-lifecycle.
+jest.mock('../review/QAFlowAdapter.ios',()=>({QAFlowAdapter:()=>null}));
 import {usePlusEntry} from '../review/plus-entry';
 import {PlusIntents} from '../review/plus-intents';
 import {VPNChainingScreen} from '../review/VPNChainingScreen';
@@ -5,9 +7,9 @@ import {usePreventRemove} from '@react-navigation/native';
 import {LegalScreen} from '../review/DiagnosticScreens';
 import {clearAppReadCache} from '../app/read-cache';
 import NativeSwitch from '../specs/LavaSwitchNativeComponent';
-import {useEffect, useState, type PropsWithChildren} from 'react';
-import {AccessibilityInfo, Alert, AppState, Linking, ScrollView, Switch} from 'react-native';
-import {act, fireEvent, render, screen, waitFor} from '@testing-library/react-native';
+import {useEffect, useState, useSyncExternalStore, type PropsWithChildren} from 'react';
+import {AccessibilityInfo, Alert, AppState, Linking, ScrollView, StyleSheet, Switch, View,type ViewProps} from 'react-native';
+import {act, fireEvent, render, screen, waitFor, within} from '@testing-library/react-native';
 import {AddDomainScreen, AddBlocklistScreen, FilterScreen, ReviewScreen, ActivityScreen, NetworkScreen, AccountScreen, SecurityScreen, DNSScreen, DNSPickerScreen, StatsScreen, DomainListScreen, FeedbackScreen, GuardScreen, FiltersScreen, UpgradeScreen, PrivacyScreen, LibraryScreen, ShareScreen, ShareDetailScreen, SettingsScreen, CustomizationScreen, ExploreScreen} from '../review/screens';
 import {configurePresentation, localized, localizedFormat} from '../app/presentation';
 import {ListRow, Toggle} from '../review/scaffold';
@@ -22,7 +24,13 @@ import {addPreviewDomain, initialPreviewDraft, previewDiff} from '../review/prev
 import type {AppCommand, AppSnapshot, DNSChoice} from '../app/contract';
 import {useDNSEditor} from '../review/dns-editor';
 import type {AppStore} from '../app/store';
+import {AppStore as RuntimeAppStore} from '../app/store';
 import {PresentationHydration} from '../app/presentation-hydration';
+
+// Whole-screen integration fixtures need enough harness time for asynchronous
+// React cleanup on shared CI. Cleanup must finish before the next screen mounts;
+// each operation's waitFor deadlines and timer assertions remain unchanged.
+jest.setTimeout(15_000);
 
 const expectedNumber = new Intl.NumberFormat();
 const backupEnablement=(value:boolean|null,signedIn=true,overrides:Partial<NonNullable<AppSnapshot['backup']['enablement']>>={})=>({
@@ -54,6 +62,7 @@ const mockGoBack = jest.fn();
 const mockDispatch = jest.fn();
 const mockNormalizeDomain = jest.fn();
 const mockChooseFilterAction=jest.fn().mockResolvedValue(null);
+const mockChooseActivityExport=jest.fn().mockResolvedValue(null);
 const mockLegalNotices = jest.fn();
 const mockSetOptions = jest.fn();
 // The domain search belongs to the navigation item, so these tests drive the
@@ -70,7 +79,7 @@ const mockNavigationListeners=new Map<string,Set<()=>void>>();
 const mockListen=(name:string,listener:()=>void)=>{const set=mockNavigationListeners.get(name)??new Set();set.add(listener);mockNavigationListeners.set(name,set);return()=>set.delete(listener);};
 const mockParentNavigation={isFocused:()=>mockParentFocused,getParent:()=>undefined,addListener:(event:string,listener:()=>void)=>mockListen(`parent.${event}`,listener)};
 const mockNavigation = {dispatch:mockDispatch,navigate:mockNavigate,goBack:mockGoBack,setOptions:mockSetOptions,getState:mockGetState,getParent:()=>mockParentNavigation,addListener:(event:string,listener:()=>void)=>mockListen(event,listener)};
-beforeEach(()=>{mockChooseFilterAction.mockReset().mockResolvedValue(null);mockDispatch.mockClear();jest.mocked(usePreventRemove).mockClear();mockNavigate.mockClear();mockGoBack.mockClear();mockSetOptions.mockClear();mockGetState.mockReset();mockNavigationListeners.clear();mockFocused=true;mockParentFocused=true;mockExploreParams={};});
+beforeEach(()=>{mockChooseActivityExport.mockReset().mockResolvedValue(null);mockChooseFilterAction.mockReset().mockResolvedValue(null);mockDispatch.mockClear();jest.mocked(usePreventRemove).mockClear();mockNavigate.mockClear();mockGoBack.mockClear();mockSetOptions.mockClear();mockGetState.mockReset();mockNavigationListeners.clear();mockFocused=true;mockParentFocused=true;mockExploreParams={};});
 const todayRange = {start: 1000, end: 1000, label: 'Today', includesToday: true};
 const mockGetActivityDates = jest.fn().mockResolvedValue(todayRange);
 const mockPickActivityDates = jest.fn();
@@ -80,7 +89,7 @@ const mockGetActivityDatePreset=jest.fn(async(preset:string)=>preset==='today'?t
 jest.mock('../review/scaffold', () => ({...jest.requireActual('../review/scaffold'), Sheet: ({children,header,footer}: PropsWithChildren<{header?: React.ReactNode;footer?: React.ReactNode}>) => <>{header}{children}{footer}</>}));
 jest.mock('../specs/LavaSliderNativeComponent', () => ({__esModule:true,default:require('react-native').View}));
 jest.mock('../specs/LavaChoiceNativeComponent', () => require('./native-choice-mock'));
-jest.mock('../specs/NativeLavaReview', () => ({__esModule: true, default: {chooseFilterAction:(...args:unknown[])=>mockChooseFilterAction(...args),stopDemo:jest.fn(),speakDemo:jest.fn().mockResolvedValue(false),getLegalNotices:()=>mockLegalNotices(), normalizeDomain: (input: string) => mockNormalizeDomain(input), close: jest.fn(), getGuardAccents:()=>JSON.stringify({original:{light:'#BF4000',dark:'#FF8855'},aquamarine:{light:'#227B89',dark:'#6FD2DF'}}), getActivityDates: () => mockGetActivityDates(), getActivityDatePreset:(preset:string)=>mockGetActivityDatePreset(preset), pickActivityDates: (start: number, end: number) => mockPickActivityDates(start, end)}}));
+jest.mock('../specs/NativeLavaReview', () => ({__esModule: true, default: {chooseActivityExport:(...args:unknown[])=>mockChooseActivityExport(...args),chooseFilterAction:(...args:unknown[])=>mockChooseFilterAction(...args),stopDemo:jest.fn(),speakDemo:jest.fn().mockResolvedValue(false),getLegalNotices:()=>mockLegalNotices(), normalizeDomain: (input: string) => mockNormalizeDomain(input), close: jest.fn(), getGuardAccents:()=>JSON.stringify({original:{light:'#BF4000',dark:'#FF8855'},aquamarine:{light:'#227B89',dark:'#6FD2DF'}}), getActivityDates: () => mockGetActivityDates(), getActivityDatePreset:(preset:string)=>mockGetActivityDatePreset(preset), pickActivityDates: (start: number, end: number) => mockPickActivityDates(start, end)}}));
 jest.mock('react-native-safe-area-context',()=>({SafeAreaProvider:require('react-native').View,SafeAreaView:require('react-native').View,SafeAreaInsetsContext:require('react').createContext(null),useSafeAreaInsets:()=>({top:59,bottom:34,left:0,right:0})}));
 jest.mock('@react-navigation/native', () => ({StackActions:{replace:(name:string,params:unknown)=>({type:'REPLACE',payload:{name,params}})},usePreventRemove:jest.fn(),useNavigation: () => mockNavigation, useRoute: () => ({key:'source-route',params:{decision:mockDomainDecision,id:mockShareFilterID,standaloneReview:mockStandaloneReview,...mockExploreParams}}), useScrollToTop: jest.fn(), useIsFocused:()=>mockFocused}));
 jest.mock('../specs/LavaDecorationNativeComponent', () => ({__esModule: true, default: require('react-native').View}));
@@ -690,6 +699,36 @@ function editingSnapshot(): AppSnapshot {
     limits:{maxBlockedDomains:25,maxAllowedDomains:25}} as unknown as AppSnapshot;
 }
 
+test.each(['en','ja'])('filter review announces each %s add/remove action with its unchanged item identity',async locale=>{
+  configurePresentation({locale,textScales:null});
+  const live=editingSnapshot();
+  live.session.blocklists=['added-list'];live.session.savedBlocklists=['removed-list'];
+  // Catalog-looking user names must stay verbatim, even in another app language.
+  live.blocklistNames={'added-list':'Cancel','removed-list':'Retry'};
+  live.savedDraft={blocked:['old-block.example'],allowed:['old-allow.example']};
+  live.draft={blocked:['new-block.example'],allowed:['new-allow.example']};
+  const command=jest.fn(async()=> 'review-token');
+  try{
+    render(<Provider live={live} app={{command} as unknown as AppStore}><ReviewScreen/></Provider>);
+    await waitFor(()=>expect(screen.getByRole('button',{name:localized('Confirm changes')})).toBeEnabled());
+    for(const [action,values,symbol,tone] of [
+      ['Added',['Cancel','new-block.example','new-allow.example'],'plus','green'],
+      ['Removed',['Retry','old-block.example','old-allow.example'],'minus','error'],
+    ] as const){
+      const rows=screen.getAllByLabelText(localized(action));
+      expect(rows.map(row=>row.props.accessibilityValue.text)).toEqual(values);
+      for(const [index,row] of rows.entries()){
+        expect(row.props.accessible).toBe(true);
+        expect(within(row).getByText(values[index]!)).toBeOnTheScreen();
+        const glyphs=within(row).UNSAFE_getAllByType(require('../specs/LavaDecorationNativeComponent').default).filter(node=>node.props.symbol===symbol);
+        expect(glyphs).toHaveLength(1);
+        expect(glyphs[0]!.props)
+          .toMatchObject({symbol,tone,accessible:false,accessibilityElementsHidden:true});
+      }
+    }
+  }finally{configurePresentation();}
+});
+
 test('domain review begins with its allowance warning and shows only the changes and confirmation',async()=>{
   mockStandaloneReview='owned-domain-review';
   // Retained navigation entries may still carry the removed scope metadata.
@@ -1223,6 +1262,7 @@ test.each([null,'data:image/png;base64,example'])('sharing retains setup-code co
     expect(shareOptions.unstable_headerLeftItems).toBeUndefined();
     expect(shareOptions.unstable_headerRightItems()).toHaveLength(1);
     const share=()=>[...mockSetOptions.mock.calls].reverse().find(([options])=>options.unstable_headerRightItems)![0].unstable_headerRightItems()[0];
+    expect(share()).toMatchObject({label:localized('Photo'),identifier:'lava.toolbar.labeled.photo',icon:{type:'sfSymbol',name:'square.and.arrow.up'}});
     expect(share().disabled).toBe(true);
     if(card){
       fireEvent(screen.getByTestId('share-card-qr-field',{includeHiddenElements:true}),'layout',{nativeEvent:{layout:{width:441,height:430}}});
@@ -1288,6 +1328,69 @@ test.each([false,true,undefined])('sharing keeps its revealed QR and copied stat
 });
 
 
+test('Privacy uses two export rows in one panel and excludes history unless full logs are selected',async()=>{
+  let finish!:(value:unknown)=>void;
+  const command=jest.fn(()=>new Promise(resolve=>{finish=resolve;}));
+  render(<Provider app={{command} as unknown as AppStore}><PrivacyScreen/></Provider>);
+  const diagnostic=()=>screen.getByRole('button',{name:'Export diagnostics'});
+  const all=()=>screen.getByRole('button',{name:'Export all logs'});
+  fireEvent.press(all());
+  expect(command).toHaveBeenCalledWith({type:'logs.export',domains:true});
+  expect(diagnostic()).toBeDisabled();expect(all()).toBeDisabled();
+  fireEvent.press(diagnostic());expect(command).toHaveBeenCalledTimes(1);
+  await act(async()=>finish(null));
+  fireEvent.press(diagnostic());expect(command).toHaveBeenLastCalledWith({type:'logs.export',domains:false});
+  await act(async()=>finish(null));
+});
+
+describe('Activity export dialog',()=>{
+let originalState:typeof AppState.currentState;
+beforeEach(()=>{originalState=AppState.currentState;Object.defineProperty(AppState,'currentState',{configurable:true,value:'active'});});
+afterEach(()=>{Object.defineProperty(AppState,'currentState',{configurable:true,value:originalState});});
+
+test.each(['logs','diagnostics',null])('Activity dispatches its native export dialog choice %s without exporting on cancel',async choice=>{
+  mockChooseActivityExport.mockResolvedValue(choice);
+  const command=jest.fn((input:AppCommand)=>Promise.resolve(input.type==='activity.query'?{allowed:12,blocked:3,uptime:'1m'}:null));
+  const app={command,subscribe:()=>()=>{},getInvalidation:()=>0} as unknown as AppStore;
+  render(<Provider app={app}><ActivityScreen/></Provider>);await act(async()=>{});
+  await act(async()=>toolbarAction('Export').onPress());
+  expect(mockChooseActivityExport).toHaveBeenCalledWith(true);
+  const exports=command.mock.calls.filter(([input])=>input.type==='logs.export');
+  expect(exports).toEqual(choice?[[{type:'logs.export',domains:choice==='logs'}]]:[]);
+  expect(command).not.toHaveBeenCalledWith(expect.objectContaining({type:'activity.card.query'}));
+});
+
+test('Activity shares the latest selected chart and accepted range after the dialog returns and native grant mounts',async()=>{
+  let choose!:(value:string)=>void;mockChooseActivityExport.mockImplementation(()=>new Promise(resolve=>{choose=resolve;}));
+  const command=jest.fn((input:AppCommand)=>Promise.resolve(input.type==='activity.card.query'?{
+    token:'activity-grant',payload:'https://apps.apple.com/app/lava-security/id6778022110',moduleCount:33,
+    chart:input.chart,period:input.period,startLabel:'September 1, 2026',endLabel:'September 13, 2026',dateLabel:'Sep 1–13, 2026',
+    allowed:12,blocked:3,uptime:'1m',buckets:[],
+  }:input.type==='activity.query'?{allowed:12,blocked:3,uptime:'1m'}:null));
+  const app={command,subscribe:()=>()=>{},getInvalidation:()=>0} as unknown as AppStore;
+  render(<Provider app={app}><ActivityScreen/></Provider>);await act(async()=>{});
+  await act(async()=>toolbarAction('Export').onPress());
+  // Calendar polling can update an accepted range while a native dialog is open.
+  fireEvent.press(screen.getByRole('button',{name:'Month'}));await act(async()=>{});
+  fireEvent.press(screen.getByTestId('activity.chart.next'));fireEvent.press(screen.getByTestId('activity.chart.next'));
+  await act(async()=>choose('chart'));
+  expect(command).toHaveBeenCalledWith({type:'activity.card.query',start:1,end:1000,hourly:false,chart:'rate',period:'month'});
+  await waitFor(()=>expect(command).toHaveBeenCalledWith({type:'activity.share',token:'activity-grant'}));
+  expect(command.mock.calls.filter(([input])=>input.type==='activity.share')).toHaveLength(1);
+});
+
+test('leaving Activity while its export dialog is open cancels its pending action',async()=>{
+  let choose!:(value:string)=>void;mockChooseActivityExport.mockImplementation(()=>new Promise(resolve=>{choose=resolve;}));
+  const command=jest.fn().mockResolvedValue({allowed:12,blocked:3,uptime:'1m'});
+  const app={command,subscribe:()=>()=>{},getInvalidation:()=>0} as unknown as AppStore;
+  const view=render(<Provider app={app}><ActivityScreen/></Provider>);await act(async()=>{});
+  act(()=>toolbarAction('Export').onPress());
+  mockFocused=false;view.rerender(<Provider app={app}><ActivityScreen/></Provider>);
+  await act(async()=>choose('logs'));
+  expect(command).not.toHaveBeenCalledWith(expect.objectContaining({type:'logs.export'}));
+});
+});
+
 test.each(['success','cancel','failure'])('standard log export excludes domain history and rejects rapid duplicate taps through %s',async outcome=>{
   let resolve!:(value:unknown)=>void;let reject!:(error:Error)=>void;
   const command=jest.fn(()=>new Promise((yes,no)=>{resolve=yes;reject=no;}));
@@ -1295,8 +1398,8 @@ test.each(['success','cancel','failure'])('standard log export excludes domain h
   try {
     render(<Provider app={{command} as unknown as AppStore}><PrivacyScreen/></Provider>);
     expect(screen.queryByRole('switch',{name:'Include domain history in this export'})).toBeNull();
-    const button=()=>screen.getByRole('button',{name:'Export local logs'});
-    const tap=screen.UNSAFE_getAllByType(ListRow).find(row=>row.props.title==='Export local logs')!.props.onPress;
+    const button=()=>screen.getByRole('button',{name:'Export diagnostics'});
+    const tap=screen.UNSAFE_getAllByType(ListRow).find(row=>row.props.title==='Export diagnostics')!.props.onPress;
     act(()=>{tap();tap();});
     expect(command).toHaveBeenCalledTimes(1);
     expect(command).toHaveBeenCalledWith({type:'logs.export',domains:false});
@@ -1314,10 +1417,117 @@ test.each(['success','cancel','failure'])('standard log export excludes domain h
 test('an already-presented native exporter keeps a remounted privacy screen disabled',()=>{
   const command=jest.fn();
   render(<Provider app={{command} as unknown as AppStore} live={{logExportBusy:true} as AppSnapshot}><PrivacyScreen/></Provider>);
-  const button=screen.getByRole('button',{name:'Export local logs'});
+  const button=screen.getByRole('button',{name:'Export diagnostics'});
   expect(button).toBeDisabled();
   expect(screen.queryByRole('switch',{name:'Include domain history in this export'})).toBeNull();
   fireEvent.press(button);expect(command).not.toHaveBeenCalled();
+});
+
+test('Activity groups Export and destructive Clear in one visible native toolbar panel',()=>{
+  render(<Provider example><ActivityScreen/></Provider>);
+  const items=toolbarItems();
+  expect(items.map((item:{label:string})=>item.label)).toEqual(['Export','Clear all logs']);
+  for(const item of items)expect(item).toMatchObject({type:'button',variant:'plain',sharesBackground:true,hidesSharedBackground:false});
+  expect(items[0]).toMatchObject({icon:{type:'sfSymbol',name:'square.and.arrow.up'},tintColor:colors.navigationForeground});
+  expect(items[1]).toMatchObject({icon:{type:'sfSymbol',name:'trash'},tintColor:colors.errorText});
+});
+
+test('Activity exports the same full local ZIP once and preserves its period through export failure',async()=>{
+  mockChooseActivityExport.mockResolvedValue('diagnostics');
+  let fail!:(error:Error)=>void;
+  const command=jest.fn((input:AppCommand)=>input.type==='logs.export'?new Promise((_yes,no)=>{fail=no;}):Promise.resolve({allowed:12,blocked:3,uptime:'1m'}));
+  const app={command,subscribe:()=>()=>{},getInvalidation:()=>0} as unknown as AppStore;
+  render(<Provider app={app}><ActivityScreen/></Provider>);
+  await act(async()=>{});
+  fireEvent.press(screen.getByRole('button',{name:'Month'}));await act(async()=>{});
+  const exportLogs=toolbarAction('Export').onPress;
+  await act(async()=>{exportLogs();exportLogs();});
+  expect(command.mock.calls.filter(([input])=>input.type==='logs.export')).toEqual([[{type:'logs.export',domains:false}]]);
+  expect(toolbarAction('Export').disabled).toBe(true);
+  await act(async()=>fail(new Error('Archive failed.')));
+  expect(screen.getByText('Couldn’t export local logs: Archive failed.')).toBeOnTheScreen();
+  expect(toolbarAction('Export').disabled).toBe(false);
+  expect(screen.getByRole('button',{name:'Month'}).props.accessibilityState.selected).toBe(true);
+});
+
+test('Activity honors an existing native exporter and reports its save failure',()=>{
+  const command=jest.fn().mockResolvedValue({allowed:0,blocked:0,uptime:'0m'});
+  const live={logExportBusy:true,logExportError:''} as AppSnapshot;
+  const app={command,subscribe:()=>()=>{},getInvalidation:()=>0} as unknown as AppStore;
+  const view=render(<Provider live={live} app={app}><ActivityScreen/></Provider>);
+  expect(toolbarAction('Export').disabled).toBe(true);
+  act(()=>toolbarAction('Export').onPress());
+  expect(command).not.toHaveBeenCalledWith(expect.objectContaining({type:'logs.export'}));
+  view.rerender(<Provider live={{...live,logExportBusy:false,logExportError:'Could not save local logs: Storage unavailable.'}} app={app}><ActivityScreen/></Provider>);
+  expect(screen.getByText('Could not save local logs: Storage unavailable.')).toBeOnTheScreen();
+});
+
+test.each([['Activity',ActivityScreen],['Privacy',PrivacyScreen]] as const)('%s reuses the clear-all confirmation and dispatches only after one destructive confirmation',async(_name,Surface)=>{
+  const contract={title:'Clear all logs?',message:'This removes saved filtering counts, domain history, network activity, and unearned Lava Guard progress from this device.',action:'Clear All Logs'};
+  let finish!:(value:unknown)=>void;
+  const command=jest.fn((input:AppCommand)=>input.type==='logs.clear'?new Promise(resolve=>{finish=resolve;}):Promise.resolve({allowed:12,blocked:3,uptime:'1m'}));
+  const app={command,subscribe:()=>()=>{},getInvalidation:()=>0} as unknown as AppStore;
+  const alert=jest.spyOn(Alert,'alert').mockImplementation(()=>{});
+  const announcement=jest.spyOn(AccessibilityInfo,'announceForAccessibility').mockImplementation(()=>{});
+  try {
+    render(<Provider live={{confirmations:{'Clear all logs':contract}} as unknown as AppSnapshot} app={app}><Surface/></Provider>);
+    if(Surface===PrivacyScreen)fireEvent.press(screen.getByRole('button',{name:localized('Delete Local Logs')}));
+    const open=()=>{if(Surface===ActivityScreen)toolbarAction('Clear all logs').onPress();else fireEvent.press(screen.getByText(localized('Clear all logs')));};
+    act(open);
+    expect(alert).toHaveBeenLastCalledWith(contract.title,contract.message,expect.any(Array),expect.any(Object));
+    expect(command).not.toHaveBeenCalledWith(expect.objectContaining({type:'logs.clear'}));
+    const cancel=alert.mock.calls.at(-1)![2]![0]!;
+    act(()=>cancel.onPress!());
+    expect(command).not.toHaveBeenCalledWith(expect.objectContaining({type:'logs.clear'}));
+    act(()=>{if(Surface===ActivityScreen)open();else fireEvent.press(screen.getByText('Clear all logs'));});
+    const confirm=alert.mock.calls.at(-1)![2]![1]!;
+    expect(confirm).toMatchObject({text:localized('Clear All Logs'),style:'destructive'});
+    act(()=>{confirm.onPress!();confirm.onPress!();});
+    expect(command.mock.calls.filter(([input])=>input.type==='logs.clear')).toEqual([[{type:'logs.clear',kind:'Clear all logs'}]]);
+    await act(async()=>finish('All logs cleared.'));
+    expect(announcement).toHaveBeenCalledWith('All logs cleared.');
+  }finally{alert.mockRestore();announcement.mockRestore();}
+});
+
+test.each(['unmounted','new read epoch'])('an Activity clear-all dialog cannot act after its owner is %s',async boundary=>{
+  let epoch=1;const command=jest.fn().mockResolvedValue({allowed:0,blocked:0,uptime:'0m'});
+  const app={command,subscribe:()=>()=>{},getInvalidation:()=>0,getReadEpoch:()=>epoch} as unknown as AppStore;
+  const alert=jest.spyOn(Alert,'alert').mockImplementation(()=>{});
+  try {
+    const view=render(<Provider live={{confirmations:{'Clear all logs':{title:'Clear all logs?',message:'Clear local logs.',action:'Clear All Logs'}}} as unknown as AppSnapshot} app={app}><ActivityScreen/></Provider>);
+    act(()=>toolbarAction('Clear all logs').onPress());
+    const confirm=alert.mock.calls.at(-1)![2]![1]!;
+    if(boundary==='unmounted')view.unmount();else ++epoch;
+    await act(async()=>confirm.onPress!());
+    expect(command).not.toHaveBeenCalledWith(expect.objectContaining({type:'logs.clear'}));
+  }finally{alert.mockRestore();}
+});
+
+test('Activity clear-all retires its saved counts and refreshes the same selected period through AppStore',async()=>{
+  Object.defineProperty(AppState,'currentState',{configurable:true,value:'active'});
+  let count=15;
+  let live={...editingSnapshot(),schema:1,fullApp:true,revision:1,activityDates:todayRange,
+    security:{unavailable:false,showBiometrics:false,canEnableBiometrics:false,biometricTitle:'',status:'',ownerRevision:'owner',displayClearRevision:'1'},
+    confirmations:{'Clear all logs':{title:'Clear all logs?',message:'Clear local logs.',action:'Clear All Logs'}}} as AppSnapshot;
+  const native={getSnapshot:jest.fn(async()=>JSON.stringify(live)),onSnapshot:()=>({remove(){}}),command:jest.fn(async(request:string)=>{
+    const input=JSON.parse(request) as AppCommand;
+    if(input.type==='activity.query')return JSON.stringify({result:{allowed:count,blocked:0,uptime:'1m'}});
+    if(input.type==='logs.clear'){count=0;live={...live,revision:2,security:{...live.security,displayClearRevision:'2'}};}
+    return JSON.stringify({snapshot:live,result:input.type==='logs.clear'?'All logs cleared.':null});
+  })} as unknown as ConstructorParameters<typeof RuntimeAppStore>[0];
+  const app=new RuntimeAppStore(native,live);const disconnect=app.connect();
+  const alert=jest.spyOn(Alert,'alert').mockImplementation(()=>{});
+  function Harness(){const state=useSyncExternalStore(app.subscribe,app.getSnapshot);return <Provider app={app} live={state.snapshot??undefined}><ActivityScreen/></Provider>;}
+  try {
+    render(<Harness/>);
+    await waitFor(()=>expect(screen.getByTestId('activity.total.inspect')).toHaveAccessibilityValue({text:'15'}));
+    fireEvent.press(screen.getByRole('button',{name:'Month'}));await act(async()=>{});
+    act(()=>toolbarAction('Clear all logs').onPress());
+    await act(async()=>alert.mock.calls.at(-1)![2]![1]!.onPress!());
+    await waitFor(()=>expect(screen.getByTestId('activity.total.inspect')).toHaveAccessibilityValue({text:'0'}));
+    expect(screen.getByRole('button',{name:'Month'}).props.accessibilityState.selected).toBe(true);
+    expect(screen.queryByText('15')).toBeNull();
+  }finally{disconnect();alert.mockRestore();}
 });
 test.each(['de','ja'])('Settings uses native source keys for its %s labels',locale=>{
   configurePresentation({locale,textScales:null});
@@ -1372,7 +1582,7 @@ test('filter review can retry a failed save and obtains a new token when the act
 test('Privacy reports a native Files save failure after the exporter closes',()=>{
   render(<Provider live={{logExportBusy:false,logExportError:'Could not save local logs: Storage unavailable.'} as AppSnapshot}><PrivacyScreen/></Provider>);
   expect(screen.getByText('Could not save local logs: Storage unavailable.')).toBeOnTheScreen();
-  expect(screen.getByRole('button',{name:'Export local logs'})).toBeEnabled();
+  expect(screen.getByRole('button',{name:'Export diagnostics'})).toBeEnabled();
 });
 
 test('domain-history actions retain native decision metadata and Copy dispatch',async()=>{
@@ -2119,17 +2329,65 @@ test('connection filter names stay verbatim in accessibility and Explore details
   }finally{configurePresentation();}
 });
 
+test.each([
+  ['phone',true,0],['filter',true,1],['vpn',true,1],['dns',false,1],['dns',true,2],
+  ['welcome',true,1],['playing',true,1],['paused',true,1],['finished',true,1],
+] as const)('Explore %s (DNS patch available=%p) separates its visible control rows',async(state,patchAvailable,count)=>{
+  const previousState=AppState.currentState;AppState.currentState='active';
+  try {
+    if(['phone','filter','vpn','dns'].includes(state))mockExploreParams={part:state};
+    const live={...dnsSnapshot(),connection:{dns:{usesWireGuard:false,primary:{name:'Quad9',detail:'',transport:'DoH'}},vpn:{eligible:true,enabled:false}},
+      dnsPatch:{available:patchAvailable,state:'disabled',busy:false}} satisfies AppSnapshot;
+    const app={command:jest.fn().mockResolvedValue(null)} as unknown as AppStore;
+    render(<Provider app={app} live={live}><ExploreScreen/></Provider>);
+    await act(async()=>{});
+    if(['playing','paused','finished'].includes(state)){
+      fireEvent.press(screen.getByTestId('explore.play'));
+      if(state!=='playing')fireEvent.press(screen.getByTestId('explore.transport.play'));
+      if(state==='finished'){
+        for(let step=0;step<20&&screen.queryByTestId('explore.next');step++)fireEvent.press(screen.getByTestId('explore.next'));
+        expect(screen.getByRole('button',{name:'Play again'})).toBeOnTheScreen();
+      }
+    }
+    const dividers=screen.getByTestId('explore.detail.panel').findAllByType(View)
+      .filter((view:{props:ViewProps})=>StyleSheet.flatten(view.props.style)?.height===StyleSheet.hairlineWidth);
+    expect(dividers).toHaveLength(count);
+  }finally{AppState.currentState=previousState;}
+});
+
+test('an optional Explore DNS row gets its own divider without replacing the existing settings link',async()=>{
+  mockExploreParams={part:'dns'};
+  const live={...dnsSnapshot(),dnsPatch:{available:false,state:'disabled',busy:false}} satisfies AppSnapshot;
+  const app={command:jest.fn().mockResolvedValue(null)} as unknown as AppStore;
+  const content=(available:boolean)=><Provider app={app} live={{...live,dnsPatch:{...live.dnsPatch,available}}}><ExploreScreen/></Provider>;
+  const view=render(content(false));await act(async()=>{});
+  const configure=screen.getByTestId('explore.configure');
+  const dividers=()=>screen.getByTestId('explore.detail.panel').findAllByType(View)
+    .filter((node:{props:ViewProps})=>StyleSheet.flatten(node.props.style)?.height===StyleSheet.hairlineWidth);
+  expect(dividers()).toHaveLength(1);expect(screen.queryByTestId('explore.dns-patch')).toBeNull();
+  view.rerender(content(true));
+  expect(dividers()).toHaveLength(2);expect(screen.getByTestId('explore.configure')).toBe(configure);
+  view.rerender(content(false));
+  expect(dividers()).toHaveLength(1);expect(screen.getByTestId('explore.configure')).toBe(configure);
+});
+
 test('DNS patch discovery moves from the DNS step to its action row while DNS is selected',async()=>{
-  const base=dnsSnapshot();
-  const live={...base,discoveries:{'ios27Patch.page':true},dnsPatch:{available:true,state:'disabled',busy:false}} satisfies AppSnapshot;
-  render(<Provider live={live}><ExploreScreen/></Provider>);
-  await act(async()=>{});
-  expect(screen.getByTestId('connection.dns.discovery-dot')).toBeOnTheScreen();
-  expect(screen.queryByTestId('explore.dns-patch.new')).toBeNull();
-  fireEvent.press(screen.getByTestId('connection.dns'));
-  expect(screen.queryByTestId('connection.dns.discovery-dot')).toBeNull();
-  expect(screen.getByTestId('explore.dns-patch')).toHaveProp('accessibilityHint','New');
-  expect(screen.getByRole('button',{name:'Open DNS settings'})).toBeOnTheScreen();
+  const previousState=AppState.currentState;AppState.currentState='active';
+  try {
+    const base=dnsSnapshot();
+    const live={...base,discoveries:{'ios27Patch.page':true},dnsPatch:{available:true,state:'disabled',busy:false}} satisfies AppSnapshot;
+    render(<Provider live={live}><ExploreScreen/></Provider>);
+    await act(async()=>{});
+    expect(screen.getByTestId('connection.dns.discovery-dot')).toBeOnTheScreen();
+    expect(screen.queryByTestId('explore.dns-patch.new')).toBeNull();
+    fireEvent.press(screen.getByTestId('connection.dns'));
+    expect(screen.queryByTestId('connection.dns.discovery-dot')).toBeNull();
+    expect(screen.getByTestId('explore.dns-patch')).toHaveProp('accessibilityHint','New');
+    expect(screen.getByTestId('explore.dns-patch.new',{includeHiddenElements:true})).toBeTruthy();
+    expect(screen.getByTestId('explore.dns-patch').findAllByProps({symbol:'chevron.right'})).toHaveLength(0);
+    expect(screen.getByTestId('explore.dns-patch.accessory').props.style).toEqual(screen.getByTestId('explore.configure.accessory').props.style);
+    expect(screen.getByRole('button',{name:'Open DNS settings'})).toBeOnTheScreen();
+  }finally{AppState.currentState=previousState;}
 });
 
 test.each(['allow','cancel','leave'])('Guard-side Explore gates DNS settings before navigation: %s',async outcome=>{
@@ -2564,6 +2822,22 @@ test('DNS swapped order is discarded by Cancel and a single row keeps Add',async
     expect(screen.queryByText('Swap order')).toBeNull();expect(screen.getByText('Add fallback DNS')).toBeOnTheScreen();
   }finally{alert.mockRestore();}
 });
+test.each(['key order','display metadata'])('DNS Cancel ignores a native refresh that changes only %s',change=>{
+  const alert=jest.spyOn(Alert,'alert').mockImplementation(()=>{});
+  const live=tierSnapshot();const command=jest.fn();const app={command} as unknown as AppStore;
+  try {
+    const view=render(<Provider live={live} app={app}><DNSScreen/></Provider>);
+    act(()=>toolbarAction('Edit').onPress());
+    const tiers=(live.dns.tiers??[]).map(tier=>change==='key order'
+      ?Object.fromEntries(Object.entries(tier).reverse()) as DNSChoice
+      :{...tier,metadata:'Updated native endpoint description'});
+    view.rerender(<Provider live={{...live,dns:{...live.dns,tiers}}} app={app}><DNSScreen/></Provider>);
+    act(()=>toolbarAction('Cancel editing','Left').onPress());
+    expect(alert).not.toHaveBeenCalled();
+    expect(toolbarItems().find((item:{label:string})=>item.label==='Edit')).toBeDefined();
+    expect(command).not.toHaveBeenCalled();
+  } finally {alert.mockRestore();}
+});
 test('DNS tier Save excludes same-frame replay and keeps the draft on rejection',async()=>{
   let reject!:(error:Error)=>void;const command=jest.fn(()=>new Promise((_,no)=>{reject=no;}));const alert=jest.spyOn(Alert,'alert').mockImplementation(()=>{});
   try {render(<Provider live={tierSnapshot()} app={{command} as unknown as AppStore}><DNSScreen/></Provider>);
@@ -2965,12 +3239,23 @@ test('an incompatible VPN swap reports the native refusal and leaves the visible
     expect(command).not.toHaveBeenCalledWith(expect.objectContaining({type:'vpn.commit'}));
   }finally{alert.mockRestore();}
 });
-test('full-tunnel presence disables fallback and replaces its deeplink with an explanation',()=>{
-  render(<Provider live={vpnSnapshot({canChangeFallback:false})} app={{command:vpnCommands()} as unknown as AppStore}><VPNChainingScreen/></Provider>);
+test.each([false,true])('full-tunnel fallback keeps saved preference %s editable with the same helper and DNS deeplink',async fallback=>{
+  mockGetState.mockReturnValue({index:0,routes:[{name:'VPNChaining',key:'vpn'}]});
+  const command=vpnCommands();const app={command} as unknown as AppStore;
+  const live=vpnSnapshot({fallback,canChangeFallback:false,enabled:true,rows:[{name:'Entry',mode:'Full tunnel'}]});
+  const view=render(<Provider live={live} app={app}><VPNChainingScreen/></Provider>);
   const toggle=screen.UNSAFE_getAllByType(Toggle).find(row=>row.props.title==='Use Lava DNS settings as fallback')!;
-  expect(toggle.props.disabled).toBe(true);
-  expect(screen.getByText('DNS fallback is unavailable with an active full-tunnel VPN.')).toBeOnTheScreen();
-  expect(screen.queryByText('Review DNS settings')).toBeNull();
+  expect(toggle.props.disabled).toBe(false);expect(toggle.props.value).toBe(fallback);
+  const note='Uses your DNS settings outside the VPN when needed. Full-tunnel VPNs don’t use fallback.';
+  expect(screen.getByText(note)).toBeOnTheScreen();
+  await act(async()=>toggle.props.onChange(!fallback));
+  expect(command).toHaveBeenCalledWith({type:'vpn.toggle',key:'fallback',value:!fallback});
+  await act(async()=>fireEvent.press(screen.getByText('Review DNS settings')));
+  expect(mockNavigate).toHaveBeenCalledWith('DNS');
+  view.rerender(<Provider live={{...live,vpn:{...live.vpn!,canChangeFallback:true,rows:[{name:'Entry',mode:'Split tunnel'}]}}} app={app}><VPNChainingScreen/></Provider>);
+  expect(screen.UNSAFE_getAllByType(Toggle).find(row=>row.props.testID==='vpn.fallback-toggle')!.props.value).toBe(fallback);
+  expect(screen.getByText(note)).toBeOnTheScreen();
+  expect(screen.getByText('Review DNS settings')).toBeOnTheScreen();
 });
 test.each(['setup','fallback'] as const)('VPN %s toggle persists independently without entering WireGuard editing',async key=>{
   const command=vpnCommands();
@@ -3078,6 +3363,19 @@ test('cancel confirms staged row removal and leaves saved settings active',async
     expect(screen.getByText('Entry')).toBeOnTheScreen();
     expect(command.mock.calls.map(([input])=>input.type)).toEqual(['vpn.begin','vpn.remove','vpn.cancel']);
   }finally{alert.mockRestore();}
+});
+test('DNS follows projected full-tunnel availability and restores its editor when available',async()=>{
+  const live=vpnSnapshot({enabled:true,canChangeFallback:false});
+  live.dns={...live.dns,editable:false,unavailableDetail:'Full-tunnel VPNs use DNS from their WireGuard configuration.'};
+  const app={command:vpnCommands()} as unknown as AppStore;
+  const view=render(<Provider live={live} app={app}><DNSScreen/></Provider>);
+  expect(screen.getByText('Full-tunnel VPNs use DNS from their WireGuard configuration.')).toBeOnTheScreen();
+  expect(screen.queryByText('DNS order')).toBeNull();
+  await act(async()=>fireEvent.press(screen.getByText('Review VPN chaining')));
+  expect(mockNavigate).toHaveBeenCalledWith('VPNChaining');
+  view.rerender(<Provider live={{...live,dns:{...live.dns,editable:true}}} app={app}><DNSScreen/></Provider>);
+  expect(screen.getByText('DNS order')).toBeOnTheScreen();
+  expect(screen.queryByText('Full-tunnel VPNs use DNS from their WireGuard configuration.')).toBeNull();
 });
 test('VPN OFF consumes the authoritative DNS snapshot while setup stays ON',async()=>{
   const initial=vpnSnapshot({enabled:true,rows:[{name:'Entry',mode:'Full tunnel'}],canChangeFallback:false});initial.dns.editable=false;

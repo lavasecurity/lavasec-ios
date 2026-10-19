@@ -1,12 +1,26 @@
-# Full app contract audit
+# Historical full app contract audit
 
-Status: source audit and local RN regression checks pass. Native package tests and the full RN app/extension simulator compile passed before the final review follow-up; CI requalifies that follow-up, simulator journeys, PR review, and signed export before release. No new RN QA tag has been cut.
+This document preserves an earlier migration inventory and its corrections. Its
+native screen names and descriptions of reused SwiftUI forms record the reviewed
+baseline; they do not declare current app presentation ownership or qualify the
+latest source. Use [RN application and retained native components](../docs/architecture/rn-only-app.md)
+and the [current integration inventory](../docs/design-revamp/native-integration-inventory.md)
+for the implemented RN screen/native-service boundary. Current-head validation
+receipts and device acceptance remain separate release requirements.
 
-The SwiftUI app is the behavioral reference. Every route is checked for displayed state, available actions, authentication, confirmation, mutation target, cancellation, failure handling, persistence, and lifecycle. Calling the same controller method alone does not establish parity.
+The historical SwiftUI app is the behavioral reference for this audit. Every route is checked for displayed state, available actions, authentication, confirmation, mutation target, cancellation, failure handling, persistence, and lifecycle. Calling the same controller method alone does not establish parity.
 
 Reference: `native-ui-reference-2026-09-08` (`ab431736f50afc3dc697a7f390aadc0fa50610fb`). That historical tag retains the original standalone SwiftUI app. Current source
 uses `LavaSec.xcodeproj` only as the native target manifest; build the application
-through the RN workspace. Shared SwiftUI forms below are deliberately reused native components, including their validation and cancellation.
+through the RN workspace. Native forms described below may since have been
+replaced by RN composition while preserving their native validation,
+transaction and cancellation owners.
+
+The inventory records the earlier migration audit. Retired standalone SwiftUI screens,
+including onboarding and Sudoku, remain available in the reference tag rather
+than the current app target. Current Sudoku interaction and layout coverage runs
+against the RN screen and full-app workspace; native puzzle, game-state and
+persistence tests continue to cover their service owners.
 
 ## Inventory and evidence
 
@@ -24,7 +38,7 @@ Paths below are relative to `LavaSecApp/` and `ReactNative/`. “Reviewed” mea
 | Blocklist picker and custom lists | BlocklistPickerView, BringYourOwnListView | Reviewed: temporary checkbox selection, localized search, native budget summary/tier limits, pending selections, custom-source mutation and cancellation retained. Native custom-list entry reused; catalog and cancellation regressions. |
 | Blocked domains and exceptions | native domain sheets, FilterDraftController | Fixed: Free-at-cap Upgrade and Plus-at-cap disabled Add, native rejection title/message, raw input validated by native editor, one pending add, independent remove/Undo. Quota, rejection, cancellation, rapid mutation and identity tests. |
 | Review/apply/failure/retry | FilterReviewFlowView, preparation controller | Fixed: Save determines whether review is needed; native canConfirm/validation and three diff groups. Native preparation owns retry/keep current/back to edit. Exact reviewed identity/draft/baseline checked at apply; no forced duplicate fresh-auth prompt after Save. Tests cover stale tokens, retries, origin, cancellation, and preparation-before-dismiss ordering. |
-| Share/import | ShareFilterPicker, sharing service, ImportFiltersFlow | Reviewed: empty/oversize gating, verbatim names, native LF1 code/QR, copy and system share card. Native import/scanner retains deferred fresh-auth and replacement review. Share regressions and native import security journeys. |
+| Share/import | ShareFilterPicker, sharing service, shared RN ImportFlow + native import session | Reviewed: empty/oversize gating, verbatim names, native LF1 code/QR, copy and system share card. Native import session retains deferred fresh-auth, reviewed target identity, consent and commit; RN owns every import stage and scanner recovery. Share regressions and native import security journeys. |
 | Activity/date ranges/review dwell | DiagnosticsView, DiagnosticsDateControls | Reviewed: native date sheet and cancellation, inclusive date ranges, native summary and refresh sampling, token-owned foreground dwell. No seven-day UI switch. Activity range/lifecycle tests. |
 | Top Domains and Domain History | native diagnostics pages/controllers | Fixed: native long-press Copy/Block/Allow menu, decision metadata and validation, owned standalone review; history page resets on native retained-event count changes. Native sampling precedes reads. Tests cover empty/filter/paging/late stage/cancel/Copy. |
 | Network log | DiagnosticsNetworkActivity, LocalLogPagination | Fixed: 30 initial rows and 30 per page; reset on entry-count change, retain on unchanged-count refresh; native clear effects/action, activity auth, durable success-only announcement. Paging and clear tests. |
@@ -40,7 +54,7 @@ Paths below are relative to `LavaSecApp/` and `ReactNative/`. “Reviewed” mea
 | Notifications/Live Activities/pause | CustomizationController and native preferences | Reviewed: original notification categories, platform availability, native 1–30 minute stepper, matching-system text-size seeding and OS settings link. Non-preset pause persistence journey and component test. |
 | Feedback/attachments | BugReportSheetView, reports controller | Reviewed: original native report/topic/attachment/send flow; full app routes and rage shake reach this flow, with Settings underneath. Fixture Feedback is not registered in the full app; native notification/deep-link redirects dismiss the bridged feedback sheet, including direct Settings entry. Real delivery requires a deliberately submitted report. |
 | Legal/notices | LegalVersionSettingsView, BundledLibraryNoticesView | Reviewed: native legal links and bundled notices, including generated RN dependency notices; native licenses flow reused. Bundle/license policy checks. |
-| Sudoku | SudokuEasterEggView, native Sudoku persistence | Reviewed: five-tap entry, native generation, values/notes persistence only when progress logs allow it, drag/notes/assist/clear/new-puzzle behavior and native haptics. Board, model, persistence, privacy and busy-action tests. |
+| Sudoku | `review/SudokuScreen.tsx`, `review/sudoku-scaffold.tsx`, native Sudoku generation/persistence | Reviewed: five-tap entry, native generation, values/notes persistence only when progress logs allow it, drag/notes/assist/clear/new-puzzle behavior and native haptics. Board, model, persistence, privacy and busy-action tests. |
 
 ## Corrections from this audit
 

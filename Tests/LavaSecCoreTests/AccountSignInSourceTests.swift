@@ -117,55 +117,20 @@ final class AccountSignInSourceTests: XCTestCase {
     }
 
     func testAccountSheetShowsProviderEmailRows() throws {
-        let settingsViewSource = try readSource(.accountBackupSettingsView)
-        // The published connections live on AccountController (Phase D3 peel); the
-        // sheet reads them off the `account` environment object.
-        let controllerSource = try readSource(.accountController)
-        let settingsSheetBlock = try sourceBlock(
-            in: settingsViewSource,
-            startingAt: "struct AccountSheet: View",
-            endingBefore: "private struct AccountConnectionRow: View"
-        )
-
-        XCTAssertTrue(controllerSource.contains("var accountConnections: [AccountAuthConnection]"))
-        XCTAssertTrue(settingsSheetBlock.contains("let accountConnections = account.accountConnections"))
-        XCTAssertTrue(settingsSheetBlock.contains("AccountConnectionRow(connection: connection)"))
-        XCTAssertTrue(settingsViewSource.contains("Text(connection.email ??"))
-        XCTAssertTrue(settingsViewSource.contains("Image(systemName: \"apple.logo\")"))
-        XCTAssertTrue(settingsViewSource.contains("GoogleSignInIcon()"))
-        XCTAssertFalse(settingsSheetBlock.contains("LavaDetailRow("))
-        XCTAssertTrue(settingsSheetBlock.contains("LavaSheetScaffold(spacing: 14)"))
-        XCTAssertFalse(settingsSheetBlock.contains("scrolls: false"))
-        XCTAssertTrue(settingsSheetBlock.contains(".presentationDetents([.medium, .large])"))
-        XCTAssertFalse(settingsSheetBlock.contains("accountSheetHeight"))
-        let host = try readSource(.reactNativeAppHost)
-        XCTAssertTrue(host.contains("sheet.detents = [.medium(), .large()]"))
-        XCTAssertFalse(host.contains("AccountSheet.height(connectionCount:"))
+        let source = try readSource(.reactNativeAccountBackupFlow)
+        XCTAssertTrue(source.contains("s.connections.map"))
+        XCTAssertTrue(source.contains("row.provider==='apple'?'apple.logo':'google.signin'"))
+        XCTAssertTrue(try readSource(.reactNativeAppAccountBackup).contains("bridge.model.account.accountConnections.map"))
+        XCTAssertTrue(try readSource(.reactNativeAppHost).contains("sheet.detents = [.medium(), .large()]"))
     }
 
     func testAccountSheetProviderRowsMatchActionTypographyTruncateLongEmailsAndSignOutIsNeutral() throws {
-        let settingsViewSource = try readSource(.accountBackupSettingsView)
-        let settingsSheetBlock = try sourceBlock(
-            in: settingsViewSource,
-            startingAt: "struct AccountSheet: View",
-            endingBefore: "private struct AccountConnectionRow: View"
-        )
-        let settingsConnectionRowBlock = try sourceBlock(
-            in: settingsViewSource,
-            startingAt: "private struct AccountConnectionRow: View",
-            endingBefore: "private struct GoogleSignInIcon: View"
-        )
-
-        XCTAssertTrue(settingsConnectionRowBlock.contains(".font(LavaTypography.rowTitle)"))
-        XCTAssertTrue(settingsConnectionRowBlock.contains(".lineLimit(1)"))
-        XCTAssertTrue(settingsConnectionRowBlock.contains(".truncationMode(.middle)"))
-        XCTAssertFalse(settingsConnectionRowBlock.contains(".fixedSize(horizontal: false, vertical: true)"))
-        XCTAssertFalse(settingsConnectionRowBlock.contains(".minimumScaleFactor(0.82)"))
-
-        XCTAssertTrue(settingsSheetBlock.contains("performAppSettingsMutation(reason: \"Edit Account settings\")"))
-        XCTAssertTrue(settingsSheetBlock.contains("account.signOutAccount()"))
-        XCTAssertTrue(settingsSheetBlock.contains("SettingsActionRow(title: \"Sign out of all accounts\", iconTint: LavaStyle.secondaryText)"))
-        XCTAssertFalse(settingsSheetBlock.contains("SettingsActionRow(title: \"Sign out of all accounts\", iconTint: .red, titleTint: .red)"))
+        let source = try readSource(.reactNativeAccountBackupFlow)
+        XCTAssertTrue(source.contains("numberOfLines={1} ellipsizeMode=\"middle\""))
+        XCTAssertTrue(source.contains("fontSize:foundation.type.row.fontSize,fontWeight:foundation.type.row.fontWeight"))
+        XCTAssertTrue(source.contains("Sign out of all accounts"))
+        XCTAssertTrue(source.contains("tone=\"secondary\""))
+        XCTAssertTrue(try readSource(.reactNativeAppAccountBackup).contains("model.account.signOutAccount()"))
     }
 
     func testStartingOneProviderSignInPreservesExistingConnectedProviders() throws {
@@ -283,24 +248,23 @@ final class AccountSignInSourceTests: XCTestCase {
     }
 
     func testAccountDeletionIsExposedFromTheAccountSheet() throws {
-        let settingsViewSource = try readSource(.accountBackupSettingsView)
         let appViewModelSource = try readAppViewModelSource()
-        // The deleteAccount flow lives on AccountController since the Phase D3 peel.
         let accountControllerSource = try readSource(.accountController)
         let serviceSource = try readSource(.accountAuthService)
-        let settingsSheetBlock = try sourceBlock(
-            in: settingsViewSource,
-            startingAt: "struct AccountSheet: View",
-            endingBefore: "private struct AccountConnectionRow: View"
+        let flow = try readSource(.reactNativeAccountBackupFlow)
+        let adapter = try readSource(.reactNativeAccountBackupAdapter)
+        XCTAssertTrue(flow.contains("Sign out of all accounts"))
+        XCTAssertTrue(flow.contains("Delete my Lava account"))
+        XCTAssertTrue(adapter.contains("useNativeFlowAlert(app,{kind:'foreground',id})"))
+        let confirmation = try sourceBlock(
+            in: adapter,
+            startingAt: "const confirmDeletion=()=>{",
+            endingBefore: "const credentials="
         )
-
-        XCTAssertTrue(settingsViewSource.contains("Sign out of all accounts"))
-        XCTAssertTrue(settingsViewSource.contains("Delete my Lava account"))
-        XCTAssertTrue(settingsViewSource.contains("deleteAccount()"))
-        XCTAssertTrue(settingsSheetBlock.contains(".alert("))
-        XCTAssertTrue(settingsSheetBlock.contains("Button(\"Cancel\", role: .cancel)"))
-        XCTAssertTrue(settingsSheetBlock.contains("Button(\"Delete\", role: .destructive)"))
-        XCTAssertFalse(settingsSheetBlock.contains(".confirmationDialog("))
+        XCTAssertTrue(confirmation.contains("showAlert('Delete your Lava account?'"))
+        XCTAssertTrue(confirmation.contains("{text:'Cancel',style:'cancel'}"))
+        XCTAssertTrue(confirmation.contains("{text:'Delete',style:'destructive'"))
+        XCTAssertTrue(try readSource(.reactNativeAppAccountBackup).contains("await model.account.deleteAccount()"))
         XCTAssertTrue(accountControllerSource.contains("@Published private(set) var isAccountDeletionInProgress"))
         XCTAssertTrue(accountControllerSource.contains("func deleteAccount() async -> Bool"))
         // Account deletion still tears down the device-local backup unlock material — the
@@ -360,7 +324,7 @@ final class AccountSignInSourceTests: XCTestCase {
             endingBefore: "struct LavaPlainCard<Content: View>: View")
         XCTAssertTrue(style.contains("@Environment(\\.isEnabled) private var isEnabled"))
         XCTAssertTrue(style.contains(".opacity(isEnabled && configuration.isPressed ? 0.6 : 1)"))
-        XCTAssertTrue((try readSource(.blocklistPickerView)).contains(".buttonStyle(LavaCondensedRowButtonStyle())"))
+        XCTAssertTrue((try readSource(.reactNativeCustomEntryScreen)).contains("<ListRow title=\"Upgrade\""))
     }
 
     func testSignedOutBackupSetupRemainsUnavailable() throws {

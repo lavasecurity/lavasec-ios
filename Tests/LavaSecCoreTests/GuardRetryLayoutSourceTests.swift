@@ -255,25 +255,12 @@ final class GuardRetryLayoutSourceTests: XCTestCase {
 
     }
 
-    func testActivityLocalLogSubpagesStartWithLargeNavigationTitles() throws {
-        let activitySource = try readSource(.diagnosticsLocalLogSupport)
-        let chromeBlock = try sourceBlock(
-            in: activitySource,
-            startingAt: "private struct LocalLogSubpageChrome",
-            endingBefore: "extension View"
-        )
-
-        XCTAssertTrue(chromeBlock.contains(".navigationTitle(title.lavaLocalized)"))
-        XCTAssertTrue(chromeBlock.contains(".navigationBarTitleDisplayMode(.large)"))
-        XCTAssertFalse(chromeBlock.contains(".navigationBarTitleDisplayMode(.inline)"))
-    }
-
     func testReactSettingsOwnsItsRootChrome() throws {
-        let rootViewSource = try readSource(.lavaScaffold)
+        let navigationSource = try readSource(.reactNativeReviewNavigation)
         let settingsSource = try readSource(.reactNativeSettingsScreens)
 
-        XCTAssertTrue(rootViewSource.contains(".navigationTitle(title.lavaLocalized)"))
-        XCTAssertTrue(rootViewSource.contains(".navigationBarTitleDisplayMode(.large)"))
+        XCTAssertTrue(navigationSource.contains("function SettingsStack() { return <RootStack root=\"Settings\" />; }"))
+        XCTAssertTrue(navigationSource.contains("headerLargeTitleEnabled: true"))
         XCTAssertTrue(settingsSource.contains("export function SettingsScreen()"))
         XCTAssertTrue(settingsSource.contains("return <Screen wide>"))
     }

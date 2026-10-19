@@ -7,7 +7,7 @@ import {ActivityFlowBar} from '../review/detail-scaffold';
 import {ActivityCharts} from '../review/activity-scaffold';
 import {activityRate,type ActivityBucket} from '../review/activity-model';
 jest.mock('react-native-safe-area-context',()=>({SafeAreaProvider:require('react-native').View,SafeAreaInsetsContext:require('react').createContext(null)}));
-jest.mock('../app/text-metrics',()=>({useTextScale:()=>1}));
+jest.mock('../app/text-metrics',()=>({...jest.requireActual('../app/text-metrics'),useTextScale:()=>1}));
 jest.mock('@react-navigation/native',()=>({useNavigation:()=>({}),useIsFocused:()=>true}));
 jest.mock('react-native/Libraries/Utilities/useColorScheme',()=>({__esModule:true,default:jest.fn(()=> 'light')}));
 jest.mock('../specs/LavaDecorationNativeComponent',()=>({__esModule:true,default:require('react-native').View}));
@@ -213,6 +213,7 @@ test.each(['light','dark'] as const)('rate connections stay below all 5pt dots a
     expect(point.width).toBe(5);expect(point.height).toBe(5);
     expect(point.left+point.width/2).toBe((index+0.5)*10);
     expect(point.top).toBeGreaterThanOrEqual(0);expect(point.top+point.height).toBeLessThanOrEqual(baseline);
+    if(data[index]!.blocked===0)expect(point.top+point.height).toBe(baseline);
   }
   for(const index of [1,2,3,6]){
     const line=StyleSheet.flatten(screen.getByTestId(`activity.line.${index}`).props.style);

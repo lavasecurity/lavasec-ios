@@ -1,0 +1,5 @@
+export type QARow={id:string;title:string;subtitle:string;icon?:string;disabled?:boolean;destructive?:boolean};
+export type QADetail={id:string;revision?:number;kind:'result'|'suite'|'check';title:string;message?:string;name?:string;count?:string;rows?:QARow[];steps?:string[];expected?:string;prepared?:boolean;verified?:boolean;configurationMatches?:boolean;evidence?:string;result?:string;canRecord?:boolean;canBlock?:boolean;canBack?:boolean;parent?:QADetail};
+export type QAState={id:string;search:string;sections:{title:string;rows:QARow[]}[];formsVisible:boolean;hasConfiguration:boolean;staging:boolean;probeSuffix:string;canaryIP:string;hasResult:boolean;detail?:QADetail};
+export type QAAction={action:'enter'|'leave'|'close'|'search'|'row'|'result'|'detail.close'|'detail.back'|'scenario'|'prepare'|'verified'|'evidence'|'record'|'hosted'|'suffix'|'probes.apply'|'canaryIP'|'canary.arm'|'canary.disarm'|'stage';value?:string|boolean;row?:string};
+export type QACommand={type:'qa.command';id:string;detail?:string}&QAAction;

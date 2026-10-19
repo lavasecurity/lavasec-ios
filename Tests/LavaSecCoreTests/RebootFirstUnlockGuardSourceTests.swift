@@ -488,23 +488,13 @@ final class RebootFirstUnlockGuardSourceTests: XCTestCase {
     // MARK: - Onboarding completion coalesces its persists so the deferred marker clear isn't raced
 
     func testOnboardingCompletionCoalescesToASingleMarkerClearingPersist() throws {
-        // The onboarding reseed's deferred durable-marker clear (see the test above) is only safe if
-        // NO sibling persist lands the seeded pair first. OnboardingFlowView.go(to: .done) applies
-        // the leaving step's surfaced choice AND seeds the recommended defaults in the same
-        // transition, so the leaving choice must be folded into the reseed's single persist —
-        // otherwise its own fire-and-forget persist could land the seeded pair while the durable
-        // marker is still present, and a kill before the deferred clear relaunches the onboarded
-        // defaults as a suppressed reseed (Codex P2 on #386).
-        let flow = try readSource(.onboardingFlowView)
-        let goBlock = try sourceBlock(
-            in: flow,
-            startingAt: "private func go(to nextPage: OnboardingPage) {",
-            endingBefore: "pageHistory.append(page)"
-        )
-        XCTAssertTrue(goBlock.contains("applyCurrentStepChoiceIfNeeded(persistImmediately: nextPage != .done)"),
-                      "go(to: .done) must fold the leaving choice into the reseed persist, not fire its own.")
-        XCTAssertTrue(goBlock.contains("if !isMock && nextPage == .done {"),
-                      "The .done transition must still seed the recommended defaults (the reseed persist the fold targets).")
+        // The leaving setup choice joins the defaults reseed's single persist.
+        // A sibling fire-and-forget write could publish the seeded pair before
+        // its deferred durable-marker clear, reviving a suppressed reseed on kill.
+        let flow = try readSource(.reactNativeAppOnboarding)
+        let navigate = try sourceBlock(in: flow, startingAt: "func navigate(to page:", endingBefore: "state = nextState")
+        XCTAssertTrue(navigate.contains("applyCurrentChoice(persistImmediately: page != .done)"))
+        XCTAssertTrue(navigate.contains("if !mock && page == .done { bridge.model.applyOnboardingRecommendedDefaults(protectionLevel: state.protectionLevel) }"))
 
         // Both surfaced-choice appliers MUTATE config unconditionally but gate their OWN persist on
         // the flag, so the .done fold suppresses the sibling persist while keeping the mutation.

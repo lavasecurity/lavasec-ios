@@ -14,7 +14,6 @@ const mockNavigation={goBack:mockGoBack,setOptions:mockSetOptions,getState:()=>m
 jest.mock('@react-navigation/native',()=>({useIsFocused:()=>mockFocused,useRoute:()=>({key:mockRouteKey}),useNavigation:()=>mockNavigation,usePreventRemove:jest.fn()}));
 jest.mock('react-native-safe-area-context',()=>require('react-native-safe-area-context/jest/mock').default);
 jest.mock('../specs/NativeLavaReview',()=>({__esModule:true,default:{getGuardAccents:()=>JSON.stringify({original:{light:'#BF4000',dark:'#FF8855'}})}}));
-jest.mock('../specs/LavaNativePageNativeComponent',()=>({__esModule:true,default:require('react-native').View}));
 jest.mock('../specs/LavaDecorationNativeComponent',()=>({__esModule:true,default:require('react-native').View}));
 jest.mock('../specs/LavaSliderNativeComponent',()=>({__esModule:true,default:require('react-native').View}));
 

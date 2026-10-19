@@ -4,7 +4,6 @@ final class LavaSurfaceSourceTests: XCTestCase {
     func testUnusedDesignScaffoldsStayRemoved() throws {
         XCTAssertFalse(try readSource(.lavaScaffold).contains("struct LavaTabScreenContent"))
         XCTAssertFalse(try readSource(.lavaComponents).contains("struct LavaMetricPill"))
-        XCTAssertFalse(try readSource(.lavaIcon).contains("struct LavaIcon: View"))
     }
 
     func testSharedSurfaceScaffoldDefinesCardPanelAndSelectionTokens() throws {
@@ -37,7 +36,7 @@ final class LavaSurfaceSourceTests: XCTestCase {
         let plainCardBlock = try sourceBlock(
             in: rootSource,
             startingAt: "struct LavaPlainCard<Content: View>: View",
-            endingBefore: "struct LavaSetupStepLayout<Content: View>: View"
+            endingBefore: "struct LavaSetupSection<Actions: View>: View"
         )
         let listSource = try readSource(.lavaCondensedList)
         let condensedListBlock = try sourceBlock(
@@ -52,27 +51,6 @@ final class LavaSurfaceSourceTests: XCTestCase {
         XCTAssertFalse(plainCardBlock.contains("secondarySystemGroupedBackground"))
         XCTAssertFalse(condensedListBlock.contains("secondarySystemGroupedBackground"))
         XCTAssertFalse(condensedListBlock.contains("cornerRadius: 18"))
-    }
-
-    func testSelectionControlsUseSelectionSurfaceToken() throws {
-        let settingsSource = try readSource(.bugReportSettingsView)
-        let stepProgressBlock = try sourceBlock(
-            in: settingsSource,
-            startingAt: "private struct BugReportStepProgressView: View",
-            endingBefore: "private struct BugReportPreviewSectionCard: View"
-        )
-
-        let selectionOwner = try sourceBlock(
-            in: try readSource(.lavaComponents),
-            startingAt: "struct LavaStepNavigation<Step: Identifiable>: View",
-            endingBefore: "struct LavaDiagnosticValueRow: View"
-        )
-
-        XCTAssertTrue(stepProgressBlock.contains("LavaStepNavigation("))
-        XCTAssertTrue(stepProgressBlock.contains("isSelected: { $0 == currentStep }"))
-        XCTAssertTrue(selectionOwner.contains(".lavaSurface(.selection(isSelected: isSelected(step)))"))
-        XCTAssertFalse(stepProgressBlock.contains("secondarySystemGroupedBackground"))
-        XCTAssertFalse(selectionOwner.contains("secondarySystemGroupedBackground"))
     }
 
     func testSearchFieldsUsePanelSurfaceToken() throws {

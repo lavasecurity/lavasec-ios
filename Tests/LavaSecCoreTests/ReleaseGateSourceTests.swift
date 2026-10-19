@@ -177,7 +177,7 @@ final class ReleaseGateSourceTests: XCTestCase {
     }
 
     func testPhoneQASurfacesAreCompileGatedOutOfRelease() throws {
-        let adminQA = try readSource(.adminQAView)
+        let adminQA = try readSource(.reactNativeAppQA)
         let settings = try readSource(.settingsView)
         let root = try readSource(.rootView)
         let viewModel = try readAppViewModelSource()
@@ -185,14 +185,10 @@ final class ReleaseGateSourceTests: XCTestCase {
         let diagnosticsController = try readSource(.diagnosticsController)
         let rageShakeQA = try readSource(.rageShakeQA)
 
-        XCTAssertTrue(
-            adminQA.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("#if DEBUG || LAVA_QA_TOOLS"),
-            "Device QA views should not be compiled into Release."
-        )
-        XCTAssertTrue(
-            adminQA.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("#endif"),
-            "The Admin QA file should close its Release compile gate explicitly."
-        )
+        let qaOwner = try sourceBlock(in: adminQA, startingAt: "#if DEBUG || LAVA_QA_TOOLS", endingBefore: "extension LavaAppBridge")
+        XCTAssertTrue(qaOwner.contains("final class LavaQASession"))
+        XCTAssertTrue(qaOwner.contains("final class LavaQAConfigurationContent"))
+        XCTAssertTrue(adminQA.contains("throw CommandError(\"Unknown native flow.\")"))
 
         // Device QA stays gated; VPN chaining is a shipping settings destination.
         XCTAssertTrue(settings.contains("""
@@ -207,16 +203,27 @@ final class ReleaseGateSourceTests: XCTestCase {
         #endif
         """))
         XCTAssertTrue(try readSource(.reactNativeSettingsScreens).contains("live?.qaTools&&<Row intent=\"page\" icon=\"hammer\" title=\"Device QA\""))
-        XCTAssertTrue(settings.contains("""
-        #if DEBUG || LAVA_QA_TOOLS
-        struct PhoneQASettingsView: View {
-        """))
 
-        XCTAssertTrue(root.contains("""
-        #if DEBUG || LAVA_QA_TOOLS
-                    case .phoneQA:
-        """))
-        XCTAssertTrue((try readSource(.reactNativeAppFlows)).contains("#if DEBUG || LAVA_QA_TOOLS"))
+        let rageShakeForwarding = try sourceBlock(in: root,
+            startingAt: "private func forwardReactRageShake()",
+            endingBefore: "private func forwardReactNavigation()")
+        let settingsForwarding = try sourceBlock(in: root,
+            startingAt: "private func forwardReactNavigation()",
+            endingBefore: "private func openSettingsRoute(")
+        for (forwarding, destination) in [
+            (rageShakeForwarding, #"case .phoneQA: LavaAppBridge.shared.flow = LavaAppNativeFlow(name: "phoneQASheet""#),
+            (settingsForwarding, #"case .phoneQA: screen = "phoneQA""#)
+        ] {
+            let qaGate = try sourceBlock(in: forwarding,
+                startingAt: "#if DEBUG || LAVA_QA_TOOLS", endingBefore: "#endif")
+            XCTAssertTrue(qaGate.contains(destination))
+            XCTAssertFalse(qaGate.contains("#else"))
+            XCTAssertEqual(forwarding.components(separatedBy: "case .phoneQA:").count - 1, 1,
+                           "Each QA destination must occur only inside its own compile gate.")
+        }
+        let qaCommand = try sourceBlock(in: adminQA, startingAt: "func qaCommand(", endingBefore: "func presentQAMockOnboarding()")
+        XCTAssertTrue(qaCommand.contains("#if DEBUG || LAVA_QA_TOOLS"))
+        XCTAssertTrue(qaCommand.contains("#else\n        throw CommandError(\"Unknown native flow.\")"))
         XCTAssertFalse(root.contains("#else\n            case .phoneQA:"))
 
         let rageShakeGate = try sourceBlock(
@@ -276,6 +283,40 @@ final class ReleaseGateSourceTests: XCTestCase {
         // one from the pinned source, those pins pass vacuously. Fail here instead, then
         // re-anchor both sides to the new name.
         XCTAssertTrue(settings.contains("phoneQA"))
+    }
+
+    func testReleaseQAConfigurationLeafHasOnlyInertFabricInterface() throws {
+        let source = try readSource(.reactNativeAppQA)
+        let gatedOwner = try sourceBlock(
+            in: source,
+            startingAt: "#if DEBUG || LAVA_QA_TOOLS",
+            endingBefore: "extension LavaAppBridge"
+        )
+        let releaseLeaf = try sourceBlock(
+            in: gatedOwner,
+            startingAt: "#else\n// MARK: - Inert Release QA configuration leaf",
+            endingBefore: "#endif"
+        )
+        // Codegen registers the Fabric component for Release too. Its Swift name
+        // and selectors must remain available without compiling any QA owner.
+        XCTAssertTrue(releaseLeaf.contains("@objc(LavaQAConfigurationContent)"))
+        XCTAssertTrue(releaseLeaf.contains("final class LavaQAConfigurationContent: UIView {"))
+        XCTAssertTrue(releaseLeaf.contains("@objc(configureWithOwnerID:fontSize:)\n    func configure(ownerID: String, fontSize: Double) {}"))
+        XCTAssertTrue(releaseLeaf.contains("@objc func resetForRecycle() {}"))
+        XCTAssertTrue(releaseLeaf.contains("isUserInteractionEnabled = false"))
+        XCTAssertTrue(releaseLeaf.contains("accessibilityElementsHidden = true"))
+        for unavailable in ["UITextView", "LavaQASession", "LavaAppBridge", "AnyCancellable", "chainedUpstreamConf", "NotificationCenter", "UIPasteboard", "addSubview"] {
+            XCTAssertFalse(releaseLeaf.contains(unavailable), "Release QA leaf must not expose \(unavailable).")
+        }
+        // Keep the positive canaries on the real branch so the exclusions above
+        // cannot pass because confidential input or session types were renamed.
+        let qaLeaf = try sourceBlock(
+            in: gatedOwner,
+            startingAt: "final class LavaQAConfigurationContent: UIView, UITextViewDelegate",
+            endingBefore: "#else\n// MARK: - Inert Release QA configuration leaf"
+        )
+        XCTAssertTrue(qaLeaf.contains("private weak var owner: LavaQASession?"))
+        XCTAssertTrue(qaLeaf.contains("owner.chainedUpstreamConf = textView.text"))
     }
 
     func testReleaseBuildSettingsUseExplicitReleaseCompilationCondition() throws {

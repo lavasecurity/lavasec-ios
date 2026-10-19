@@ -235,4 +235,14 @@ public struct ChainedDNSSettingsPresentation: Equatable, Sendable {
         // editable unless the user's known choice or validated policy bypasses it.
         canEditDNS = !chainingEnabled || (fallbackPreference && storedIsSplitTunnel != false)
     }
+
+    /// Whether a saved fallback consent change must reach the live session.
+    /// Only a known current full-tunnel session can leave this preference dormant;
+    /// a stale or unknown session may still be using a split-tunnel fallback.
+    public func shouldApplyFallbackPreferenceChange(
+        isChainedSessionLive: Bool, runningGeneration: UInt64, storedGeneration: UInt64?
+    ) -> Bool {
+        canChangeFallback || !isChainedSessionLive || runningGeneration == 0
+            || storedGeneration != runningGeneration
+    }
 }

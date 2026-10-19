@@ -1,3 +1,5 @@
+import {PreparationFlow} from './PreparationFlow';
+import {PasscodeRuntime} from './PasscodeFlowAdapter.ios';
 import {OnboardingSurface} from './OnboardingSurface';
 import type {PlusReason} from './plus-intents';
 import {Alert, localized, configurePresentation, PresentationContext, type Presentation} from '../app/presentation';
@@ -17,7 +19,7 @@ import {mayInteractWithPresentation} from '../app/read-cache';
 import {AppearanceStore} from './appearance-store';
 import {ReviewContext, useReview, LiveRenderBoundary, usePreviewFixtureState} from './ReviewContext';
 import {protectedActionNames} from './session';
-import {fullScreenModalPresentation, fullSheetPresentation, nativeInlineHeader,toolbarButton,nativeFlowHeader} from './scaffold';
+import {fullScreenModalPresentation, fullSheetPresentation, nativeInlineHeader,toolbarAction,nativeFlowHeader} from './scaffold';
 import {floatingTabMinimizeBehavior,ordinaryPageHeader,useOrdinaryPushPresentation} from './navigation-scaffold';
 import {PresentationContent,PresentationCover} from './PresentationCover';
 import {lavaTokens} from '../src/generated/tokens';
@@ -106,16 +108,15 @@ function RootStack({root}: {root: 'Guard' | 'Settings'}) {
       options={{title: localized(root),headerShown:true}} />
     {routeDestinations.filter(([name])=>name==='VPNChaining'?!!app:name==='DeviceQA'?!!app&&qaTools.current:name==='Components'?!app||qaTools.current:!app||!['Import','Passcode','Feedback'].includes(name)).map(([name, component, title]) => <Stack.Screen key={name} name={name} component={component} options={({navigation,route}) => ({title:localized(title),headerBackVisible:true,
       ...(!sheets.has(name)&&name!=='Passcode'&&name!=='Sudoku'?pushPresentation:{}),
-      ...(name === 'Components' && !app ? {unstable_headerRightItems:()=>[toolbarButton('Close','xmark',()=>NativeReview.close(),false,'review.close')]} : {}),
+      ...(name === 'Components' && !app ? {unstable_headerRightItems:()=>[toolbarAction('Close','close',()=>NativeReview.close(),false,'review.close')]} : {}),
       headerLargeTitleEnabled: !['Filter', 'Guardian', 'Review', 'Import', 'ShareDetail', 'Passcode', 'AddDomain', 'AddBlocklist'].includes(name),
       ...(sheets.has(name) ? {...fullSheetPresentation,
-        unstable_headerLeftItems: () => [toolbarButton('Close', 'xmark', () => {if(mayInteractWithPresentation(app))navigation.goBack();})], headerBackVisible: false} : {}),
+        unstable_headerLeftItems: () => [toolbarAction('Close', 'close', () => {if(mayInteractWithPresentation(app))navigation.goBack();})], headerBackVisible: false} : {}),
       ...(name==='Passcode'?{...fullScreenModalPresentation,headerLargeTitleEnabled:false,
-        unstable_headerLeftItems:()=>[toolbarButton('Close','xmark',()=>{if(mayInteractWithPresentation(app))navigation.goBack();})]}:{}),
+        unstable_headerLeftItems:()=>[toolbarAction('Close','close',()=>{if(mayInteractWithPresentation(app))navigation.goBack();})]}:{}),
       // Only embedded native pages need the inline override. VPN chaining uses
       // the same root ScrollView as DNS and inherits the ordinary large title.
       ...(['AutoSwitch','DNSPatch'].includes(name)?{headerLargeTitleEnabled:false}:{}),
-      ...(name==='DeviceQA'?{headerShown:false}:{}),
       ...(name==='Feedback'?{gestureEnabled:false}:{}),
       // Sudoku keeps the native full-screen presentation while its shared rail
       // owns the controls in both orientations. Status-bar visibility is owned
@@ -129,15 +130,19 @@ function RootStack({root}: {root: 'Guard' | 'Settings'}) {
 function GuardStack() { return <RootStack root="Guard" />; }
 function SettingsStack() { return <RootStack root="Settings" />; }
 
-export function LavaUIReview({activityExample = false, reviewGallery = false, fullApp = false, onboardingPreview = false, initialSnapshot, initialPresentation, plusContext,foregroundContext,presentationID}: {activityExample?: boolean; reviewGallery?: boolean; fullApp?: boolean; onboardingPreview?:boolean; initialSnapshot?: string;initialPresentation?:Presentation;presentationID?:string;plusContext?:PlusReason;foregroundContext?:string}) {
+export function LavaUIReview({activityExample = false, reviewGallery = false, fullApp = false, onboardingPreview = false, initialSnapshot, initialPresentation, plusContext,foregroundContext,preparationContext,securityContext,presentationID}: {activityExample?: boolean; reviewGallery?: boolean; fullApp?: boolean; onboardingPreview?:boolean; initialSnapshot?: string;initialPresentation?:Presentation;presentationID?:string;plusContext?:PlusReason;foregroundContext?:string;preparationContext?:string;securityContext?:string}) {
+  if(securityContext)return <PasscodeRuntime ownerID={securityContext} initialSnapshot={initialSnapshot} initialPresentation={initialPresentation}/>;
+  return <LavaRuntime activityExample={activityExample} reviewGallery={reviewGallery} fullApp={fullApp} onboardingPreview={onboardingPreview} initialSnapshot={initialSnapshot} initialPresentation={initialPresentation} plusContext={plusContext} foregroundContext={foregroundContext} preparationContext={preparationContext} presentationID={presentationID}/>;
+}
+function LavaRuntime({activityExample,reviewGallery,fullApp,onboardingPreview,initialSnapshot,initialPresentation,plusContext,foregroundContext,preparationContext,presentationID}: {activityExample:boolean;reviewGallery:boolean;fullApp:boolean;onboardingPreview:boolean;initialSnapshot?:string;initialPresentation?:Presentation;plusContext?:PlusReason;foregroundContext?:string;preparationContext?:string;presentationID?:string}){
   const [app] = useState(() => fullApp && NativeApp ? new AppStore(NativeApp, initialSnapshot ? JSON.parse(initialSnapshot) as AppSnapshot : undefined,
     {initial:true}) : undefined);
-  return <LavaPresentation presentationID={presentationID} initialPresentation={initialPresentation} app={app} onboardingPreview={onboardingPreview} fullApp={fullApp} activityExample={activityExample} reviewGallery={reviewGallery} plusContext={plusContext} foregroundContext={foregroundContext}/>;
+  return <LavaPresentation presentationID={presentationID} initialPresentation={initialPresentation} app={app} onboardingPreview={onboardingPreview} fullApp={fullApp} activityExample={activityExample} reviewGallery={reviewGallery} plusContext={plusContext} foregroundContext={foregroundContext} preparationContext={preparationContext}/>;
 }
 const emptyLive = {snapshot: null, displaySnapshot:null, error: null,privacyCoverRequired:undefined};
 const emptyHydration={epoch:0,required:false};
 const noSubscribe = () => () => {};
-function LavaPresentation({app, onboardingPreview, fullApp, activityExample, reviewGallery,plusContext,foregroundContext,presentationID,initialPresentation}: {initialPresentation?:Presentation;presentationID?:string;app?: AppStore; onboardingPreview:boolean; fullApp: boolean; activityExample: boolean; reviewGallery: boolean;plusContext?:PlusReason;foregroundContext?:string}) {
+function LavaPresentation({app, onboardingPreview, fullApp, activityExample, reviewGallery,plusContext,foregroundContext,preparationContext,presentationID,initialPresentation}: {initialPresentation?:Presentation;presentationID?:string;app?: AppStore; onboardingPreview:boolean; fullApp: boolean; activityExample: boolean; reviewGallery: boolean;plusContext?:PlusReason;foregroundContext?:string;preparationContext?:string}) {
   const appState = useSyncExternalStore(app?.subscribe ?? noSubscribe, app?.getSnapshot ?? (() => emptyLive));
   const hydration=useSyncExternalStore(app?.subscribe??noSubscribe,app?.getPresentationHydration??(()=>emptyHydration));
   const live = appState.snapshot ?? appState.displaySnapshot ?? undefined;
@@ -150,7 +155,7 @@ function LavaPresentation({app, onboardingPreview, fullApp, activityExample, rev
   const presentationPaused=displayOnly||hydration.required;
   const [nativeLayoutReady,setNativeLayoutReady]=useState(false);
   const [navigationReady,setNavigationReady]=useState(false);
-  // Keep only this accepted all-off native editor's existing responder. Fabric
+  // Keep each accepted all-off native credential editor's existing responder. Fabric
   // maps `none` to a disabled ancestor UIView; `box-only` instead consumes hits
   // at this inert frame without visiting any child. Native/JS action and AX
   // authority remain revoked until the current active projection returns.
@@ -158,9 +163,12 @@ function LavaPresentation({app, onboardingPreview, fullApp, activityExample, rev
   // Fabric otherwise reparents its descendants when AX/pointer fences change,
   // and UIKit resigns the confidential editor as its ancestor leaves the window.
   // pinned: runtime-presentation-lifecycle.test.tsx same-visit all-off WireGuard display
-  const retainedWireGuardDisplay=displayOnly&&appState.privacyCoverRequired===false
+  // pinned: runtime-presentation-lifecycle.test.tsx accepted all-off native credential editors
+  const retainedNativeCredentialDisplay=displayOnly&&appState.privacyCoverRequired===false
     &&!!foregroundContext&&live?.foregroundFlow?.id===foregroundContext
-    &&live.foregroundFlow.kind==='vpnConfiguration'&&live.foregroundFlow.vpnEditor?.concealed===false;
+    &&(live.foregroundFlow.kind==='vpnConfiguration'&&live.foregroundFlow.vpnEditor?.concealed===false
+      ||live.foregroundFlow.kind==='backupRestore'&&live.foregroundFlow.accountBackup?.mode==='recoveryCode'&&live.foregroundFlow.accountBackup.review==null
+      ||live.foregroundFlow.kind==='passcode'&&live.passcode?.id===foregroundContext&&!live.passcode.authenticating);
   const [navigation] = useState(() => createNavigationContainerRef());
   const lastNavigation = useRef(0);
   const pendingNavigation=useRef<{epoch:number;request:NonNullable<AppSnapshot['navigation']>;dispatched:boolean;ticket:ReturnType<AppStore['registerPresentationRead']>}|undefined>(undefined);
@@ -176,7 +184,7 @@ function LavaPresentation({app, onboardingPreview, fullApp, activityExample, rev
     lastNavigation.current=pending.request.serial;pendingNavigation.current=undefined;app?.settlePresentationRead(pending.ticket);
   };
   const navigateNativeRequest = () => {
-    if(plusContext||foregroundContext||onboardingPreview||AppState.currentState!=='active'||!navigationReady)return;
+    if(preparationContext||plusContext||foregroundContext||onboardingPreview||AppState.currentState!=='active'||!navigationReady)return;
     const request = app?.getSnapshot().snapshot?.navigation;
     if (!request || request.serial <= lastNavigation.current || !navigation.isReady()) return;
     const pending=pendingNavigation.current;
@@ -193,7 +201,7 @@ function LavaPresentation({app, onboardingPreview, fullApp, activityExample, rev
   };
   useLayoutEffect(()=>{
     const request=appState.snapshot?.navigation;
-    if(!app||!request||request.serial<=lastNavigation.current||plusContext||foregroundContext||onboardingPreview||AppState.currentState!=='active')return;
+    if(!app||!request||request.serial<=lastNavigation.current||preparationContext||plusContext||foregroundContext||onboardingPreview||AppState.currentState!=='active')return;
     const pending={epoch:hydration.epoch,request,dispatched:false,ticket:app.registerPresentationRead()};pendingNavigation.current=pending;
     return()=>{if(pendingNavigation.current===pending)pendingNavigation.current=undefined;app.settlePresentationRead(pending.ticket);};
   },[app,appState.snapshot?.navigation?.serial,!!appState.snapshot,hydration.epoch,plusContext,foregroundContext,onboardingPreview]);
@@ -214,7 +222,7 @@ function LavaPresentation({app, onboardingPreview, fullApp, activityExample, rev
   // supplied synchronously on boot, but those fields alone do not own the port.
   useLayoutEffect(() => app?.connect(), [app]);
   const run = (command: AppCommand) => { if (app&&appState.snapshot&&!presentationPaused&&AppState.currentState==='active') void app.command(command).catch(error => Alert.alert('Lava', String(error.message ?? error))); };
-  const recordNavigationTurn = () => {if(plusContext||foregroundContext||onboardingPreview||presentationPaused||app&&!appState.snapshot||AppState.currentState!=='active')return;const state=navigation.getRootState();if(state&&navigationTurn.current.advance(state))run({type:'navigation.endTurn'});};
+  const recordNavigationTurn = () => {if(preparationContext||plusContext||foregroundContext||onboardingPreview||presentationPaused||app&&!appState.snapshot||AppState.currentState!=='active')return;const state=navigation.getRootState();if(state&&navigationTurn.current.advance(state))run({type:'navigation.endTurn'});};
 
   const [appearance] = useState(() => new AppearanceStore(NativeAppearance));
   const [fixtureLook, setFixtureLook] = useState('original');
@@ -270,22 +278,22 @@ function LavaPresentation({app, onboardingPreview, fullApp, activityExample, rev
   // policy keeps the ordinary frame; protected or unknown policy conceals.
   const unavailable = <RuntimeUnavailable concealed={appState.privacyCoverRequired!==false} background={rgb(background)}
     error={appState.error ?? (!app ? 'The full Lava runtime is missing from this installation.' : null)} retry={() => void app?.refresh()} />;
+  const onboardingActive=live?.onboardingSetup?.mock===onboardingPreview;
   return <ReviewContext.Provider value={{app, live, onboardingPreview, appearance, look, setLook, draft, setDraft, savedDraft, setSavedDraft, session, setSession, activityExample, reviewGallery}}>
-    <LavaAppearanceContext.Provider value={dark?'dark':'light'}><PresentationContext.Provider value={presentation.current}><SafeAreaProvider><View style={{flex:1}}><View testID="lava-render-frame" collapsable={false} onLayout={event=>{if(event.nativeEvent.layout.width>0&&event.nativeEvent.layout.height>0)setNativeLayoutReady(true);}} style={{flex:1}} pointerEvents={presentationPaused?(retainedWireGuardDisplay?'box-only':'none'):'auto'} accessibilityElementsHidden={fullApp&&(!live||presentationPaused)} importantForAccessibility={fullApp&&(!live||presentationPaused)?'no-hide-descendants':'auto'}><OnboardingSurface enabled={fullApp&&!foregroundContext&&!plusContext}><NavigationContainer ref={navigation} onReady={()=>{setNavigationReady(true);recordNavigationTurn();}} onStateChange={()=>{acceptNativeNavigation();recordNavigationTurn();navigateNativeRequest();}} theme={{...base, colors: {...base.colors, primary: rgb(green), background: rgb(background), card: rgb(background)}}}>
-      {foregroundContext?<Stack.Navigator screenOptions={{...nativeFlowHeader(dark),headerBackVisible:false}}><Stack.Screen name="Foreground" component={ForegroundRoute} initialParams={{id:foregroundContext}}/></Stack.Navigator>:plusContext?<Stack.Navigator screenOptions={{headerShown:false}}><Stack.Screen name="Upgrade" component={PlusRoute} initialParams={{reason:plusContext,embedded:true} as Screens.ReviewRoutes['Upgrade']}/></Stack.Navigator>:<Tabs.Navigator screenOptions={({route}) => ({headerShown: false, tabBarActiveTintColor: rgb(green),
+    <LavaAppearanceContext.Provider value={dark?'dark':'light'}><PresentationContext.Provider value={presentation.current}><SafeAreaProvider><View style={{flex:1}}><View testID="lava-render-frame" collapsable={false} onLayout={event=>{if(event.nativeEvent.layout.width>0&&event.nativeEvent.layout.height>0)setNativeLayoutReady(true);}} style={{flex:1}} pointerEvents={presentationPaused?(retainedNativeCredentialDisplay?'box-only':'none'):'auto'} accessibilityElementsHidden={fullApp&&(!live||presentationPaused)} importantForAccessibility={fullApp&&(!live||presentationPaused)?'no-hide-descendants':'auto'}><OnboardingSurface enabled={fullApp&&!preparationContext&&!foregroundContext&&!plusContext}><NavigationContainer ref={navigation} onReady={()=>{setNavigationReady(true);recordNavigationTurn();}} onStateChange={()=>{acceptNativeNavigation();recordNavigationTurn();navigateNativeRequest();}} theme={{...base, colors: {...base.colors, primary: rgb(green), background: rgb(background), card: rgb(background)}}}>
+      {preparationContext?<Stack.Navigator screenOptions={{headerShown:false}}><Stack.Screen name="Foreground" initialParams={{id:preparationContext}}>{()=> <PreparationFlow id={preparationContext}/>}</Stack.Screen></Stack.Navigator>:foregroundContext?<Stack.Navigator screenOptions={{...nativeFlowHeader(dark),headerBackVisible:false}}><Stack.Screen name="Foreground" component={ForegroundRoute} initialParams={{id:foregroundContext}}/></Stack.Navigator>:plusContext?<Stack.Navigator screenOptions={{headerShown:false}}><Stack.Screen name="Upgrade" component={PlusRoute} initialParams={{reason:plusContext,embedded:true} as Screens.ReviewRoutes['Upgrade']}/></Stack.Navigator>:<Tabs.Navigator screenOptions={({route}) => ({headerShown: false, tabBarActiveTintColor: rgb(green),
         tabBarMinimizeBehavior: floatingTabMinimizeBehavior(),
-        // Setup retains its Guard destination, while that owner's navigation
-        // stays hidden. A separate mock preview cannot hide the real app's bar.
-        tabBarStyle: live?.onboardingSetup?.mock===onboardingPreview?{display:'none'}:undefined,
+        // The onboarding modal covers the tabs while Guard keeps its final safe
+        // area. Hiding the bar here moves the measured iPad destination on dismissal.
         // Native tabs have input authority only with an active projection. A
         // protected Settings entry additionally waits for native authentication.
-        tabBarSelectionEnabled: !(app&&(!appState.snapshot||presentationPaused||AppState.currentState!=='active'))
+        tabBarSelectionEnabled: !onboardingActive&&!(app&&(!appState.snapshot||presentationPaused||AppState.currentState!=='active'))
           &&!(app && route.name === 'SettingsTab' && session.protectedActions['Update App Settings']),
       })}>
         <Tabs.Screen name="GuardTab" component={GuardStack} options={{title: localized('Guard'), tabBarIcon: ({focused}) => ({type: 'sfSymbol', name: 'shield.fill'})}} />
         <Tabs.Screen name="SettingsTab" component={SettingsStack} options={{title: localized('Settings'), tabBarIcon: () => ({type: 'sfSymbol', name: 'gearshape.fill'})}}
           listeners={({navigation:tabNavigation}) => ({tabPress: () => {
-            if(AppState.currentState!=='active'||presentationPaused||app&&!appState.snapshot)return;
+            if(onboardingActive||AppState.currentState!=='active'||presentationPaused||app&&!appState.snapshot)return;
             const state=navigation.getRootState();
             if(!state)return;
             if(state.routes[state.index]?.name==='SettingsTab'){

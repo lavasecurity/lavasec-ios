@@ -212,24 +212,28 @@ export class AppStore {
   }
   command<T = unknown>(command: AppCommand): Promise<T> {
     const generation = this.generation;
+    const retiresQAOwner=command.type==='qa.command'&&['leave','close','detail.close','detail.back'].includes(command.action);
     const execute = async () => {
       if (!this.connected || generation !== this.generation) throw new Error('The app screen closed before this action started.');
       // Owner retirement releases native work when a concealed body unmounts.
       // It grants no new read/action authority; replies still follow epoch and
       // native snapshot fences below.
-      const retiresOwner=['vpn.cancel','customEntry.dismiss','foreground.dismiss','domains.cancel','domainCheck.cancel','filter.close','purchase.clearMessage'].includes(command.type)
-        ||command.type==='activity.visibility'&&!command.visible;
+      const retiresOwner=['vpn.cancel','customEntry.dismiss','foreground.dismiss','domains.cancel','domainCheck.cancel','filter.close','purchase.clearMessage','presentation.flowAlert.cancel'].includes(command.type)
+        ||command.type==='activity.visibility'&&!command.visible
+        ||retiresQAOwner;
       if(!retiresOwner&&(AppState.currentState!=='active'||!this.state.snapshot))throw new Error('Read access changed.');
       // Restored native authorization permits mounted screens to prepare their
       // owner and presentation under the cover. Interactive callbacks remain
       // paused; setup cannot reject once and leave an empty retained route.
       const presentationWork=command.type.endsWith('.query')||['filter.review','filter.open','refresh',
         'discovery.seen','backup.refresh','purchase.refresh','sudoku.new','activity.visibility','onboarding.enter',
-        'customEntry.enter','vpnEditor.enter','vpn.enter','foreground.enter','feedback.enter'].includes(command.type);
+        'customEntry.enter','vpnEditor.enter','vpn.enter','foreground.enter','foreground.layout','feedback.enter','preparation.enter'].includes(command.type)
+        ||command.type==='qa.command'&&command.action==='enter';
       if(!retiresOwner&&this.hydration.getSnapshot().required&&!presentationWork)throw new Error('Read access changed.');
       const navigationEpoch=this.navigationAuthorizationEpoch;
       const navigationOwner=command.type==='navigation.authorize'?presentationScaffoldOwnerScope(this.state.snapshot!):undefined;
-      const revokesReads = command.type === 'logs.clear' || command.type.startsWith('account.');
+      const revokesReads = command.type === 'logs.clear' || command.type.startsWith('account.')
+        ||command.type==='accountBackup.command'&&['account.signOut','account.delete'].includes(command.command.action);
       if (revokesReads) {this.revokeReads(); this.notify();}
       const readEpoch = this.readEpoch;
       const authenticationPauseEpoch=this.authenticationPauseEpoch;
@@ -239,9 +243,14 @@ export class AppStore {
         if(['domains.stage','domainCheck.stage'].includes(command.type))await this.discardUndeliveredDomainReview(response.result);
         throw new Error('The app screen closed while this action completed.');
       }
-      // A haptic changes no app state. Native acknowledges only the effect;
+      // Effect, layout and cancellation ACKs carry no app projection;
       // independent snapshot events still carry actual runtime changes.
-      if (command.type === 'haptic' || command.type === 'domainCheck.cancel') return response.result;
+      if (command.type === 'haptic' || command.type === 'foreground.layout' || command.type === 'domainCheck.cancel') return response.result;
+      if(command.type==='presentation.flowAlert.cancel')return response.result;
+      if(command.type==='presentation.flowAlert'){
+        if(readEpoch!==this.readEpoch||AppState.currentState!=='active'||!this.state.snapshot)throw new Error('Read access changed.');
+        return response.result;
+      }
       if(['domains.stage','domainCheck.stage'].includes(command.type)&&domainReviewEpoch!==this.domainReviewEpoch) {
         await this.discardUndeliveredDomainReview(response.result);
         throw new Error('Read access changed.');
@@ -281,6 +290,9 @@ export class AppStore {
     // navigation must reach the native orchestrator immediately while it runs.
     // Apply starts only after the queued review returns a token. Native rechecks
     // that token against the current draft/baseline and rejects overtaken edits.
+    // Foreground and QA cleanup must reach their native owner while auth,
+    // deletion or staging is suspended. Native still checks the exact visit
+    // and dismissal guards before retiring it; unrelated writes stay queued.
     if(command.type.endsWith('.query')){
       // Join only simultaneous work in the same authority/source epoch. This
       // retains no settled result; reusable private data stays in native cache.
@@ -289,7 +301,7 @@ export class AppStore {
       const pending=execute().finally(()=>{if(this.pendingQueries.get(key)===pending)this.pendingQueries.delete(key);});
       this.pendingQueries.set(key,pending);return pending;
     }
-    if (command.type.startsWith('protection.') || ['refresh','haptic','guard.gesture','activity.visibility','filter.open','filter.close','filter.refresh','filter.edit','foreground.dirty'].includes(command.type) || command.type.startsWith('navigation.') || command.type === 'filter.apply') return execute();
+    if (retiresQAOwner || command.type.startsWith('protection.') || command.type.startsWith('presentation.flowAlert') || ['refresh','haptic','guard.gesture','activity.visibility','filter.open','filter.close','filter.refresh','filter.edit','foreground.dirty','foreground.dismiss'].includes(command.type) || command.type.startsWith('navigation.') || command.type === 'filter.apply') return execute();
     const result = this.tail.then(execute, execute);
     this.tail = result.then(() => undefined, () => undefined);
     return result;

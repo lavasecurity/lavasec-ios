@@ -7,6 +7,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const copyProperties = new Set(['title','label','summary','subtitle','description','note','placeholder','text','caption','accessibilityLabel','accessibilityHint']);
 // These are programmer invariants or stable control-flow signals, never display copy.
 const internalStrings = new Set([
+  'Flow UI requires this platform’s component adapter.',
   'Read access changed.', 'Review screen must be inside its isolated review provider.',
   'AppearanceStore is already connected.', 'scroll interaction', 'left center',
   'LavaChoice needs this platform’s native component mapping.',
@@ -25,7 +26,7 @@ function isCopyArgument(node) {
     if (ts.isNewExpression(parent) && parent.expression.getText() === 'Error') return parent.arguments?.[0] === current;
     if (ts.isCallExpression(parent)) {
       const name = parent.expression.getText();
-      return /^(localized|localizedFormat|toolbarButton|nativeSearchOptions)$/.test(name) && parent.arguments[0] === current
+      return /^(localized|localizedFormat|toolbarButton|toolbarAction|nativeSearchOptions)$/.test(name) && parent.arguments[0] === current
         || /^Alert\.(alert|prompt)$/.test(name) && parent.arguments.slice(0,2).includes(current);
     }
     if (!ts.isConditionalExpression(parent) && !ts.isParenthesizedExpression(parent) && !ts.isJsxExpression(parent)) break;

@@ -17,7 +17,6 @@ import XCTest
 
 /// Repo-relative location of every file pinned by a source-introspection test.
 enum SourceFile: String, CaseIterable {
-    case reactNativePageContent = "ReactNative/native-app/LavaNativePageContent.swift"
     case catalogAuthorizationFixture = "docs/testing/fixtures/catalog-v1.json"
     case qaMetricKitCollector = "LavaSecApp/QAMetricKitCollector.swift"
     // MARK: Documentation contracts
@@ -27,7 +26,40 @@ enum SourceFile: String, CaseIterable {
 
     // MARK: React Native production app and fixture host
     case reactNativeReviewProject = "ReactNative/ios/project.json"
+    case reactNativeAppPreparation = "ReactNative/native-app/LavaAppPreparation.swift"
+    case reactNativePreparationScreen = "ReactNative/src/flows/preparation/PreparationScreen.tsx"
+    case reactNativePreparationFlow = "ReactNative/review/PreparationFlow.tsx"
+    case reactNativeAccountBackupFlow = "ReactNative/src/flows/account-backup/AccountBackupFlow.tsx"
+    case reactNativeAccountBackupAdapter = "ReactNative/review/AccountBackupFlowAdapter.ios.tsx"
+    case reactNativeAppAccountBackup = "ReactNative/native-app/LavaAppAccountBackup.swift"
+    case reactNativeBackupCredentials = "ReactNative/native-app/LavaBackupCredentialsContent.swift"
+    case reactNativeAppQA = "ReactNative/native-app/LavaAppQA.swift"
+    case reactNativeQAFlow = "ReactNative/src/flows/qa/QAScreens.tsx"
+    case reactNativeQAFlowAdapter = "ReactNative/review/QAFlowAdapter.ios.tsx"
+    case reactNativeInlineSymbolText = "ReactNative/ios/LavaSecUIReview/LavaInlineSymbolTextContent.swift"
+    case reactNativeInlineSymbolTextAdapter = "ReactNative/src/flows/InlineSymbolText.ios.tsx"
+    case reactNativeFlowInfo = "ReactNative/src/flows/FlowInfo.tsx"
+    case reactNativeDNSScreen = "ReactNative/review/DNSScreen.tsx"
+    case reactNativeVPNChainingScreen = "ReactNative/review/VPNChainingScreen.tsx"
+    case reactNativeCustomEntryScreen = "ReactNative/review/CustomEntryScreen.tsx"
+    case reactNativeHelpScreens = "ReactNative/review/HelpScreens.tsx"
+    case reactNativeVPNEditorFlow = "ReactNative/review/VPNEditorFlow.tsx"
+    case reactNativeFormScaffold = "ReactNative/review/form-scaffold.tsx"
+    case reactNativeRowContent = "ReactNative/src/row-content.tsx"
+    case reactNativeScaffold = "ReactNative/review/scaffold.tsx"
+    case reactNativeFoundation = "ReactNative/src/foundation.ts"
+    case wireGuardConfigurationFile = "Sources/LavaSecAppServices/WireGuardConfigurationFile.swift"
+    case reactNativeAppImport = "ReactNative/native-app/LavaAppImport.swift"
+    case reactNativeImportFlow = "ReactNative/src/flows/import/ImportFlow.tsx"
+    case reactNativeAppPasscode = "ReactNative/native-app/LavaAppPasscode.swift"
+    case reactNativePasscodeFlow = "ReactNative/src/flows/passcode/PasscodeScreen.tsx"
+    case reactNativePasscodeFlowAdapter = "ReactNative/review/PasscodeFlowAdapter.ios.tsx"
     case reactNativeAppFlows = "ReactNative/native-app/LavaAppFlows.swift"
+    case reactNativeAppOnboarding = "ReactNative/native-app/LavaAppOnboarding.swift"
+    case reactNativeOnboardingFlow = "ReactNative/review/OnboardingFlow.tsx"
+    case reactNativeAppFeedback = "ReactNative/native-app/LavaAppFeedback.swift"
+    case reactNativeFeedbackFlow = "ReactNative/review/FeedbackFlow.tsx"
+    case reactNativeFilterShareCard = "ReactNative/review/FilterShareCard.tsx"
     case reactNativeAppWireGuardEditor = "ReactNative/native-app/LavaAppWireGuardEditor.swift"
     case reactNativeAppSettings = "ReactNative/native-app/LavaAppSettings.swift"
     case reactNativeAppFilters = "ReactNative/native-app/LavaAppFilters.swift"
@@ -44,11 +76,17 @@ enum SourceFile: String, CaseIterable {
     case reactNativeActivityScreen = "ReactNative/review/ActivityScreen.tsx"
     case reactNativeGuardScreen = "ReactNative/review/screens.tsx"
     case reactNativeAppBridge = "ReactNative/native-app/LavaAppBridge.swift"
+    case reactNativeAppPresentation = "ReactNative/native-app/LavaAppPresentation.swift"
+    case reactNativePresentation = "ReactNative/app/presentation.tsx"
     case reactNativeActivityDateBridge = "ReactNative/ios/LavaSecUIReview/ActivityDateBridge.swift"
     case reactNativeReviewModule = "ReactNative/ios/LavaSecUIReview/LavaReviewModule.mm"
     case reactNativeReferenceContent = "ReactNative/ios/LavaSecUIReview/ReviewReferenceContent.swift"
     case reactNativeAppHost = "ReactNative/native-app/LavaAppHost.swift"
     case reactNativeSettingsScreens = "ReactNative/review/SettingsScreens.tsx"
+    case reactNativePlusScaffold = "ReactNative/review/plus-scaffold.tsx"
+    case reactNativeSettingsScaffold = "ReactNative/review/settings-scaffold.tsx"
+    case reactNativeMascotInteraction = "ReactNative/review/mascot-interaction.ts"
+    case reactNativePagingScaffold = "ReactNative/review/paging-scaffold.tsx"
     case reactNativeReviewNavigation = "ReactNative/review/LavaUIReview.tsx"
 
     // MARK: Config
@@ -59,7 +97,6 @@ enum SourceFile: String, CaseIterable {
     case accountAuthService = "LavaSecApp/AccountAuthService.swift"
     case accountController = "LavaSecApp/AccountController.swift"
     case accountSessionKeychainStore = "LavaSecApp/AccountSessionKeychainStore.swift"
-    case adminQAView = "LavaSecApp/AdminQAView.swift"
     case appEntitlements = "LavaSecApp/LavaSecApp.entitlements"
     case appInfoPlist = "LavaSecApp/Info.plist"
     case activityViewController = "LavaSecApp/ActivityViewController.swift"
@@ -105,8 +142,7 @@ enum SourceFile: String, CaseIterable {
     case backupRestoreView = "LavaSecApp/BackupRestoreView.swift"
     case backupSetupView = "LavaSecApp/BackupSetupView.swift"
     case backupSyncService = "LavaSecApp/BackupSyncService.swift"
-    case blocklistPickerView = "LavaSecApp/BlocklistPickerView.swift"
-    case bugReportSettingsView = "LavaSecApp/BugReportSettingsView.swift"
+    case lavaSheetLockMask = "LavaSecApp/LavaSheetLockMask.swift"
     case filterDraftController = "LavaSecApp/FilterDraftController.swift"
     case filterLibraryController = "LavaSecApp/FilterLibraryController.swift"
     case catalogController = "LavaSecApp/CatalogController.swift"
@@ -118,14 +154,11 @@ enum SourceFile: String, CaseIterable {
     case diagnosticsDateControls = "LavaSecApp/DiagnosticsDateControls.swift"
     case diagnosticsLocalLogSupport = "LavaSecApp/DiagnosticsLocalLogSupport.swift"
     case diagnosticsNetworkActivity = "LavaSecApp/DiagnosticsNetworkActivity.swift"
-    case dnsResolverSettingsView = "LavaSecApp/DNSResolverSettingsView.swift"
-    case filterLibraryView = "LavaSecApp/FilterLibraryView.swift"
     case filterReviewFlowView = "LavaSecApp/FilterReviewFlowView.swift"
     case filterSharedViews = "LavaSecApp/FilterSharedViews.swift"
     case infoPlistStringsCatalog = "LavaSecApp/InfoPlist.xcstrings"
     case lavaComponents = "LavaSecApp/LavaDesignSystem/LavaComponents.swift"
     case lavaCondensedList = "LavaSecApp/LavaDesignSystem/LavaCondensedList.swift"
-    case lavaIcon = "LavaSecApp/LavaDesignSystem/LavaIcon.swift"
     case lavaLiveActivityController = "LavaSecApp/LavaLiveActivityController.swift"
     case lavaScaffold = "LavaSecApp/LavaDesignSystem/LavaScaffold.swift"
     case lavaSelectableRow = "LavaSecApp/LavaDesignSystem/LavaSelectableRow.swift"
@@ -135,7 +168,6 @@ enum SourceFile: String, CaseIterable {
     case lavaTokens = "LavaSecApp/LavaDesignSystem/LavaTokens.swift"
     case localizableStringsCatalog = "LavaSecApp/Localizable.xcstrings"
     case legalVersionSettingsView = "LavaSecApp/LegalVersionSettingsView.swift"
-    case onboardingFlowView = "LavaSecApp/OnboardingFlowView.swift"
     case protectionConnectivityPresentation = "LavaSecApp/ProtectionConnectivityPresentation.swift"
     case protectionPlatformSeams = "LavaSecApp/ProtectionPlatformSeams.swift"
     case privacySecuritySettingsView = "LavaSecApp/PrivacySecuritySettingsView.swift"
@@ -143,12 +175,10 @@ enum SourceFile: String, CaseIterable {
     case securityController = "LavaSecApp/SecurityController.swift"
     case settingsCommon = "LavaSecApp/SettingsCommon.swift"
     case settingsView = "LavaSecApp/SettingsView.swift"
-    case sudokuEasterEggView = "LavaSecApp/SudokuEasterEggView.swift"
     // Deliberately NOT a member of `readSettingsSourceAggregate()` — like `adminQAView`, this
     // page is compile-gated in full, and folding it into the aggregate would make the
     // production tier/subpage contracts read gated source as if it shipped.
-    case vpnChainingSettingsView = "LavaSecApp/VPNChainingSettingsView.swift"
-    case shareableFilterCard = "LavaSecApp/ShareableFilterCard.swift"
+    case shareableFilterCardSupport = "LavaSecApp/ShareableFilterCardSupport.swift"
     case shareableFilterImageDecoder = "LavaSecApp/ShareableFilterImageDecoder.swift"
     case shareableFiltersUI = "LavaSecApp/ShareableFiltersUI.swift"
     // App-target (App Shortcuts register from the app bundle, not the extension).
@@ -275,7 +305,6 @@ enum SourceFile: String, CaseIterable {
     case localLogTimestampFormatter = "Sources/LavaSecKit/LocalLogTimestampFormatter.swift"
     case networkActivityLog = "Sources/LavaSecKit/NetworkActivityLog.swift"
     case networkEndpointValidation = "Sources/LavaSecKit/NetworkEndpointValidation.swift"
-    case onboardingAnimation = "Sources/LavaSecAppServices/OnboardingAnimation.swift"
     case onboardingDefaults = "Sources/LavaSecKit/OnboardingDefaults.swift"
     case pinnedPublicHTTPSFetcher = "Sources/LavaSecNetworking/PinnedPublicHTTPSFetcher.swift"
     case preparedFilterSnapshot = "Sources/LavaSecFilterPipeline/PreparedFilterSnapshot.swift"
@@ -423,9 +452,9 @@ func readSettingsSourceAggregate() throws -> String {
         readSource(.accountBackupSettingsView),
         readSource(.upgradeSettingsView),
         readSource(.customizationSettingsView),
-        readSource(.dnsResolverSettingsView),
+        readSource(.reactNativeDNSScreen),
         readSource(.privacySecuritySettingsView),
-        readSource(.bugReportSettingsView),
+        readSource(.lavaSheetLockMask),
         readSource(.legalVersionSettingsView),
         readSource(.settingsCommon),
     ].joined(separator: "\n")
@@ -529,11 +558,11 @@ func readAppViewModelSource() throws -> String {
 func readFiltersSourceAggregate() throws -> String {
     try [
         readSource(.reactNativeFilterScreens),
-        readSource(.filterLibraryView),
+        readSource(.reactNativeHelpScreens),
         readSource(.reactNativeAppFilters),
         readSource(.filterSharedViews),
         readSource(.reactNativeAppFlows),
-        readSource(.blocklistPickerView),
+        readSource(.reactNativeCustomEntryScreen),
     ].joined(separator: "\n")
 }
 

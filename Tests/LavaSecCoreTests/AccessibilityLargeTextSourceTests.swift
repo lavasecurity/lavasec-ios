@@ -25,89 +25,35 @@ final class AccessibilityLargeTextSourceTests: XCTestCase {
 
     // MARK: Onboarding
 
-    func testOnboardingHeadlineReflows() throws {
-        let source = try readSource(.onboardingFlowView)
-        XCTAssertTrue(source.contains("LavaSetupStepLayout("))
-        let heading = try sourceBlock(in: try readSource(.lavaScaffold),
-                                      startingAt: "struct LavaSetupStepHeading:",
-                                      endingBefore: "struct LavaSetupChoiceRow:")
-        XCTAssertTrue(heading.contains(".fixedSize(horizontal: false, vertical: true)"))
-        XCTAssertTrue(heading.contains(".accessibilityAddTraits(.isHeader)"))
-        XCTAssertFalse(heading.contains(".lineLimit("))
-        XCTAssertFalse(heading.contains(".minimumScaleFactor("))
-    }
-
-    func testOnboardingCTAsReflow() throws {
-        let source = try readSource(.onboardingFlowView)
-        XCTAssertTrue(source.contains(".buttonStyle(LavaStandaloneActionButtonStyle())"))
-        XCTAssertTrue(source.contains(".buttonStyle(LavaSecondaryActionButtonStyle())"))
-        let primary = try sourceBlock(in: try readSource(.lavaScaffold),
-                                      startingAt: "struct LavaStandaloneActionButtonStyle:",
-                                      endingBefore: "struct LavaCondensedRowButtonStyle:")
-        let secondary = try sourceBlock(in: try readSource(.lavaComponents),
-                                        startingAt: "struct LavaSecondaryActionButtonStyle:",
-                                        endingBefore: "struct LavaToggleRow:")
-        for style in [primary, secondary] {
-            XCTAssertTrue(style.contains("LavaFullWidthActionPrimitiveStyle("))
-            XCTAssertTrue(style.contains(".makeBody(configuration: configuration)"))
-            XCTAssertFalse(style.contains(".lineLimit("))
-            XCTAssertFalse(style.contains(".frame(height:"))
-        }
-        let body = try sourceBlock(in: try readSource(.lavaScaffold),
-                                   startingAt: "struct LavaFullWidthActionButtonBody<",
-                                   endingBefore: "struct LavaFullWidthActionPrimitiveStyle:")
-        XCTAssertTrue(body.contains(".fixedSize(horizontal: false, vertical: true)"))
-        XCTAssertTrue(body.contains(".frame(minHeight: LavaSurface.actionButtonHeight)"))
-        XCTAssertFalse(body.contains(".lineLimit("))
-        XCTAssertFalse(body.contains(".frame(height:"))
-    }
-
-    // MARK: Filters
-
-    // MARK: Settings
-
-    func testUpgradeComparisonKeepsHorizontalFixedSizeForStackedFallback() throws {
-        // The comparison values row lives inside `ViewThatFits(in: .horizontal)`. Its
-        // `.fixedSize(horizontal: true)` forces intrinsic width so, when the row can't fit at large
-        // text, ViewThatFits rejects the horizontal candidate and picks the STACKED VStack fallback.
-        // Flipping it to `horizontal: false` (with lineLimit(1) + minimumScaleFactor still on the
-        // chain) would let the row compress in place and never stack — the correct large-text
-        // behavior here is the stack, so keep the horizontal fixedSize.
-        let valuesBlock = try sourceBlock(
-            in: try readSource(.upgradeSettingsView),
-            startingAt: "private func comparisonValues(free:",
-            endingBefore: "private func paidValue"
+    func testUpgradeBenefitsReflowWithTextScaleAndIntrinsicPageHeight() throws {
+        let scene = try sourceBlock(
+            in: readSource(.reactNativePlusScaffold),
+            startingAt: "function BenefitScene(",
+            endingBefore: "function RoutineCard("
         )
-        XCTAssertTrue(valuesBlock.contains(".fixedSize(horizontal: true, vertical: false)"),
-                      "The upgrade-comparison row must keep horizontal fixedSize so ViewThatFits picks the stacked fallback at large text.")
+        XCTAssertTrue(scene.contains("useAccessibilityTextScale()"))
+        XCTAssertTrue(scene.contains("landscape&&usable/scale>="),
+                      "Large text must reject the paired art/copy layout when its scaled reading width cannot fit.")
+        XCTAssertTrue(scene.contains("s.pairedPart"))
+        XCTAssertFalse(scene.contains("numberOfLines"))
+        XCTAssertFalse(scene.contains("adjustsFontSizeToFit"))
+
+        let pages = try readSource(.reactNativePagingScaffold)
+        XCTAssertTrue(pages.contains("alignItems:'stretch'"))
+        XCTAssertTrue(pages.contains("alignSelf:'stretch'"))
+        XCTAssertFalse(pages.contains("height:"),
+                       "The tallest intrinsic benefit page must determine the carousel height at larger text sizes.")
     }
 
     // MARK: Backup
 
     func testBackupTitlesUseTheSharedFullSheetHeaderPolicy() throws {
-        // Full-size sheets share a wrapping title above their scroll content;
-        // ordinary pushed navigation retains its separate native title policy.
-        XCTAssertTrue(try readSource(.backupSetupView).contains("LavaTaskSheet(title: step.title"))
-        XCTAssertTrue(try readSource(.backupRestoreView).contains("LavaTaskSheet(title: \"Restore Backup\""))
-        let scaffold = try sourceBlock(
-            in: try readSource(.lavaScaffold),
-            startingAt: "struct LavaTaskSheet<",
-            endingBefore: "struct LavaPrimaryTabScreenContent<"
-        )
-        XCTAssertTrue(scaffold.contains(".lavaFullSheetHeader(title, leading:"))
-        let header = try sourceBlock(in: try readSource(.lavaScaffold),
-                                     startingAt: "func lavaFullSheetHeader<",
-                                     endingBefore: "func lavaFullSheetHeader(_")
-        XCTAssertTrue(header.contains("navigationTitle(title.lavaLocalized)"))
-        XCTAssertTrue(header.contains(".navigationBarTitleDisplayMode(.inline)"))
-        XCTAssertTrue(header.contains("ToolbarItemGroup(placement: .topBarLeading)"))
-        XCTAssertTrue(header.contains("ToolbarItemGroup(placement: .topBarTrailing)"))
-        XCTAssertFalse(header.contains(".safeAreaInset("))
+        let source = try readSource(.reactNativeAccountBackupAdapter)
+        XCTAssertTrue(source.contains("...nativeInlineHeader"))
+        XCTAssertTrue(source.contains("title:state.title"))
+        XCTAssertTrue(source.contains("toolbarAction('Back','back'"))
+        XCTAssertTrue(source.contains("toolbarAction('Close','close'"))
     }
-
-    // MARK: Diagnostics
-
-    // MARK: LavaComponents overview banner row
 
     func testOverviewBannerRowGrowsViaMinHeight() throws {
         let compact = try compactSource(.lavaComponents)

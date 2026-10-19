@@ -6,7 +6,12 @@ export const reviewSources = [
   'LavaSecUIReview/ReactReviewViewController.swift', 'LavaSecUIReview/LavaAppearanceModule.h',
   'LavaSecUIReview/LavaAppearanceModule.mm', 'LavaSecUIReview/BridgingHeader.h',
   'LavaSecUIReview/LavaDecorationView.h', 'LavaSecUIReview/LavaDecorationView.mm', 'LavaSecUIReview/LavaDecorationContent.swift',
+  'LavaSecUIReview/LavaSheetScrollEdge.swift',
   'LavaSecUIReview/LavaShareCardSurfaceView.h', 'LavaSecUIReview/LavaShareCardSurfaceView.mm',
+  'LavaSecUIReview/LavaInlineSymbolTextView.h', 'LavaSecUIReview/LavaInlineSymbolTextView.mm', 'LavaSecUIReview/LavaInlineSymbolTextContent.swift',
+  'LavaSecUIReview/LavaSystemButtonView.h', 'LavaSecUIReview/LavaSystemButtonView.mm', 'LavaSecUIReview/LavaSystemButtonContent.swift',
+  'LavaSecUIReview/LavaQAConfigurationView.h', 'LavaSecUIReview/LavaQAConfigurationView.mm',
+  'LavaSecUIReview/LavaPasscodeInputView.h', 'LavaSecUIReview/LavaPasscodeInputView.mm', 'LavaSecUIReview/LavaImportScannerView.h', 'LavaSecUIReview/LavaImportScannerView.mm', 'LavaSecUIReview/LavaBackupCredentialsView.h', 'LavaSecUIReview/LavaBackupCredentialsView.mm',
   'LavaSecUIReview/LavaShareQrView.h', 'LavaSecUIReview/LavaShareQrView.mm', 'LavaSecUIReview/LavaShareCardCapture.swift',
   'LavaSecUIReview/LavaSymbolPalette.swift', 'LavaSecUIReview/LavaNativeContainment.swift', 'LavaSecUIReview/LavaReviewModule.h', 'LavaSecUIReview/LavaReviewModule.mm', 'LavaSecUIReview/BundledNarrationPlayer.swift', '../../Shared/SoftShieldGuardian.swift', '../../Shared/LavaActivityAttributes.swift',
   'LavaSecUIReview/LavaTextFieldView.h', 'LavaSecUIReview/LavaTextFieldView.mm', 'LavaSecUIReview/ReviewDomainValidator.swift',
@@ -15,7 +20,7 @@ export const reviewSources = [
   'LavaSecUIReview/ActivityDateBridge.swift', '../../LavaSecApp/DiagnosticsDateControls.swift', '../../LavaSecApp/LavaDesignSystem/LavaTokens.swift', '../../LavaSecApp/LavaDesignSystem/LavaScaffold.swift', '../../LavaSecApp/LavaDesignSystem/LavaSelectableRow.swift', '../../LavaSecApp/LavaStrings.swift',
   '../native-app/LavaAppModule.h', '../native-app/LavaAppModule.mm',
   'LavaSecUIReview/LavaContextMenuView.h', 'LavaSecUIReview/LavaContextMenuView.mm',
-  'LavaSecUIReview/LavaNativePageView.h', 'LavaSecUIReview/LavaNativePageView.mm', 'LavaSecUIReview/LavaSwitchView.h', 'LavaSecUIReview/LavaSwitchView.mm', 'LavaSecUIReview/LavaSliderView.h', 'LavaSecUIReview/LavaSliderView.mm', 'LavaSecUIReview/ReviewReferenceContent.swift',
+  'LavaSecUIReview/LavaSwitchView.h', 'LavaSecUIReview/LavaSwitchView.mm', 'LavaSecUIReview/LavaSliderView.h', 'LavaSecUIReview/LavaSliderView.mm', 'LavaSecUIReview/ReviewReferenceContent.swift',
   'LavaSecUIReview/LavaScrollView.h', 'LavaSecUIReview/LavaScrollView.mm',
 ];
 export const testSource = 'LavaSecUIReviewUITests/ReviewLifecycleTests.swift';

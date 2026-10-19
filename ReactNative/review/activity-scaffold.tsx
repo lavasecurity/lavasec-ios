@@ -11,6 +11,7 @@ import {Copy,Symbol,MetricValue,usePageInspectionLock,usePageInspectionReset} fr
 import {CountLegend,ActivityFlowBar} from './detail-scaffold';
 import {StableVariants} from './scaffold';
 import {activityRate,activityLegendValue,activityOutcomeAt,activityInspectionFeedback,type ActivityBucket,type ActivityOutcome} from './activity-model';
+import type {ActivityChartKind} from './ActivityShareCard';
 
 const chartTitles=['Total requests','Requests by time','Blocked rate by time'] as const;
 const lineWidth=3;
@@ -23,11 +24,12 @@ function chartFrame(scale:number){
   const top=foundation.space.sm*scale;
   return {height,captionHeight,top,drawable:Math.max(height/2,height-captionHeight-top)};
 }
-export function ActivityCharts({buckets,rangeKey,allowed,blocked,loaded,pending=false,uptime,onInspect}:{buckets:readonly ActivityBucket[];rangeKey:string;allowed:number;blocked:number;loaded:boolean;pending?:boolean;uptime:string;onInspect?:(availability:'populated'|'empty')=>void}) {
+export function ActivityCharts({buckets,rangeKey,allowed,blocked,loaded,pending=false,uptime,onInspect,chart,onChartChange}:{buckets:readonly ActivityBucket[];rangeKey:string;allowed:number;blocked:number;loaded:boolean;pending?:boolean;uptime:string;onInspect?:(availability:'populated'|'empty')=>void;chart?:ActivityChartKind;onChartChange?:(chart:ActivityChartKind)=>void}) {
   const s=useScaffoldStyles(windowBase_s);
   const feedback=useFeedback();
   const {locale}=useContext(PresentationContext);
-  const [page,setPage]=useState(0);const [selected,setSelected]=useState<number|ActivityOutcome>();
+  const [localPage,setPage]=useState(0);const kinds:ActivityChartKind[]=['total','counts','rate'];
+  const page=chart?kinds.indexOf(chart):localPage;const [selected,setSelected]=useState<number|ActivityOutcome>();
   const selection=useRef<number|ActivityOutcome|undefined>(undefined);
   const clear=useCallback(()=>{selection.current=undefined;setSelected(undefined);},[]);
   useEffect(clear,[rangeKey,pending,clear]);usePageInspectionReset(clear);
@@ -44,13 +46,13 @@ export function ActivityCharts({buckets,rangeKey,allowed,blocked,loaded,pending=
   const frame=chartFrame(useTextScale());
   return <View testID="activity.charts" style={s.stack}>
     <Pressable testID="activity.chart.next" accessibilityRole="button" accessibilityLabel={localized(chartTitles[page]!)} accessibilityHint={localized('Show next chart')}
-      onPress={()=>{clear();setPage(current=>(current+1)%chartTitles.length);}} style={({pressed})=>[s.titlePill,pressed&&s.pressed]}>
+      onPress={()=>{clear();const next=(page+1)%chartTitles.length;setPage(next);onChartChange?.(kinds[next]!);}} style={({pressed})=>[s.titlePill,pressed&&s.pressed]}>
       <View style={{flexShrink:1}}><StableVariants selectedKey={chartTitles[page]!} variants={chartTitles.map(title=>({key:title,content:<Copy role="row">{title}</Copy>}))}/></View><Symbol name="arrow.triangle.2.circlepath" size={16} tone="secondary"/>
     </Pressable>
     {page===0?<TotalChart allowed={allowed} blocked={blocked} loaded={loaded} pending={pending} uptime={uptime} frame={frame} selected={typeof selected==='string'?selected:undefined} onSelect={inspect}/>
       :<TimeChart kind={page===1?'counts':'rate'} title={chartTitles[page]!} pending={pending} frame={frame} buckets={buckets} selected={typeof selected==='number'?selected:undefined} onSelect={inspect}/>}
-    <CountLegend label="Allowed" count={displayed.available?displayed.allowed:undefined} value={value(displayed.allowed)} tone="allowed" dimmed={selected==='blocked'}/>
-    <CountLegend label="Blocked" count={displayed.available?displayed.blocked:undefined} value={value(displayed.blocked)} tone="blocked" dimmed={selected==='allowed'}/>
+    <CountLegend semantic label="Allowed" count={displayed.available?displayed.allowed:undefined} value={value(displayed.allowed)} tone="allowed" dimmed={selected==='blocked'}/>
+    <CountLegend semantic label="Blocked" count={displayed.available?displayed.blocked:undefined} value={value(displayed.blocked)} tone="blocked" dimmed={selected==='allowed'}/>
   </View>;
 }
 function TotalChart({allowed,blocked,loaded,pending,uptime,frame,selected,onSelect}:{allowed:number;blocked:number;loaded:boolean;pending:boolean;uptime:string;frame:ReturnType<typeof chartFrame>;selected?:ActivityOutcome;onSelect:(outcome:ActivityOutcome)=>void}){

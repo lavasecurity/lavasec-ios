@@ -56,11 +56,9 @@ struct RootView: View {
         // Larger Text setting flows through untouched; a fixed size otherwise. Applied app-wide here
         // so every screen — including sheets/covers presented from it — inherits it.
         .lavaTextSizeOverride(customization.textSizeOverride)
-        #if LAVA_REACT_NATIVE
         .onChange(of: hasSeenLavaOnboarding) { _, completed in
             if !completed { LavaAppBridge.shared.beginOnboarding(mock: false) }
         }
-        #endif
         // A review anchor was earned: present the native prompt, but ONLY while the scene is active.
         // StoreKit needs a foreground-active scene to present from, and an eligible moment can be armed
         // from an async path (a filter apply or VPN connect finishing) after the user has left the app —
@@ -70,17 +68,6 @@ struct RootView: View {
         // pinned: ReviewPromptWiringSourceTests.testRootViewForwardsTheSignalToNativeRequestReview
         .onChange(of: viewModel.pendingReviewRequest) { _, _ in
             presentReviewRequestIfActive()
-        }
-        .accessibilityHidden(!rootPresentationAllowsInteraction)
-        .allowsHitTesting(rootPresentationAllowsInteraction)
-        .overlay {
-            #if !LAVA_REACT_NATIVE
-            if !hasSeenLavaOnboarding {
-                LavaOnboardingView(hasSeenOnboarding: $hasSeenLavaOnboarding,
-                    installDNSProfile: { try await LavaAppBridge.shared.updateManagedDNSPatch(create: true) },
-                    supportsDNSProfile: ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 27)
-            }
-            #endif
         }
         .overlay {
             RageShakeDetector {
@@ -200,14 +187,6 @@ struct RootView: View {
                 handleDeepLink(deepLink)
             }
         }
-    }
-
-    private var rootPresentationAllowsInteraction: Bool {
-        #if LAVA_REACT_NATIVE
-        true // RN owns onboarding's body, interaction and accessibility cover.
-        #else
-        hasSeenLavaOnboarding
-        #endif
     }
 
     @ViewBuilder
@@ -535,29 +514,6 @@ private extension SettingsRoute {
         case .networkActivity:
             self = .networkActivity
         }
-    }
-}
-
-struct BugReportSheetView: View {
-    @Environment(\.dismiss) private var dismiss
-    @Binding private var isReportDirty: Bool
-
-    init(isReportDirty: Binding<Bool> = .constant(false)) {
-        self._isReportDirty = isReportDirty
-    }
-
-    var body: some View {
-        NavigationStack {
-            BugReportSettingsView(
-                isReportDirty: $isReportDirty,
-                onDismissRequested: canRequestDismiss
-            )
-        }
-        .interactiveDismissDisabled(isReportDirty)
-    }
-
-    private func canRequestDismiss() {
-        dismiss()
     }
 }
 

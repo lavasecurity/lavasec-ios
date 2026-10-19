@@ -7,7 +7,6 @@ final class AppServicesAPIAccessPolicySourceTests: XCTestCase {
         try assertBackupPasswordPolicy()
         try assertBugReportPolicy()
         try assertLocalLogArchivePolicy()
-        try assertOnboardingPolicy()
         try assertRageShakePolicy()
         try assertSupabasePolicy()
         try assertLegalNoticePolicy()
@@ -263,29 +262,6 @@ final class AppServicesAPIAccessPolicySourceTests: XCTestCase {
             in: source
         )
         XCTAssertTrue(error.contains("case archiveTooLarge"))
-    }
-
-    private func assertOnboardingPolicy() throws {
-        let source = try readSource(.onboardingAnimation)
-        let plan = try sourceBlock(
-            in: source,
-            startingAt: "enum OnboardingFeatureTransitionPlan {",
-            endingBefore: "enum OnboardingLavaWaveTimeline"
-        )
-        for name in [
-            "initialHeroTopSpacer",
-            "finalHeroTopSpacer",
-            "initialHeroHeight",
-            "finalHeroHeight",
-            "initialHeroPanelOffsetY",
-            "finalHeroPanelOffsetY",
-            "initialFeatureRowsOffsetY",
-            "finalFeatureRowsOffsetY",
-            "featureRowsTopOffset",
-        ] {
-            XCTAssertTrue(plan.contains("package static let \(name) ="), "missing package geometry: \(name)")
-            XCTAssertFalse(plan.contains("public static let \(name) ="), "public geometry remains: \(name)")
-        }
     }
 
     private func assertRageShakePolicy() throws {

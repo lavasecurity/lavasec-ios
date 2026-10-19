@@ -1,6 +1,6 @@
 import {act, fireEvent, render, screen} from '@testing-library/react-native';
 import {ScrollView,StyleSheet,Text, TextInput, View,type ViewStyle} from 'react-native';
-import {createRef,useState} from 'react';
+import {Fragment,createRef,useState} from 'react';
 import {SafeAreaInsetsContext} from 'react-native-safe-area-context';
 import {HeaderHeightContext} from '@react-navigation/elements';
 import {PresentationContext} from '../app/presentation';
@@ -187,6 +187,28 @@ test('conditional group rows do not remount an existing editor or discard its dr
   expect(screen.getByTestId('retained-editor').props.value).toBe('draft stays here');
   screen.rerender(content(false));
   expect(screen.getByTestId('retained-editor').props.value).toBe('draft stays here');
+});
+
+test('group dividers include nested fragment rows while keyed fragments retain independent drafts',()=>{
+  function Editor({id}:{id:string}){const [value,setValue]=useState('');return <TextInput testID={id} value={value} onChangeText={setValue}/>;}
+  const content=(extra:boolean,reverse=false)=><Group>{(reverse?['b','a']:['a','b']).map(id=><Fragment key={id}>
+    <Fragment key="rows">{id==='a'&&extra&&<Text key="notice">Optional row</Text>}<Editor key="editor" id={id}/></Fragment>
+    <></>
+  </Fragment>)}<>{false&&<Text>Hidden row</Text>}</></Group>;
+  const dividers=()=>screen.UNSAFE_getAllByType(View).filter(view=>StyleSheet.flatten(view.props.style)?.height===StyleSheet.hairlineWidth);
+  render(content(false));
+  expect(dividers()).toHaveLength(1);
+  const first=screen.getByTestId('a'),second=screen.getByTestId('b');
+  fireEvent.changeText(first,'First draft');fireEvent.changeText(second,'Second draft');
+  screen.rerender(content(true,true));
+  expect(dividers()).toHaveLength(2);
+  expect(screen.getByTestId('a')).toBe(first);expect(screen.getByTestId('b')).toBe(second);
+  expect(first.props.value).toBe('First draft');expect(second.props.value).toBe('Second draft');
+  screen.rerender(content(false));
+  expect(dividers()).toHaveLength(1);
+  expect(screen.getByTestId('a')).toBe(first);expect(screen.getByTestId('b')).toBe(second);
+  screen.rerender(<Group><><>{null}{false}</></></Group>);
+  expect(dividers()).toHaveLength(0);
 });
 
 test('the domain editor follows the app text override and adopts the native measured line height',()=>{

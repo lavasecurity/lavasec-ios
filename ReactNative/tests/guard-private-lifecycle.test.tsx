@@ -1,3 +1,5 @@
+// QA's independent native navigator is qualified by device-qa-presentation-lifecycle.
+jest.mock('../review/QAFlowAdapter.ios',()=>({QAFlowAdapter:()=>null}));
 import {useLayoutEffect,useSyncExternalStore} from 'react';
 import {AppState,type AppStateStatus} from 'react-native';
 import {act,fireEvent,render,screen} from '@testing-library/react-native';

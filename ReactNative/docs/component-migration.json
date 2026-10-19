@@ -1,0 +1,140 @@
+{
+  "scope": "RN component foundation; existing renderers, native wires, tokens, artwork and feature owners retained",
+  "components": [
+    {
+      "family": "text",
+      "previousOwner": "src/contracts.ts",
+      "owner": "src/ui/contracts/text.ts",
+      "exports": [
+        "LavaTextProps",
+        "LavaTextRole",
+        "LavaTextTone"
+      ],
+      "compatibilityEntry": "src/contracts.ts",
+      "android": "shared"
+    },
+    {
+      "family": "surface",
+      "previousOwner": "src/contracts.ts",
+      "owner": "src/ui/contracts/surface.ts",
+      "exports": [
+        "LavaCardProps"
+      ],
+      "compatibilityEntry": "src/contracts.ts",
+      "android": "shared"
+    },
+    {
+      "family": "actions",
+      "previousOwner": "src/contracts.ts",
+      "owner": "src/ui/contracts/action.ts",
+      "exports": [
+        "LavaActionButtonProps"
+      ],
+      "compatibilityEntry": "src/contracts.ts",
+      "android": "shared"
+    },
+    {
+      "family": "icons",
+      "previousOwner": "src/contracts.ts",
+      "owner": "src/ui/contracts/icon.ts",
+      "exports": [
+        "LavaIconAction",
+        "LavaIconButtonProps"
+      ],
+      "compatibilityEntry": "src/contracts.ts",
+      "android": "shared"
+    },
+    {
+      "family": "selection",
+      "previousOwner": "src/contracts.ts",
+      "owner": "src/ui/contracts/selection.ts",
+      "exports": [
+        "LavaSelectionAccessoryProps"
+      ],
+      "compatibilityEntry": "src/contracts.ts",
+      "android": "shared"
+    },
+    {
+      "family": "toggle-contract",
+      "previousOwner": "src/contracts.ts",
+      "owner": "src/ui/contracts/toggle.ts",
+      "exports": [
+        "LavaToggleRowProps"
+      ],
+      "compatibilityEntry": "src/contracts.ts",
+      "android": "shared"
+    },
+    {
+      "family": "choice-contract",
+      "previousOwner": "src/contracts.ts",
+      "owner": "src/ui/contracts/choice.ts",
+      "exports": [
+        "LavaChoiceProps",
+        "LavaChoiceOption"
+      ],
+      "compatibilityEntry": "src/contracts.ts",
+      "android": "shared"
+    },
+    {
+      "family": "toggle-request",
+      "previousOwner": "src/toggle-row.ios.tsx",
+      "owner": "src/ui/behavior/toggle.ts",
+      "exports": [
+        "useToggleRequest"
+      ],
+      "compatibilityEntry": "src/toggle-row.ios.tsx",
+      "android": "shared"
+    },
+    {
+      "family": "choice-request",
+      "previousOwner": "src/choice.ios.tsx",
+      "owner": "src/ui/behavior/choice.ts",
+      "exports": [
+        "useChoiceRequest"
+      ],
+      "compatibilityEntry": "src/choice.ios.tsx",
+      "android": "shared"
+    },
+    {
+      "family": "ios-symbols",
+      "previousOwner": "src/components.ios.tsx",
+      "owner": "src/ui/platform/ios/icons.ts",
+      "exports": [
+        "actionSymbols"
+      ],
+      "compatibilityEntry": "src/components.ios.tsx",
+      "android": "platform binding required"
+    },
+    {
+      "family": "ios-toolbar",
+      "previousOwner": "review/scaffold.tsx",
+      "owner": "src/ui/platform/toolbar.ios.ts",
+      "exports": [
+        "toolbarButton",
+        "toolbarToggle",
+        "ToolbarSymbol"
+      ],
+      "compatibilityEntry": "review/scaffold.tsx",
+      "android": "platform binding required"
+    }
+  ],
+  "additiveEntryPoints": [
+    "src/ui/contracts/adapter.ts",
+    "src/ui/contracts/navigation.ts",
+    "src/ui/components/choice.tsx"
+  ],
+  "retainedPlatformOwners": [
+    "src/components.ios.tsx",
+    "src/choice.ios.tsx",
+    "src/toggle-row.ios.tsx",
+    "src/surface.ios.tsx",
+    "src/colors.ios.ts",
+    "src/foundation.ts",
+    "src/generated/tokens.ts",
+    "src/GuardianDrawing.tsx",
+    "src/OnboardingDrawing.tsx",
+    "specs/"
+  ],
+  "adopterMigration": "Toolbar consumers use toolbarAction with the same labels, callbacks, identifiers and exact iOS glyphs. Other existing component consumers retain their imports and component identities.",
+  "androidIntegration": "Apply only structural delta; reconcile existing overlays and canonical-source provenance in the Android repository."
+}

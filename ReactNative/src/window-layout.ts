@@ -6,23 +6,32 @@ export type WindowSize={width:number;height:number};
 // Native form sheets can be smaller than Dimensions.window. Their measured
 // viewport scopes the same policy used by pages, including detached footers.
 export const WindowSizeContext=createContext<WindowSize|null>(null);
+export type WindowMetrics='responsive'|'nativeFlow';
+// Migrated native task layouts retain authored point metrics while using the
+// real viewport for wrapping, orientation and keyboard/fitted-sheet geometry.
+export const WindowMetricsContext=createContext<WindowMetrics>('responsive');
 
-export function windowLayout({width,height}:WindowSize){
+export function windowLayout({width,height}:WindowSize,metrics:WindowMetrics='responsive'){
   const shortSide=Math.min(width,height);
   // Phone rotation must not enlarge the phone UI. A narrow tablet window also
   // returns to phone sizing; full-size tablets get a bounded larger baseline.
   const expansion=Math.min(1,Math.max(0,(shortSide-480)/480));
   const scale=1+0.4*expansion;
-  return {width,height,scale,spacingScale:1+0.75*expansion,insetScale:1+0.8*expansion,
+  const layout={width,height,scale,spacingScale:1+0.75*expansion,insetScale:1+0.8*expansion,
     topPadding:foundation.space.screenTop+8*expansion,landscape:width>height,
     readingWidth:Math.min(880,720*scale),wideWidth:1180,
     gutter:foundation.space.screenHorizontal*scale};
+  // Native LavaSheetScaffold/LavaScreenContent fill their proposed width;
+  // neither applies the RN story reading band or window-size multipliers.
+  return metrics==='nativeFlow'?{...layout,scale:1,spacingScale:1,insetScale:1,
+    topPadding:foundation.space.screenTop,readingWidth:width,gutter:foundation.space.screenHorizontal}:layout;
 }
 
 export function useWindowLayout(){
   const window=useWindowDimensions();
   const viewport=useContext(WindowSizeContext);
-  return windowLayout(viewport??window);
+  const metrics=useContext(WindowMetricsContext);
+  return windowLayout(viewport??window,metrics);
 }
 
 // Single-column scenes retain their authored compact-window breadth, but use

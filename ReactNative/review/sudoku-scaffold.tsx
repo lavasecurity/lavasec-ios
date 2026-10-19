@@ -1,27 +1,53 @@
 import {useWindowLayout,useWindowStyles} from '../src/window-layout';
 import {memo,useContext,useMemo,type ComponentRef,type Ref} from 'react';
-import {ActivityIndicator, Animated, Pressable, StyleSheet, View, type GestureResponderHandlers} from 'react-native';
+import {ActivityIndicator, Animated, Pressable, ScrollView, StyleSheet, View, type GestureResponderHandlers} from 'react-native';
 import {Text, localized, localizedFormat,PresentationContext} from '../app/presentation';
 import {LavaActionButton, LavaIconButton, type LavaIconAction} from '../src';
 import {colors} from '../src/colors.ios';
 import {foundation} from '../src/foundation';
 import {Copy, Symbol} from './primitives';
-import {cellLabel, keypadColumnGeometry, keypadGeometry, keypadShortSide, workingBoard, type SudokuGame} from './sudoku-model';
+import {cellLabel, hintCellIndices, keypadColumnGeometry, keypadGeometry, keypadShortSide, workingBoard, type SudokuGame} from './sudoku-model';
 import {revealFontSize, revealLineHeight, revealTileOffset} from './sudoku-reveal';
 
 // Gameplay keeps a stable native cell tree. Selection/preview changes update
 // only affected memoized cells/keys; labels and counts follow game/locale changes.
+// Explicit bounds keep border triangles inside their offsets in Yoga.
+const hintSide=(cell:number)=>Math.max(6,Math.min(8,cell*0.16));
+const hintInset=(index:number)=>index===8
+  // Clear the rounded board corner as well as its 3pt outline.
+  ?Math.ceil(foundation.radius.compact-(foundation.radius.compact-3-2)/Math.SQRT2):5;
+const SudokuNotes=memo(function SudokuNotes({index,cell,notes,hint}:{index:number;cell:number;notes:readonly number[];hint:boolean}){
+  const columns=notes.length===1?1:notes.length<=4?2:3;
+  // Rounded digits need much less width than height. Pack their slots to the
+  // glyphs and reserve the chip's corner horizontally, keeping full row height.
+  const padding=3,availableWidth=cell-padding-(hint?hintInset(index)+hintSide(cell)+2:padding);
+  const availableHeight=cell-2*padding;
+  const fontSize=Math.min(cell*0.55,availableWidth/(columns*0.65),availableHeight/(columns*1.05));
+  const slotWidth=fontSize*0.65,slotHeight=fontSize*1.05;
+  const width=slotWidth*columns,height=slotHeight*columns;
+  const left=padding+(availableWidth-width)/2,top=(cell-height)/2;
+  return <View testID={`sudoku-notes-${index}`} accessible={false} style={{position:'absolute',left,top,width,height}}>
+    {Array.from({length:columns},(_,row)=><View key={row} style={s.row}>{Array.from({length:columns},(_,column)=>{
+      const digit=notes[row*columns+column];
+      return <View key={column} style={{width:slotWidth,height:slotHeight,alignItems:'center',justifyContent:'center'}}>
+        {digit!==undefined&&<Text responsive={false} allowFontScaling={false} numberOfLines={1}
+          style={[s.note,{fontSize,lineHeight:slotHeight}]}>{digit}</Text>}
+      </View>;
+    })}</View>)}
+  </View>;
+});
 type CellProps={index:number;cell:number;given:boolean;value:number;notes:readonly number[];active:boolean;lockedTrack:boolean;
-  notesMode:boolean;assist:boolean;correct:boolean;loading:boolean;locked:boolean;label:string;onChoose:(index:number)=>void};
-const SudokuCell=memo(function SudokuCell({index,cell,given,value,notes,active,lockedTrack,notesMode,assist,correct,loading,locked,label,onChoose}:CellProps){
+  notesMode:boolean;assist:boolean;hint:boolean;correct:boolean;loading:boolean;locked:boolean;label:string;onChoose:(index:number)=>void};
+const SudokuCell=memo(function SudokuCell({index,cell,given,value,notes,active,lockedTrack,notesMode,assist,hint,correct,loading,locked,label,onChoose}:CellProps){
   const fill=active?colors.safeGreen:lockedTrack||given?colors.secondaryText:notesMode&&!value&&notes.length?colors.softGreen:undefined;
-  return <Pressable testID={`sudoku-cell-${index}`} accessibilityRole={given?'text':'button'} accessibilityLabel={label}
+  return <Pressable testID={`sudoku-cell-${index}`} accessibilityRole={given?'text':'button'} accessibilityLabel={label} accessibilityValue={{text:hint?localized('Hint available'):''}}
     accessibilityState={{selected:active,disabled:loading||locked&&!given}} disabled={loading} onPress={()=>onChoose(index)} style={[s.cell,{width:cell,height:cell}]}>
     {fill&&<View pointerEvents="none" style={[StyleSheet.absoluteFill,{backgroundColor:fill,opacity:active||lockedTrack?0.24:given?0.1:1}]}/>}
     {value!==0?<Text responsive={false} allowFontScaling={false} style={[s.numeral,{fontSize:cell*0.55,fontWeight:given?'700':'400',color:given?colors.ink:!assist||correct?colors.safeGreen:colors.lavaOrangeText}]}>{value}</Text>
-      :notesMode&&notes.length>0&&<View style={[s.notes,{width:cell,height:cell}]}>{notes.map(digit=><Text key={digit} responsive={false} allowFontScaling={false} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.18}
-        style={[s.note,{fontSize:cell*0.55}]}>{digit}</Text>)}</View>}
+      :notesMode&&notes.length>0&&<SudokuNotes index={index} cell={cell} notes={notes} hint={hint}/>}
     {(active||lockedTrack)&&<View pointerEvents="none" style={[StyleSheet.absoluteFill,{borderWidth:2.5,borderColor:active?colors.safeGreen:colors.secondaryText,opacity:active?1:0.72}]}/>}
+    {hint&&<View testID={`sudoku-hint-${index}`} pointerEvents="none" accessible={false} accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
+      style={{position:'absolute',top:hintInset(index),right:hintInset(index),width:hintSide(cell),height:hintSide(cell),borderTopWidth:hintSide(cell),borderLeftWidth:hintSide(cell),borderTopColor:colors.lavaOrangeText,borderLeftColor:'transparent'}}/>}
   </Pressable>;
 });
 const SudokuGrid=memo(function SudokuGrid({side,cell}:{side:number;cell:number}) {
@@ -44,6 +70,7 @@ export const SudokuBoard=memo(function SudokuBoard({game,side,selected,tracking,
     return {board,locked:board.every((value,index)=>value===game.puzzle.solution[index]),complete:board.every(Boolean),filled:board.filter(Boolean).length,
       labels:board.map((_,index)=>cellLabel(game,index,notesMode,assist,localizedFormat))};
   },[game,notesMode,assist,locale]);
+  const hintCells=useMemo(()=>assist?hintCellIndices(game):new Set<number>(),[game,assist]);
   return <View ref={boardRef} testID="sudoku-board" pointerEvents={loading?'none':'auto'}
     accessibilityElementsHidden={!ready} importantForAccessibility={ready?'auto':'no-hide-descendants'}
     style={[s.board,{width:side,height:side},!ready&&s.hiddenBoard]} {...panHandlers}>
@@ -52,7 +79,7 @@ export const SudokuBoard=memo(function SudokuBoard({game,side,selected,tracking,
     {Array.from({length:9},(_,row)=><View key={row} style={s.row}>{Array.from({length:9},(_,col)=>{
       const index=row*9+col,given=game.puzzle.givens[index]!==0;
       return <SudokuCell key={index} index={index} cell={cell} given={given} value={state.board[index]!} notes={game.notes[index]!}
-        active={selected===index} lockedTrack={tracking===index&&given} notesMode={notesMode} assist={assist}
+        active={selected===index} lockedTrack={tracking===index&&given} notesMode={notesMode} assist={assist} hint={ready&&!loading&&hintCells.has(index)}
         correct={state.board[index]===game.puzzle.solution[index]} loading={loading} locked={state.locked} label={state.labels[index]!} onChoose={onChoose}/>;
     })}</View>)}
     {revealEmoji!==undefined&&revealTiles!==undefined&&revealTiles.length>0&&
@@ -152,30 +179,25 @@ export function SudokuFeedback({loading,error,outcome,onRetry,column=false,testI
   </View>;
 }
 
-// The rail has one layout and one set of controls. Only its axis changes:
-// Close stays at the leading edge, and the tools stay at the trailing edge.
-// Landscape adds the two-player control directly after Close: the six controls
-// then spread at one uniform distance (the flexible spacer is dropped), and only
-// the minimum gap is enforced when a short band cannot host that spacing.
+// One control list follows the rail's axis. Compact windows tighten the gaps;
+// exceptionally short landscape windows can scroll without shrinking hit targets.
 export type SudokuTool={id:string;label:string;icon:LavaIconAction;selected?:boolean;prominent?:boolean;disabled:boolean;onPress:()=>void;onLongPress?:()=>void;longPressDelayMs?:number};
-export function SudokuRail({tools,onClose,landscape=false,availableHeight,onStartTwoPlayer,flash}:{
-  tools:readonly SudokuTool[];onClose:()=>void;landscape?:boolean;availableHeight?:number;onStartTwoPlayer?:()=>void;
+export function SudokuRail({tools,onClose,landscape=false,availableHeight,availableWidth,onStartTwoPlayer,flash}:{
+  tools:readonly SudokuTool[];onClose:()=>void;landscape?:boolean;availableHeight?:number;availableWidth?:number;onStartTwoPlayer?:()=>void;
   flash?:{id:string;opacity:Animated.Value};
 }) {
-  const s=useWindowStyles(windowBase_s);
-  // Six 44pt targets plus the rail's own padding are the physical floor for the
-  // two-player control. Below it the control is omitted rather than shrinking a
-  // target under the accessibility minimum; every supported device clears it.
-  const fitsTwoPlayer=availableHeight===undefined
-    ||availableHeight>=(tools.length+2)*foundation.control.target+2*foundation.space.sm;
-  const showsTwoPlayer=landscape&&onStartTwoPlayer!==undefined&&fitsTwoPlayer;
-  // The spacer is a flex child, so portrait's five controls create five gaps.
-  // Compress those gaps only when a short landscape viewport cannot fit 12pt spacing.
-  const controls=tools.length+1+(showsTwoPlayer?1:0);
-  const gap=landscape&&availableHeight!==undefined
-    ? Math.max(0,Math.min(foundation.space.md,(availableHeight-controls*foundation.control.target-2*foundation.space.sm)/controls))
-    : undefined;
-  return <View testID="sudoku-rail" style={[s.rail,landscape?s.railColumn:s.railRow,showsTwoPlayer&&s.railEven,gap!==undefined&&{gap}]}>
+  const s=useWindowStyles(windowBase_s),layout=useWindowLayout();
+  const target=foundation.control.target*layout.scale,padding=2*foundation.space.sm*layout.scale;
+  // Keep two-player available on compact phones too; scrolling handles the
+  // extra hint control when all seven targets cannot fit at once.
+  const showsTwoPlayer=landscape&&onStartTwoPlayer!==undefined;
+  // The flex spacer contributes an extra gap when two-player is absent.
+  const controls=tools.length+1+(showsTwoPlayer?1:0),gaps=showsTwoPlayer?controls-1:controls;
+  const breadth=landscape?availableHeight:Math.min(availableWidth??layout.width,layout.readingWidth);
+  const inset=landscape?padding:2*foundation.space.screenHorizontal*layout.scale;
+  const gap=breadth===undefined?undefined:Math.max(0,Math.min(foundation.space.md*layout.scale,(breadth-controls*target-inset)/gaps));
+  const scrolls=landscape&&breadth!==undefined&&breadth<controls*target+inset;
+  const children=<>
     <LavaIconButton title="Close" icon="close" shape="rounded" onPress={onClose} testID="sudoku-close"/>
     {showsTwoPlayer&&onStartTwoPlayer&&<LavaIconButton title="Two-player mode" icon="twoPeople" shape="rounded" onPress={onStartTwoPlayer} testID="sudoku-two-player"/>}
     {!showsTwoPlayer&&<View style={s.flexible}/>}
@@ -183,6 +205,9 @@ export function SudokuRail({tools,onClose,landscape=false,availableHeight,onStar
       <LavaIconButton title={tool.label} icon={tool.icon} shape="rounded" selected={tool.selected??false} prominent={tool.prominent??false} disabled={tool.disabled} onPress={tool.onPress} onLongPress={tool.onLongPress} longPressDelayMs={tool.longPressDelayMs} testID={tool.id}/>
       {flash?.id===tool.id&&<Animated.View pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={[s.toolFlash,{opacity:flash.opacity}]}/>}
     </View>)}
+  </>;
+  return <View testID="sudoku-rail" style={[s.rail,landscape?s.railColumn:s.railRow,showsTwoPlayer&&s.railEven,gap!==undefined&&{gap}]}>
+    {scrolls?<ScrollView testID="sudoku-rail-scroll" showsVerticalScrollIndicator={false} style={{flex:1}}>{children}</ScrollView>:children}
   </View>;
 }
 
@@ -212,8 +237,7 @@ export const sudokuStyles=StyleSheet.create({
   revealTile:{position:'absolute',overflow:'hidden',backgroundColor:colors.groupedBackground},
   revealGlyph:{textAlign:'center'},
   numeral:{fontFamily:'ui-rounded'},
-  notes:{flexDirection:'row',alignItems:'center'},
-  note:{flex:1,textAlign:'center',fontFamily:'ui-rounded',fontStyle:'italic',color:colors.secondaryText},
+  note:{textAlign:'center',fontFamily:'ui-rounded',fontStyle:'italic',color:colors.secondaryText},
   boardOutline:{borderRadius:foundation.radius.compact,borderWidth:3},
   keypad:{height:sudokuMetrics.keypadHeight,paddingTop:foundation.space.md},
   erase:{position:'absolute',top:eraserOffset,height:foundation.control.target,borderRadius:foundation.radius.control,backgroundColor:colors.cardBackground,alignItems:'center',justifyContent:'center'},

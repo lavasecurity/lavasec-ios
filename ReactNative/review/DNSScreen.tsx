@@ -7,7 +7,7 @@ import type {DNSChoice} from '../app/contract';
 import {LavaActionButton,LavaIconButton,LavaToggleControl} from '../src';
 import {colors} from '../src/colors.ios';
 import {Screen,Section,Symbol} from './primitives';
-import {AccessorySlot,AddAction,Group,ListRow,Quiet,toolbarButton,useToolbar} from './scaffold';
+import {AccessorySlot,AddAction,Group,ListRow,Quiet,toolbarAction,useToolbar} from './scaffold';
 import {OrderedListAction,useSettingsEditToolbar,SettingsIntro,SettingsInset,SettingsSurface,SettingsGlyph} from './settings-scaffold';
 import {CatalogSheet} from './story-scaffold';
 import {useReview} from './ReviewContext';
@@ -30,7 +30,7 @@ export function DNSScreen(){
   useEffect(()=>()=>retireDraft.current({tiers:[],context:''}),[]);
   const edit=()=>{setDraft({tiers:live?.dns.tiers??[],context:live?.dns.tiersContext??'',systemDNS:live?.dnsPatch?.provider??null,systemDNSOriginalID:live?.dnsPatch?.provider?.id??null});setEditing(true);};
   const cancel=()=>{const discard=()=>{setEditing(false);setDraft({tiers:[],context:''});};
-    if(systemChanged||JSON.stringify(draft.tiers)!==JSON.stringify(live?.dns.tiers))Alert.alert('Discard changes?','Your saved DNS settings will stay active.',[{text:'Cancel',style:'cancel'},{text:'Discard',style:'destructive',onPress:discard}]);else discard();};
+    if(systemChanged||JSON.stringify(draft.tiers.map(selection))!==JSON.stringify((live?.dns.tiers??[]).map(selection)))Alert.alert('Discard changes?','Your saved DNS settings will stay active.',[{text:'Cancel',style:'cancel'},{text:'Discard',style:'destructive',onPress:discard}]);else discard();};
   const commit=async()=>{if(!app||pending.current)return;pending.current=true;setBusy(true);
     try{
       if(systemChanged){
@@ -82,7 +82,7 @@ export function DNSScreen(){
       {text:'Cancel',style:'cancel'},{text:'Remove DNS profile',style:'destructive',onPress:()=>void command('dnsPatchRemove')},
     ]);
   };
-  return <Screen><SettingsIntro summary={editable?'Choose who looks up website addresses for your device.':'With fallback off, VPN chaining uses DNS from its WireGuard configuration.'}
+  return <Screen><SettingsIntro summary={editable?'Choose who looks up website addresses for your device.':live?.dns.unavailableDetail??'With fallback off, VPN chaining uses DNS from its WireGuard configuration.'}
     action={!editable?{title:'Review VPN chaining',onPress:()=>nav.navigate('VPNChaining')}:undefined}/>
     {editable&&<><Section title="Resolution tiers in Lava" footer="Lava tries the primary DNS first, then the fallback DNS if needed."><Group footer={editing&&editable?<OrderedListAction count={tiers.length} addTitle="Add fallback DNS" disabled={busy}
       onAdd={()=>nav.navigate('DNSPicker',{target:'tier',index:tiers.length})} onSwap={()=>setDraft({...draft,tiers:[...tiers].reverse()})}/>:undefined}>
@@ -132,7 +132,7 @@ export function DNSPickerScreen(){
     try{if(target==='profile'){setDraft({...draft,systemDNS:selected});}
       else {const tiers=[...draft.tiers];tiers[index]={...selected,isEnabled:draft.tiers[index]?.isEnabled!==false};setDraft({...draft,tiers});}nav.goBack();
     }catch(e){report(e);}finally{pending.current=false;setBusy(false);}};
-  useToolbar({title:'Choose DNS',unstable_headerRightItems:()=>target==='tier'?[toolbarButton('Add custom DNS','plus',()=>{if(!live?.limits.allowsCustomDNS){upgrade('customDNS',async()=>{if(!app)return;const id=await app.command<string>({type:'dns.customDraft',choice:custom});setCustomToken(id);return {name:'CustomEntry',params:{id,kind:'dns'}};});return;}if(!app||pending.current)return;pending.current=true;setBusy(true);void app.command<string>({type:'dns.customDraft',choice:custom}).then(id=>{setCustomToken(id);nav.navigate('CustomEntry',{id,kind:'dns'});}).catch(report).finally(()=>{pending.current=false;setBusy(false);});},busy)]:[],
+  useToolbar({title:'Choose DNS',unstable_headerRightItems:()=>target==='tier'?[toolbarAction('Add custom DNS','add',()=>{if(!live?.limits.allowsCustomDNS){upgrade('customDNS',async()=>{if(!app)return;const id=await app.command<string>({type:'dns.customDraft',choice:custom});setCustomToken(id);return {name:'CustomEntry',params:{id,kind:'dns'}};});return;}if(!app||pending.current)return;pending.current=true;setBusy(true);void app.command<string>({type:'dns.customDraft',choice:custom}).then(id=>{setCustomToken(id);nav.navigate('CustomEntry',{id,kind:'dns'});}).catch(report).finally(()=>{pending.current=false;setBusy(false);});},busy)]:[],
   },[target,busy,draft,custom,live?.limits,selected]);
   return <CatalogSheet sections={sections} categoryTitles={(target==='profile'?['DoT','DoH']:['Device','DoH','DoT','IP','DoQ']).filter(title=>choices.some(choice=>choice.transport===title))} search={search} onSearch={setSearch} searchLabel="Search DNS providers or transports"
     renderRow={choice=><ListRow key={choice.id} verbatimTitle title={choice.name} metadata={choice.metadata} selected={!!selected&&sameDNS(choice,selected)} disabled={busy||target==='tier'&&draft.tiers.some((row,i)=>i!==index&&sameDNS(row,choice))} onPress={()=>setSelected(choice)}/>}

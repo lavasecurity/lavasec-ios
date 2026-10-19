@@ -7,6 +7,15 @@ import LavaSecAppServices
 import LavaSecFilterPipeline
 import LavaSecPresentation
 
+private enum LavaAppRuntimeContext {
+    @TaskLocal static var id: UUID?
+}
+@MainActor private final class LavaAppRuntimeObjectIdentity {
+    weak var object: AnyObject?
+    let nonce = UUID().uuidString
+    init(_ object: AnyObject) { self.object = object }
+}
+
 @MainActor
 @objc(LavaAppBridge)
 final class LavaAppBridge: NSObject, ObservableObject {
@@ -26,6 +35,7 @@ final class LavaAppBridge: NSObject, ObservableObject {
     var filterEditAuthenticationInFlight = false
     var filterPresentationEpoch = 0
     let shareCardAuthority = LavaShareCardAuthority()
+    var activityShareGrant: ActivityShareGrant?
     var shareCardForegroundEpoch: UInt64 = 0
     var shareCardModuleEpoch: UInt64 = 0
     var standaloneDomainReviews: [String: StandaloneDomainReview] = [:]
@@ -35,16 +45,38 @@ final class LavaAppBridge: NSObject, ObservableObject {
     let domainCheckSnapshotLoadGate = SnapshotCompileGate()
     @Published var flow: LavaAppNativeFlow? {
         didSet {
-            if let oldValue, oldValue.usesReactPresentation, oldValue.id != flow?.id { closingForegroundIDs.insert(oldValue.id) }
+            #if DEBUG || LAVA_QA_TOOLS
+            // A QA sheet can cover a still-mounted page, including one whose
+            // authentication is pending before it has a session to retire.
+            if let flow, ["phoneQA", "phoneQASheet"].contains(flow.name) {
+                retireQAForNewFlow(id: flow.id.uuidString)
+            }
+            #endif
+            if let oldValue, oldValue.id != flow?.id {
+                if oldValue.usesReactPresentation { closingForegroundIDs.insert(oldValue.id) }
+                foregroundNaturalHeights.removeValue(forKey: oldValue.id)
+                retireAccountBackup(oldValue.id)
+                if oldValue.isImport { retireImportPresentation() }
+                if oldValue.name == "passcode", passcodeSession?.id == oldValue.id { passcodeSession?.retire(); passcodeSession = nil }
+            }
         }
     }
     var closingForegroundIDs = Set<UUID>()
     @Published var feedbackDraftIsDirty = false
     @Published var foregroundDraftIsDirty = false
     var foregroundDismissAttempt = 0
+    var foregroundNaturalHeights: [UUID: CGFloat] = [:]
     var feedbackVisit: LavaFeedbackVisit?
     var wireGuardEditorVisit: LavaWireGuardEditorVisit?
     var onboardingVisit: LavaOnboardingVisit?
+    var accountBackupSession: LavaAccountBackupSession?
+    var importSession: LavaAppImportSession?
+    var flowAlert: LavaAppFlowAlert?
+    var flowAlertLifetime = ScopedSystemAlertLifetime()
+    var passcodeSession: LavaPasscodeSession?
+    #if DEBUG || LAVA_QA_TOOLS
+    var qaSession: LavaQASession?
+    #endif
     let presentationCache = SecurePresentationCache()
     var presentationSourceGeneration: UInt64 = 0
     private var presentationOwnerRevision = PresentationOwnerRevision()
@@ -54,6 +86,8 @@ final class LavaAppBridge: NSObject, ObservableObject {
     var presentationDisplayClearGeneration: UInt64 = 0
     private var subscriptions = Set<AnyCancellable>()
     private var observers: [UUID: (String) -> Void] = [:]
+    private var runtimeOwnership = PresentationRuntimeOwnership()
+    private var runtimeObjectIdentities: [String: LavaAppRuntimeObjectIdentity] = [:]
     private(set) var presentationReveal = PresentationRevealGate()
     func mountPresentation(_ id: String) { presentationReveal.mount(id) }
     func unmountPresentation(_ id: String) { updatePresentationReveal { $0.unmount(id) } }
@@ -105,6 +139,16 @@ final class LavaAppBridge: NSObject, ObservableObject {
         #endif
         PrivateImportFiles.purgeExpired()
         #if DEBUG && targetEnvironment(simulator)
+        // A fixed public puzzle for the real RN route's rendering journey.
+        // Seed the in-memory projection; normal RN editing and persistence remain in use.
+        if ProcessInfo.processInfo.environment["LAVA_UI_TEST_SUDOKU_HINTS"] == "1" {
+            let source = SudokuPuzzle.generate(seed: 648)
+            // A legal within-band row swap brings a provable cell to the rounded
+            // top-right corner without adding clues or revealing solution digits.
+            let indices = [2, 1, 0, 3, 4, 5, 6, 7, 8].flatMap { row in (0..<9).map { row * 9 + $0 } }
+            let puzzle = SudokuPuzzle(givens: indices.map { source.givens[$0] }, solution: indices.map { source.solution[$0] })
+            model.sudokuGameState = SudokuGameState(puzzle: puzzle)
+        }
         // Seed UIKit's actual pasteboard in the target process: the XCTest runner
         // and host clipboard transport are unreliable on iOS 27 simulators.
         // This fixed public fixture is never compiled into device/release builds.
@@ -115,13 +159,13 @@ final class LavaAppBridge: NSObject, ObservableObject {
         }
         if ProcessInfo.processInfo.environment["LAVA_UI_TEST_DOMAIN_FILTER"] == "1" {
             // The task-owned simulator needs a published filter, not merely a
-            // parsed hostname. Publish one public manual rule through the real
+            // parsed hostname. Publish fixed public rules and exceptions through the real
             // persistence funnel, without fetching blocklists or enabling VPN.
             var fixture = model.configuration
             fixture.enabledBlocklistIDs = []
             fixture.customBlocklists = []
             fixture.blockedDomains = ["blocked.example"]
-            fixture.allowedDomains = []
+            fixture.allowedDomains = ["exception.example", "parent.example"]
             fixture.protectionEnabled = false
             model.configuration = fixture
             Task { @MainActor [weak self] in
@@ -205,6 +249,13 @@ final class LavaAppBridge: NSObject, ObservableObject {
                 self?.presentationCache.invalidate()
             }
         }.store(in: &subscriptions)
+        NotificationCenter.default.publisher(for: UIContentSizeCategory.didChangeNotification).sink { [weak self] _ in
+            Task { @MainActor [weak self] in
+                // Semantic font measurements are public display preferences;
+                // the existing projection keeps its ordinary privacy gates.
+                self?.publish()
+            }
+        }.store(in: &subscriptions)
         NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification).sink { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.presentationCache.invalidate()
@@ -285,14 +336,25 @@ final class LavaAppBridge: NSObject, ObservableObject {
         guard !publishQueued else { return }
         publishQueued = true
         Task { @MainActor [weak self] in
-            await Task.yield()
-            guard let self else { return }
-            publishQueued = false
-            publish()
+            // Model observations and terminal cleanup are process-owned. A
+            // queued publication must not inherit a detached command's runtime.
+            await LavaAppRuntimeContext.$id.withValue(nil) {
+                await Task.yield()
+                guard let self else { return }
+                self.publishQueued = false
+                self.publish()
+            }
         }
     }
     @discardableResult
     func publish() -> String {
+        // A task inherited from a detached module cannot compose a snapshot
+        // that would manufacture a new credential owner after retirement.
+        if let runtime = LavaAppRuntimeContext.id, !runtimeOwnership.isActive(runtime) { return "{}" }
+        // Session-only changes also own UIKit dismissal and native credential
+        // admission; observers must update before the next gesture or render.
+        // pinned: AccountBackupSessionSourceTests.testSessionPublicationRefreshesNativeDismissalGates
+        objectWillChange.send()
         revision += 1
         SecurityController.tracePresentation("snapshot.begin")
         let value = snapshot()
@@ -308,7 +370,8 @@ final class LavaAppBridge: NSObject, ObservableObject {
         let value = json(["schema": 1, "fullApp": true, "domainCheckAvailable": true, "revision": revision,
                           "presentationBlocked": true, "presentationToken": presentationReveal.token, "backgroundPrivacyCoverRequired": security.backgroundPrivacyCoverRequired,
                           "authenticationInProgress": false, "presentationRevoked": true,
-                          "security": ["ownerRevision": presentationOwnerRevision.revision(for: model.account.accountAuthState.connections.all.map { $0.session.userID })]])
+                          "passcode": passcodeProjection().map { $0 as Any } ?? NSNull(), "presentation": presentationSnapshot(),
+                         "security": ["ownerRevision": presentationOwnerRevision.revision(for: model.account.accountAuthState.connections.all.map { $0.session.userID })]])
         for observer in observers.values { observer(value) }
     }
     @objc func observe(_ callback: @escaping (String) -> Void) -> String {
@@ -316,7 +379,80 @@ final class LavaAppBridge: NSObject, ObservableObject {
         let id = UUID(); observers[id] = callback
         return id.uuidString
     }
+    /// Only a React module has the matching invalidation lifecycle. Native
+    /// snapshot observers must not keep unclaimed credential entries alive.
+    // pinned: native-page-source.test.js runtime ownership boundary
+    @objc func registerRuntime() -> String {
+        let id = UUID()
+        runtimeOwnership.register(id)
+        return id.uuidString
+    }
     @objc func removeObserver(_ token: String) { if let id = UUID(uuidString: token) { observers[id] = nil } }
+
+    private func runtimeOwner(_ kind: String, _ id: String, _ object: AnyObject) -> PresentationRuntimeOwnership.Owner {
+        let identity: LavaAppRuntimeObjectIdentity
+        if let current = runtimeObjectIdentities[kind], current.object === object { identity = current }
+        else { identity = LavaAppRuntimeObjectIdentity(object); runtimeObjectIdentities[kind] = identity }
+        return .init(kind: kind, id: id, identity: identity.nonce)
+    }
+    /// Admission belongs to the native module, never a caller-supplied JS field.
+    func requireCurrentRuntime() throws {
+        if let runtime = LavaAppRuntimeContext.id, !runtimeOwnership.isActive(runtime) { throw CommandError("The app screen closed before this action started.") }
+    }
+    private func claimCommandOwners(_ name: String, _ input: [String: Any], previousFlow: UUID?) {
+        guard let runtime = LavaAppRuntimeContext.id, runtimeOwnership.isActive(runtime) else { return }
+        let id = input["id"] as? String
+        let newFlow = name == "native.flow" && flow?.id != previousFlow && flow?.name == input["flow"] as? String
+        let entered = name == "foreground.enter" && id == flow?.id.uuidString
+        if let owner = accountBackupSession, (newFlow || entered || name == "accountBackup.command" && id == owner.id.uuidString), flow?.id == owner.id {
+            runtimeOwnership.claim(runtimeOwner("accountBackup", owner.id.uuidString, owner), runtime: runtime)
+        }
+        if let owner = importSession, (newFlow || entered || name.hasPrefix("import.") && id == owner.id.uuidString), flow?.id == owner.id {
+            runtimeOwnership.claim(runtimeOwner("import", owner.id.uuidString, owner), runtime: runtime)
+        }
+        if let owner = passcodeSession,
+           (!owner.authenticating && (newFlow || entered) && flow?.id == owner.id
+            || ["passcode.header", "passcode.command"].contains(name) && id == owner.id.uuidString) {
+            // Authentication may originate in A and be rendered by B. Its
+            // admitted header belongs to the actual credential presenter B.
+            runtimeOwnership.claim(runtimeOwner("passcode", owner.id.uuidString, owner), runtime: runtime,
+                                   presenter: owner.authenticating && name == "passcode.header")
+        }
+        #if DEBUG || LAVA_QA_TOOLS
+        if let owner = qaSession, name == "qa.command", id == owner.id {
+            runtimeOwnership.claim(runtimeOwner("qa", owner.id, owner), runtime: runtime)
+        }
+        #endif
+    }
+    @objc func retireRuntime(_ token: String) {
+        guard let runtime = UUID(uuidString: token) else { return }
+        let owned = runtimeOwnership.invalidate(runtime)
+        // Native-origin entry can precede its first admitted RN command. Only
+        // the final module may retire those still-unclaimed presentation buffers.
+        let noRenderer = !runtimeOwnership.hasActiveRuntimes
+        if let owner = accountBackupSession, noRenderer || owned.contains(runtimeOwner("accountBackup", owner.id.uuidString, owner)) {
+            retireAccountBackup(owner.id)
+            if flow?.id == owner.id { flow = nil }
+        }
+        if let owner = importSession, noRenderer || owned.contains(runtimeOwner("import", owner.id.uuidString, owner)) {
+            retireImportPresentation()
+            // An accepted native write keeps its operation/completion owner.
+            // The helper clears entry/photo state and retains applying work.
+            if importSession?.id != owner.id, flow?.id == owner.id { flow = nil }
+        }
+        if let owner = passcodeSession, noRenderer || owned.contains(runtimeOwner("passcode", owner.id.uuidString, owner)) {
+            owner.retire(); passcodeSession = nil
+            if owner.authenticating { security.cancelPasscodeAuthentication(requestID: owner.id) }
+            else if flow?.id == owner.id { flow = nil }
+        }
+        #if DEBUG || LAVA_QA_TOOLS
+        if let owner = qaSession, noRenderer || owned.contains(runtimeOwner("qa", owner.id, owner)) {
+            retireQASession(id: owner.id)
+            if flow?.id.uuidString == owner.id { flow = nil }
+        }
+        #endif
+        queuePublish()
+    }
 
     /// Display continuity only: authentication never grants reads while inactive.
     private var authenticationInProgressForPresentation: Bool {
@@ -332,6 +468,7 @@ final class LavaAppBridge: NSObject, ObservableObject {
                          "backgroundPrivacyCoverRequired": security.backgroundPrivacyCoverRequired,
                          "authenticationInProgress": authenticationInProgressForPresentation,
                          "presentationRevoked": UIApplication.shared.applicationState == .background || !security.hasCurrentAuthorization(for: .appUnlock),
+                         "passcode": passcodeProjection().map { $0 as Any } ?? NSNull(), "presentation": presentationSnapshot(),
                          "security": ["ownerRevision": presentationOwnerRevision.revision(for: model.account.accountAuthState.connections.all.map { $0.session.userID })]])
         }
         let m = model, c = model.customization
@@ -342,10 +479,10 @@ final class LavaAppBridge: NSObject, ObservableObject {
         // Public coarse counts only. Never derive a Guard chart from protected domain history.
         let today = m.reports.diagnostics.dailySummary(on: Date())
         let selectedID = m.filterEditTargetID ?? m.activeFilterID
-        let plusOffers = UpgradeSettingsView.displayedOffers(for: m.plus)
+        let plusOffers = LavaPlusPresentation.displayedOffers(for: m.plus)
         let offerRows: [[String: String]] = plusOffers.map { offer in
             let commitment = offer.plan.kind == .yearlyPaidMonthly ? offer.commitmentDisplayPrice : nil
-            return ["id": offer.id, "title": offer.title, "subtitle": UpgradeSettingsView.planPitch(for: offer),
+            return ["id": offer.id, "title": offer.title, "subtitle": LavaPlusPresentation.planPitch(for: offer),
                     "price": offer.displayPrice, "commitmentPrice": commitment.map { "%@ total".lavaLocalizedFormat($0) } ?? ""]
         }
         let backupEnablement = m.backup.enablementPresentation(
@@ -522,7 +659,10 @@ final class LavaAppBridge: NSObject, ObservableObject {
            "choices": DNSResolverPreset.allPresets.map { dnsChoice(DNSResolutionSelection(id: $0.id)) },
            "tiers": m.configuration.dnsResolutionSelections.map(dnsChoice),
            "tiersContext": json(encode(m.configuration.dnsResolutionSelections)),
-           "customDraft": (dnsPickerCustomChoice.map(dnsChoice) as Any?) ?? NSNull(), "customDraftToken": dnsPickerCustomToken ?? ""]
+           "customDraft": (dnsPickerCustomChoice.map(dnsChoice) as Any?) ?? NSNull(), "customDraftToken": dnsPickerCustomToken ?? "",
+           "unavailableDetail": (m.dnsSettingsPresentation.canChangeFallback
+               ? "With fallback off, VPN chaining uses DNS from its WireGuard configuration."
+               : "Full-tunnel VPNs use DNS from their WireGuard configuration.").lavaLocalized]
         let blocklistIDs = Set(m.blocklists.map(\.id) + m.displayedCustomBlocklists.map(\.id))
             .union(baseline.enabledBlocklistIDs).union(draft?.enabledBlocklistIDs ?? [])
         value["blocklistNames"] = Dictionary(uniqueKeysWithValues: blocklistIDs.map { ($0, m.blocklistName(for: $0)) })
@@ -536,6 +676,9 @@ final class LavaAppBridge: NSObject, ObservableObject {
         #endif
         value["vpn"] = vpnSettingsState()
         value["customEntry"] = customEntryProjection().map { $0 as Any } ?? NSNull()
+        value["preparation"] = preparationProjection().map { $0 as Any } ?? NSNull()
+        value["qa"] = qaProjection().map { $0 as Any } ?? NSNull()
+        value["passcode"] = passcodeProjection().map { $0 as Any } ?? NSNull()
         value["foregroundFlow"] = foregroundFlowProjection().map { $0 as Any } ?? NSNull()
         value["foregroundClosing"] = closingForegroundIDs.map(\.uuidString)
         if let game = m.sudokuGameState { value["sudoku"] = ["puzzle": encode(game.puzzle), "values": game.userValues, "notes": game.notes.map { $0.sorted() }] }
@@ -636,62 +779,83 @@ final class LavaAppBridge: NSObject, ObservableObject {
         }
     }
     func authorize(_ surface: SecurityProtectedSurface, _ reason: String, fresh: Bool = false) async throws {
+        try requireCurrentRuntime()
         let granted = fresh ? await security.requireFreshAuthentication(for: surface, reason: reason) : await security.requireAuthentication(for: surface, reason: reason)
+        try requireCurrentRuntime()
         guard granted else { throw CommandError("Authentication cancelled.") }
     }
-    @objc func command(_ request: String, completion: @escaping (String?, String?) -> Void) {
+    @objc func command(_ request: String, runtimeID: String, completion: @escaping (String?, String?) -> Void) {
         Task { @MainActor in
-            do {
-                guard request.utf8.count <= 1_048_576, let data = request.data(using: .utf8),
-                      let payload = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                      let name = payload["type"] as? String else { throw CommandError("Invalid app command.") }
-                // A committed-frame acknowledgement only releases presentation. It
-                // cannot authenticate, publish fields or execute navigation.
-                if name == "presentation.ready" {
-                    SecurityController.tracePresentation("presentation.acknowledged")
-                    if let id = payload["id"] as? String, let token = payload["token"] as? String {
-                        let authorized = canReadPresentation(.appUnlock)
-                        updatePresentationReveal { $0.acknowledge(id, token: token, authorized: authorized) }
-                    }
-                    completion(json(["result": NSNull()]), nil)
-                    return
-                }
-                if name == "navigation.authorize" { SecurityController.tracePresentation("navigation.requested") }
-                var result = try await perform(name, payload)
-                if name == "navigation.authorize" { SecurityController.tracePresentation("navigation.authorized") }
-                // Revalidate at the final synchronous bridge delivery, including
-                // suspension between the query owner and this command callback.
-                if let privateRead = result as? AuthorizedPresentationResult {
-                    do {
-                        try privateRead.validate()
-                    } catch {
-                        if name == "domains.stage" { discardStandaloneDomainResult(privateRead.value) }
-                        if name == "domainCheck.stage" { discardStandaloneDomainResult(privateRead.value) }
-                        throw error
-                    }
-                    result = privateRead.value
-                }
-                // A validated read returns its value, not another whole-app
-                // projection. Model observations still publish actual changes.
-                // Keep this after the final private-read authorization check.
-                if name == "haptic" || name.hasSuffix(".query") {
-                    completion(json(["result": result], sortedKeys: false), nil)
-                    return
-                }
-                if name == "domainCheck.cancel" {
-                    completion(json(["result": result], sortedKeys: false), nil)
-                    return
-                }
-                let projection = publish()
-                completion(json(["snapshot": try JSONSerialization.jsonObject(with: Data(projection.utf8)), "result": result], sortedKeys: false), nil)
-            } catch { completion(nil, error.localizedDescription) }
+            guard let runtime = UUID(uuidString: runtimeID), runtimeOwnership.isActive(runtime) else { completion(nil, "App runtime detached."); return }
+            await LavaAppRuntimeContext.$id.withValue(runtime) { await executeCommand(request, completion: completion) }
         }
+    }
+    private func executeCommand(_ request: String, completion: @escaping (String?, String?) -> Void) async {
+        do {
+            try requireCurrentRuntime()
+            guard request.utf8.count <= 1_048_576, let data = request.data(using: .utf8),
+                  let payload = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let name = payload["type"] as? String else { throw CommandError("Invalid app command.") }
+            // A committed-frame acknowledgement only releases presentation. It
+            // cannot authenticate, publish fields or execute navigation.
+            if name == "presentation.ready" {
+                SecurityController.tracePresentation("presentation.acknowledged")
+                if let id = payload["id"] as? String, let token = payload["token"] as? String {
+                    let authorized = canReadPresentation(.appUnlock)
+                    updatePresentationReveal { $0.acknowledge(id, token: token, authorized: authorized) }
+                }
+                completion(json(["result": NSNull()]), nil)
+                return
+            }
+            if name == "navigation.authorize" { SecurityController.tracePresentation("navigation.requested") }
+            let previousFlow = flow?.id
+            var result = try await perform(name, payload)
+            try requireCurrentRuntime()
+            claimCommandOwners(name, payload, previousFlow: previousFlow)
+            if name == "navigation.authorize" { SecurityController.tracePresentation("navigation.authorized") }
+            // Revalidate at the final synchronous bridge delivery, including
+            // suspension between the query owner and this command callback.
+            if let privateRead = result as? AuthorizedPresentationResult {
+                do {
+                    try privateRead.validate()
+                } catch {
+                    if name == "domains.stage" { discardStandaloneDomainResult(privateRead.value) }
+                    if name == "domainCheck.stage" { discardStandaloneDomainResult(privateRead.value) }
+                    throw error
+                }
+                result = privateRead.value
+            }
+            // A validated read returns its value, not another whole-app
+            // projection. Model observations still publish actual changes.
+            // Keep this after the final private-read authorization check.
+            if name == "haptic" || name == "foreground.layout" || name == "passcode.header" || name.hasPrefix("presentation.flowAlert") || name.hasSuffix(".query") {
+                completion(json(["result": result], sortedKeys: false), nil)
+                return
+            }
+            if name == "domainCheck.cancel" {
+                completion(json(["result": result], sortedKeys: false), nil)
+                return
+            }
+            let projection = publish()
+            claimCommandOwners(name, payload, previousFlow: previousFlow)
+            completion(json(["snapshot": try JSONSerialization.jsonObject(with: Data(projection.utf8)), "result": result], sortedKeys: false), nil)
+        } catch { completion(nil, error.localizedDescription) }
     }
     func domainCheckRulesRevision() -> String {
         "\(presentationLibraryDisplayRevision):\(model.activeFilterID):\(model.library.filter(id: model.activeFilterID)?.lastCompiledToken ?? ""):\(model.configuration.limits.maxFilterRules):\(model.configuration.protectionEnabled):\(model.isProtectionTemporarilyPaused)"
     }
 
     func perform(_ name: String, _ input: [String: Any]) async throws -> Any {
+        try requireCurrentRuntime()
+        // System dialog presentation is UI-only. It neither authenticates nor
+        // invalidates reads, publishes fields or executes the chosen mutation.
+        if name == "presentation.flowAlert" || name == "presentation.flowAlert.cancel" { return try await flowAlertCommand(name, input) }
+        if name == "passcode.header" { return try passcodeHeader(input) }
+        if name == "qa.command" { return try await qaCommand(input) }
+        if name == "passcode.command" { return try passcodeCommand(input) }
+        if name.hasPrefix("preparation.") { return try await preparationCommand(name, input) }
+        if name.hasPrefix("import.") { return try await importCommand(name, input) }
+        if name == "accountBackup.command" { return try await accountBackupCommand(input) }
         // Clipboard/check visits are ephemeral reads and must never enter the reusable query cache.
         if name.hasPrefix("domainCheck.") { return try await domainCheckCommand(name, input) }
         if name.hasPrefix("onboarding.") { return try await onboardingCommand(name, input) }
@@ -701,7 +865,7 @@ final class LavaAppBridge: NSObject, ObservableObject {
         }
         // Mutation starts retire existing entries and pending result tickets.
         // Independent system/model changes are also checked in the native scope.
-        if !name.hasSuffix(".query") && !name.hasPrefix("navigation.") && !["haptic", "guard.gesture", "activity.visibility", "refresh"].contains(name) {
+        if !name.hasSuffix(".query") && !name.hasPrefix("navigation.") && !["haptic", "guard.gesture", "activity.visibility", "foreground.layout", "refresh"].contains(name) {
             presentationSourceGeneration &+= 1
             presentationCache.invalidate()
         }
@@ -715,8 +879,8 @@ final class LavaAppBridge: NSObject, ObservableObject {
         switch name {
         case "system.open":
             guard canReadPresentation(.appUnlock), let target = input["target"] as? String,
-                  ["shortcuts", "settings"].contains(target),
-                  let url = URL(string: target == "shortcuts" ? "shortcuts://" : UIApplication.openSettingsURLString) else { throw CommandError("Read access changed.") }
+                  ["shortcuts", "settings", "connectivityAssist"].contains(target),
+                  let url = URL(string: target == "shortcuts" ? "shortcuts://" : target == "connectivityAssist" ? "https://support.apple.com/127686" : UIApplication.openSettingsURLString) else { throw CommandError("Read access changed.") }
             await UIApplication.shared.open(url)
         case "discovery.seen":
             guard let raw = input["target"] as? String, let target = LavaDiscovery(rawValue: raw) else { throw CommandError("Unknown discovery target.") }
@@ -724,7 +888,7 @@ final class LavaAppBridge: NSObject, ObservableObject {
             UserDefaults.standard.set(true, forKey: target.seenKey)
         case "native.flow":
             guard let name = input["flow"] as? String,
-                  ["account", "backupSetup", "backupRestore", "passcode", "automation", "import", "importCode", "importScan", "licenses", "feedback", "customDNS", "phoneQA"].contains(name) else { throw CommandError("Unknown native flow.") }
+                  ["account", "backupSetup", "backupRestore", "passcode", "automation", "import", "importCode", "importScan", "licenses", "feedback", "phoneQA"].contains(name) else { throw CommandError("Unknown native flow.") }
             #if !DEBUG && !LAVA_QA_TOOLS
             guard name != "phoneQA" else { throw CommandError("Unknown native flow.") }
             #endif
@@ -735,6 +899,7 @@ final class LavaAppBridge: NSObject, ObservableObject {
             if let surface { try await authorize(surface, "Open Lava settings") }
             if name == "passcode", security.isPasscodeEnabled {
                 guard await security.requirePasscodeAuthentication(reason: "Turn off Security passcode") else { throw CommandError("Authentication cancelled.") }
+                try requireCurrentRuntime()
                 security.disablePasscode()
                 guard !security.isPasscodeEnabled else { throw CommandError(security.statusMessage ?? "Passcode could not be removed.") }
             } else { flow = LavaAppNativeFlow(name: name) }
@@ -767,17 +932,17 @@ final class LavaAppBridge: NSObject, ObservableObject {
             defer { buildingLogExport = false; publish() }
             try await authorize(.appSettings, "Export local logs")
             let authorizationRevision = security.viewAuthenticationRevision
-            let archive = try await model.makeLocalLogExportArchive(includeDomainHistory: false)
+            let includeDomainHistory = input["domains"] as? Bool == true
+            let archive = try await model.makeLocalLogExportArchive(includeDomainHistory: includeDomainHistory)
             guard canReadPresentation(.appSettings), security.viewAuthenticationRevision == authorizationRevision else {
                 throw CommandError("Read access changed.")
             }
             exportDocument = LocalLogExportDocument(data: archive.data)
             exportFilename = archive.filename
             exporting = true
-        case "share.present":
-            guard let id = input["id"] as? String, let filter = model.filter(id: id), model.isFilterShareable(filter) else { throw CommandError("This filter cannot be shared.") }
-            guard flow == nil else { throw CommandError("Another screen is already open.") }
-            flow = LavaAppNativeFlow(name: "share", filterID: id)
+        case "activity.share":
+            try await authorize(.activityViewing, "View Activities", fresh: false)
+            try shareActivityCard(input)
         case "share.card":
             try await authorize(.appUnlock, "Share filter")
             guard canReadPresentation(.appUnlock) else { throw CommandError("Read access changed.") }
@@ -825,14 +990,14 @@ final class LavaAppBridge: NSObject, ObservableObject {
         case "backup.delete": try await authorize(.appSettings, BackupMaintenanceAction.clear.authReason); await model.backup.clearEncryptedBackup()
         case "purchase.buy":
             try await authorize(.appSettings, "Upgrade to Lava Security Plus")
-            guard let offer = UpgradeSettingsView.displayedOffers(for: model.plus).first(where: { $0.id == input["id"] as? String }) else { throw CommandError("This purchase is unavailable. Refresh the available plans.") }
+            guard let offer = LavaPlusPresentation.displayedOffers(for: model.plus).first(where: { $0.id == input["id"] as? String }) else { throw CommandError("This purchase is unavailable. Refresh the available plans.") }
             await model.plus.purchaseLavaSecurityPlus(offer)
         case "purchase.restore":
             try await authorize(.appSettings, "Restore Lava Security Plus")
             await model.plus.restoreLavaSecurityPlusPurchases()
         case "purchase.manage":
             try await authorize(.appSettings, "Manage Lava Security Plus")
-            await UpgradeSettingsView.presentManageSubscriptions(plus: model.plus)
+            await LavaPlusPresentation.presentManageSubscriptions(plus: model.plus)
         case "purchase.refresh":
             model.plus.clearLavaSecurityPlusMessage()
             if !model.plus.hasCheckedLavaSecurityPlusEntitlements { await model.plus.refreshLavaSecurityPlusEntitlements() }

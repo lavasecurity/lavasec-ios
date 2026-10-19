@@ -7,13 +7,14 @@ import {foundation} from './foundation';
 
 // Navigation, status and labeled controls share the actual title/summary stack.
 // Interaction and surfaces belong to their respective containing components.
-export function LavaRowLabel({title,summary,titleRole='rowTitle',verbatimTitle=false,verbatimSummary=false,disabled=false,accessible,titleColor,strike=false,children}:PropsWithChildren<{
-  title:string;summary?:string;titleRole?:'rowTitle'|'cardTitle';verbatimTitle?:boolean;verbatimSummary?:boolean;disabled?:boolean;accessible?:boolean;titleColor?:ColorValue;strike?:boolean;
+export function LavaRowLabel({title,summary,titleRole='rowTitle',verbatimTitle=false,verbatimSummary=false,disabled=false,accessible,titleColor,titleNumberOfLines,strike=false,children}:PropsWithChildren<{
+  title:string;summary?:string;titleRole?:'rowTitle'|'cardTitle';verbatimTitle?:boolean;verbatimSummary?:boolean;disabled?:boolean;accessible?:boolean;titleColor?:ColorValue;titleNumberOfLines?:number;strike?:boolean;
 }>) {
   const styles=useScaffoldStyles(windowBase_styles);
   const type=titleRole==='cardTitle'?foundation.type.section:foundation.type.row;
   return <View style={styles.labelStack}>
     <Text accessible={accessible} verbatim={verbatimTitle} allowFontScaling dynamicTypeRamp={type.dynamicTypeRamp}
+      {...(titleNumberOfLines===undefined?{}:{numberOfLines:titleNumberOfLines})}
       style={[styles.title,{fontSize:type.fontSize,fontWeight:type.fontWeight},titleRole==='cardTitle'&&{color:Platform.OS==='ios'?PlatformColor('label'):colors.primaryText},titleColor!==undefined&&{color:titleColor},disabled&&styles.muted,strike&&styles.strike]}>{title}</Text>
     {!!summary&&<Text accessible={accessible} verbatim={verbatimSummary} allowFontScaling dynamicTypeRamp={foundation.type.supporting.dynamicTypeRamp}
       style={styles.summary}>{summary}</Text>}
@@ -21,11 +22,11 @@ export function LavaRowLabel({title,summary,titleRole='rowTitle',verbatimTitle=f
   </View>;
 }
 
-export function LavaControlContent({title,summary,titleRole,verbatimTitle=false,children,onLabelPress,disabled=false,testID}:PropsWithChildren<{
-  title?:string;summary?:string;titleRole?:'rowTitle'|'cardTitle';verbatimTitle?:boolean;onLabelPress?:()=>void;disabled?:boolean;testID?:string;
+export function LavaControlContent({title,summary,titleRole,titleColor,verbatimTitle=false,children,onLabelPress,disabled=false,testID}:PropsWithChildren<{
+  title?:string;summary?:string;titleRole?:'rowTitle'|'cardTitle';titleColor?:ColorValue;verbatimTitle?:boolean;onLabelPress?:()=>void;disabled?:boolean;testID?:string;
 }>) {
   const styles=useScaffoldStyles(windowBase_styles);
-  const label=title&&<LavaRowLabel title={title} summary={summary} titleRole={titleRole} verbatimTitle={verbatimTitle} disabled={disabled} accessible={onLabelPress?false:undefined}/>;
+  const label=title&&<LavaRowLabel title={title} summary={summary} titleRole={titleRole} titleColor={titleColor} verbatimTitle={verbatimTitle} disabled={disabled} accessible={onLabelPress?false:undefined}/>;
   return <View style={styles.control}>
     {label&&(onLabelPress
       ? <Pressable testID={testID===undefined?undefined:`${testID}.label`} accessible={false} disabled={disabled} onPress={onLabelPress}

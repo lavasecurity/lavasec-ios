@@ -1,3 +1,6 @@
+// QA's independent native navigator is qualified by device-qa-presentation-lifecycle.
+jest.mock('../review/QAFlowAdapter.ios',()=>({QAFlowAdapter:()=>null}));
+import {localized} from '../app/presentation';
 import type {PropsWithChildren} from 'react';
 import {AppState} from 'react-native';
 import {act,fireEvent,render,screen} from '@testing-library/react-native';
@@ -20,7 +23,6 @@ let previousAppPhase:typeof AppState.currentState;
 jest.mock('@react-navigation/native',()=>({useNavigation:()=>mockNavigation,useRoute:()=>({key:'native-page',params:mockParams}),useIsFocused:()=>mockFocused,usePreventRemove:jest.fn()}));
 jest.mock('../specs/NativeLavaReview',()=>({__esModule:true,default:{getGuardAccents:()=>JSON.stringify({original:{light:'#BF4000',dark:'#FF8855'}})}}));
 jest.mock('../specs/LavaSliderNativeComponent',()=>({__esModule:true,default:require('react-native').View}));
-jest.mock('../specs/LavaNativePageNativeComponent' ,()=>({__esModule:true,default:require('react-native').View}));
 jest.mock('react-native-safe-area-context',()=>require('react-native-safe-area-context/jest/mock').default);
 
 beforeEach(()=>{
@@ -95,14 +97,15 @@ test('shared Auto-switch renders the real instructions and opens only the reques
 test('DNS patch uses the same native scaffold boundary as Auto-switch without setup on mount',()=>{
   const command=jest.fn();
   render(<DNSPatchScreen/>,{wrapper:provider(command)});
-  expect(screen.getByTestId('dns-patch-page').props.page).toBe('dnsPatch');
+  expect(screen.getByText('Turn off Connectivity Assist')).toBeTruthy();
+  expect(screen.getByText(localized('Use Full Tunnel (requires Lava Plus)'))).toBeTruthy();
   expect(command).not.toHaveBeenCalled();
 });
 
 test('DNS patch opens VPN chaining through the protected parent navigator',async()=>{
   const command=jest.fn().mockResolvedValue(null);
   render(<DNSPatchScreen/>,{wrapper:provider(command)});
-  fireEvent(screen.getByTestId('dns-patch-page'),'navigate',{nativeEvent:{destination:'VPNChaining'}});
+  fireEvent.press(screen.getByText('Open VPN chaining'));
   await act(async()=>{});
   expect(command).toHaveBeenCalledWith({type:'navigation.authorize',surface:'appSettings'});
   expect(mockNavigate).toHaveBeenCalledWith('VPNChaining');

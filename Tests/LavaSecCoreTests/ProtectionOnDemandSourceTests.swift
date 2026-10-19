@@ -1181,55 +1181,17 @@ final class ProtectionOnDemandSourceTests: XCTestCase {
     /// Admission and actionable restrictions share the model's snapshot; ordinary toggle
     /// changes leave the external option explanation untouched.
     func testTheChainingControlKeepsStaticCopyAndSharedAvailability() throws {
-        let view = try readSource(.vpnChainingSettingsView)
-        let body = try sourceBlock(
-            in: view,
-            startingAt: "    private func pageContent(_ status: AppViewModel.ChainedUpstreamSurfaceStatus)",
-            endingBefore: "\n    private func")
-        XCTAssertTrue(
-            body.contains("let state = viewModel.chainedOperationalState(from: status)"),
-            "the row must resolve the state ONCE, from the snapshot the view already read")
-        XCTAssertTrue(
-            body.contains("chainingRestriction(status, state: state)"),
-            "availability restrictions must render that same resolved state")
-        XCTAssertTrue(body.contains("LavaQuietFooter(chainingExplanation)"))
-        XCTAssertFalse(body.contains("Route my traffic through this VPN setup"))
-        let explanation = try sourceBlock(
-            in: view,
-            startingAt: "    private var chainingExplanation: String {",
-            endingBefore: "    private func chainingRestriction(")
-        XCTAssertFalse(sourceCodeOnly(explanation).contains("viewModel."))
-        XCTAssertFalse(sourceCodeOnly(explanation).contains("switch"))
-        // Render the one event-refreshed snapshot; credential reads never run in the body.
-        XCTAssertEqual(
-            sourceOccurrenceCount(of: "viewModel.chainedUpstreamSurfaceStatus", in: body), 0,
-            "the toggle and its detail line must render from the same cached snapshot")
-        let detail = try sourceBlock(
-            in: view,
-            startingAt: "    private func chainingRestriction(",
-            endingBefore: "\n    // MARK:")
-        XCTAssertTrue(
-            detail.contains("switch state {"),
-            "the detail line must switch over the shared state")
-        // 🔴 THE CONTROL, THE UPGRADE ROUTE AND THE LINE ALL READ THAT ONE STATE. They used to
-        // read three sources — the switch and the button from raw `status` fields, the line from
-        // the state — and disagreed for a non-Plus account whose device store is unreadable:
-        // `ineligibility` is nil there by design, so the button vanished while the line said
-        // chaining needs Plus, leaving a dead grey control and no way to buy what it named
-        // (Codex, PR #637).
+        let source = try readSource(.reactNativeAppSettings)
+        let metadata = try sourceBlock(in: source, startingAt: "func vpnSettingsState()", endingBefore: "private func wireGuardDraftMetadata")
+        XCTAssertTrue(metadata.contains("let state = model.chainedOperationalState(from: status)"))
+        XCTAssertTrue(metadata.contains("ChainedSetupPolicy.canEditConfiguration(inputs)"))
+        XCTAssertTrue(metadata.contains("case .notEntitled:"))
+        XCTAssertFalse(sourceCodeOnly(metadata).contains("status.ineligibility"))
         let rowToggle = try sourceBlock(in: readAppViewModelSource(), startingAt: "func setWireGuardRowEnabled", endingBefore: "func commitWireGuardPage")
         XCTAssertTrue(rowToggle.contains("ChainedSetupPolicy.canEditConfiguration(chainedSurfaceInputs(from: status))"))
-        XCTAssertTrue(
-            body.contains("if state == .notEntitled {"),
-            "the upgrade route must open for the same state the detail line explains")
-        XCTAssertFalse(
-            sourceCodeOnly(body).contains("status.ineligibility"),
-            "no surface in this row may re-derive availability from the raw status fields")
-        XCTAssertFalse(
-            sourceCodeOnly(detail).contains("status."),
-            "reading status fields here reintroduces the second decision table")
-        XCTAssertTrue(detail.contains("case .preferenceOff, .ready:"))
-        XCTAssertTrue(detail.contains("return nil"))
+        let view = try readSource(.reactNativeVPNChainingScreen)
+        XCTAssertTrue(view.contains("Lava filters first, then sends allowed DNS requests through your WireGuard VPN."))
+        XCTAssertTrue(view.contains("vpn?.needsPlus"))
     }
 
 }

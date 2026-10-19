@@ -75,10 +75,10 @@ if (tool==='xcrun' && args[0]==='xcresulttool' && args[1]==='export') mkdirSync(
     env: {...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: root,
       LAVA_CI_TEST_TRACE: trace,
       LAVA_CI_TEST_SUMMARY: JSON.stringify({result: 'Passed', passedTests: normalMinimum, failedTests: 0, skippedTests: 0}),
-      LAVA_CI_TEST_IPAD_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 2, failedTests: 0, skippedTests: 0}),
+      LAVA_CI_TEST_IPAD_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 4, failedTests: 0, skippedTests: 0}),
       LAVA_CI_TEST_PREFERENCES_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 1, failedTests: 0, skippedTests: 0}),
-      LAVA_CI_TEST_MOTION_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 3, failedTests: 0, skippedTests: 0}),
-      LAVA_CI_TEST_CROSSFADE_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 4, failedTests: 0, skippedTests: 0}),
+      LAVA_CI_TEST_MOTION_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 4, failedTests: 0, skippedTests: 0}),
+      LAVA_CI_TEST_CROSSFADE_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 5, failedTests: 0, skippedTests: 0}),
       ...options},
   });
   assert.ifError(result.error);
@@ -105,6 +105,11 @@ test('mandatory journey selectors exist and the normal minimum covers every ordi
   for (const name of separate) assert.ok(names.includes(name), `Unknown separately qualified case: ${name}`);
   assert.equal(lanes.normalSimulatorMinimumTests, names.filter(name => !separate.includes(name)).length);
   const script = readFileSync(new URL('../scripts/build-full-app.sh', import.meta.url), 'utf8');
+  for(const name of ['testDeviceQAPushBackAndSettingsReselection','testSettingsFeedbackSheetAndDeviceQAPushWithGuardedCloseAndReentry']) {
+    assert.ok(names.includes(name), `Missing QA navigation coverage: ${name}`);
+    assert.ok(!separate.includes(name), `QA navigation must remain an ordinary simulator journey: ${name}`);
+    assert.ok(!script.includes(`-skip-testing:LavaSecUITests/RNFullAppUITests/${name}`), `QA navigation cannot be excluded from the full-class selector: ${name}`);
+  }
   for (const [, name] of script.matchAll(/RNFullAppUITests\/(test\w+)/g)) {
     assert.ok(names.includes(name), `Unknown mandatory motion/tablet selector: ${name}`);
   }
@@ -172,12 +177,19 @@ test('existing local default still runs journeys and retains review evidence', t
     ['preferences-reduced.xcresult', 'reduced-motion.xcresult', 'preferences-crossfade.xcresult', 'crossfade.xcresult', 'preferences-reset.xcresult']);
   assert.ok(builds[6].args.includes('-only-testing:LavaSecUITests/RNFullAppUITests/testExplicitCrossFadeNavigation'));
   assert.ok(builds[6].args.includes('-only-testing:LavaSecUITests/RNFullAppUITests/testDomainEntryKeepsPageGeometryAcrossKeyboardAndForeground'));
+  const preparation='testPreparationProgressCommitsNativeRuleAndReturnsToDomainCheck';
+  assert.ok(!build.some(arg=>arg===`-skip-testing:LavaSecUITests/RNFullAppUITests/${preparation}`), 'Normal motion must exercise the committed native preparation transaction.');
+  for(const phase of [builds[4],builds[6]]) {
+    assert.ok(phase.args.includes(`-only-testing:LavaSecUITests/RNFullAppUITests/${preparation}`), 'Both verified accessibility modes must exercise the same native preparation journey.');
+  }
   const tablet = builds[8].args;
   assert.equal(tablet.at(-1), 'test-without-building');
   assert.equal(tablet[tablet.indexOf('-derivedDataPath')+1],build[build.indexOf('-derivedDataPath')+1]);
   assert.deepEqual(tablet.filter(arg=>arg.startsWith('-only-testing:')), [
     '-only-testing:LavaSecUITests/RNFullAppUITests/testStoryJourneyLightPreservesConnectionAlignmentAcrossRotation',
     '-only-testing:LavaSecUITests/RNFullAppUITests/testStoryJourneyDarkPreservesConnectionAlignmentAcrossRotation',
+    '-only-testing:LavaSecUITests/RNFullAppUITests/testNativeOnboardingPersistsFallbackChoiceThroughNavigationAndRelaunch',
+    '-only-testing:LavaSecUITests/RNFullAppUITests/testNativeOnboardingKeepsGuardGeometryInLandscape',
   ]);
   const phoneShutdown = calls.findIndex(call=>call.tool==='xcrun'&&call.args.join(' ')==='simctl shutdown isolated-test-simulator');
   const tabletBoot = calls.findIndex(call=>call.tool==='xcrun'&&call.args.join(' ')==='simctl boot isolated-ipad-simulator');
@@ -202,9 +214,12 @@ for (const [name, args, options] of [
   ['missing ordinary journey', ['--journeys'], {LAVA_CI_TEST_SUMMARY: JSON.stringify({result: 'Passed', passedTests: normalMinimum - 1, failedTests: 0, skippedTests: 0})}],
   ['motion execution failure', ['--journeys'], {LAVA_CI_TEST_MOTION_XCODE_EXIT: '65'}],
   ['missing motion preference verification', ['--journeys'], {LAVA_CI_TEST_PREFERENCES_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 0, failedTests: 0, skippedTests: 0})}],
-  ['failed motion journeys', ['--journeys'], {LAVA_CI_TEST_MOTION_SUMMARY: JSON.stringify({result: 'Failed', passedTests: 2, failedTests: 1, skippedTests: 0})}],
-  ['skipped motion journeys', ['--journeys'], {LAVA_CI_TEST_MOTION_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 3, failedTests: 0, skippedTests: 1})}],
-  ['missing motion journey', ['--journeys'], {LAVA_CI_TEST_MOTION_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 2, failedTests: 0, skippedTests: 0})}],
+  ['failed motion journeys', ['--journeys'], {LAVA_CI_TEST_MOTION_SUMMARY: JSON.stringify({result: 'Failed', passedTests: 3, failedTests: 1, skippedTests: 0})}],
+  ['skipped motion journeys', ['--journeys'], {LAVA_CI_TEST_MOTION_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 4, failedTests: 0, skippedTests: 1})}],
+  ['missing motion journey', ['--journeys'], {LAVA_CI_TEST_MOTION_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 3, failedTests: 0, skippedTests: 0})}],
+  ['failed crossfade journeys', ['--journeys'], {LAVA_CI_TEST_CROSSFADE_SUMMARY: JSON.stringify({result: 'Failed', passedTests: 4, failedTests: 1, skippedTests: 0})}],
+  ['skipped crossfade journeys', ['--journeys'], {LAVA_CI_TEST_CROSSFADE_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 5, failedTests: 0, skippedTests: 1})}],
+  ['missing crossfade journey', ['--journeys'], {LAVA_CI_TEST_CROSSFADE_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 4, failedTests: 0, skippedTests: 0})}],
   ['tablet execution failure', ['--journeys'], {LAVA_CI_TEST_IPAD_XCODE_EXIT: '65'}],
   ['failed tablet journeys', ['--journeys'], {LAVA_CI_TEST_IPAD_SUMMARY: JSON.stringify({result: 'Failed', passedTests: 1, failedTests: 1, skippedTests: 0})}],
   ['skipped tablet journeys', ['--journeys'], {LAVA_CI_TEST_IPAD_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 1, failedTests: 0, skippedTests: 1})}],

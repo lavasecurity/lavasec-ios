@@ -8,9 +8,14 @@ Read this with the [implementation contracts](README.md) before changing a scree
 - Equivalent functions share atomic implementation, including when nested inside larger panels. Shared tokens alone do not establish reuse.
 - Screen modules arrange shared primitives. Foundation tokens, native palette/type owners and RN scaffolds own paint, typography, control geometry, disabled states and motion.
 - Native navigation owns headers, Back, Close, tabs and system tool chrome. Each route has one header and one ordinary page scroll. Compare intermediate transitions and cancellation as well as settled screens.
+- Catalog sheets keep results as the native sheet's direct first child, with fixed search/category controls beside it. On iOS 26+, those controls extend the results' native scroll-edge effect through the shared header; a separate opaque strip must not hide scrolling content. Preserve the same hierarchy through loading, empty searches and returning from custom entry.
 - Settings introductions, rows, helper copy, selectors and disclosure accessories use their existing shared families. Keep controls and explanations distinct, and preserve explicit opt-in and confirmation semantics.
+- Discovery dots replace the navigation glyph in the same centered accessory slot. Seen/unseen state keeps the slot width and row text alignment unchanged, including Guard's Explore entry and Explore's destination rows.
+- Panel scaffolds separate an inset explanation from its first action/control row, and separate subsequent visible rows, with the shared inset divider. Conditional rows and fragments follow the same rule; explanatory paragraphs stay together and no trailing divider is added.
 - Primary, panel and secondary actions share their label, wrapping, minimum target and interaction owners. Role colors remain semantic differences.
+- Pending actions keep their accepted paint and label position while blocking repeated input. Actions that supply a busy state reserve the same progress space while idle.
 - Repeated benefits, summary tiles and chart legends share their corresponding outer treatment and text roles. Display real proportions and preserve empty/unavailable meanings.
+- Category and count glyphs use the scaffold's primary/secondary palette by default. Charts opt into outcome colors that match their plotted values, and the Filters overview uses canonical orange for blocking rules and green for allowed exceptions. Zero and unavailable counts retain the subdued treatment.
 - Filter identity and unchanged rows stay stable across reading, editing and pending operations. A confirmation follows the actual operation's success.
 - Security policy selects privacy covers. All-off pages retain their ordinary presentation through read refresh; loading is not a security choice. See the [lifecycle contract](../testing/background-privacy-settings.md).
 

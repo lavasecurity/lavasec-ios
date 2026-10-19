@@ -1,6 +1,10 @@
+// Passcode's independent security surface has its own runtime suite.
+jest.mock('../review/PasscodeFlowAdapter.ios',()=>({PasscodeFlowAdapter:()=>null}));
+// QA's independent native navigator is qualified by device-qa-presentation-lifecycle.
+jest.mock('../review/QAFlowAdapter.ios',()=>({QAFlowAdapter:()=>null}));
 import {createRef,useSyncExternalStore,type ComponentRef} from 'react';
 import {AppState,Alert as NativeAlert,Platform,ScrollView,TextInput,View,type AppStateStatus} from 'react-native';
-import {act,fireEvent,render,screen} from '@testing-library/react-native';
+import {act,fireEvent,render,screen,within} from '@testing-library/react-native';
 import {ReviewContext,type ReviewState} from '../review/ReviewContext';
 import {VPNEditorFlow} from '../review/VPNEditorFlow';
 import {FeedbackFlow} from '../review/FeedbackFlow';
@@ -8,7 +12,7 @@ import {ForegroundFlowScreen} from '../review/ForegroundFlowScreen';
 import {Search} from '../review/scaffold';
 import {CharacterCounter,FormField,FormActions,FlowSheet} from '../review/form-scaffold';
 import {PresentationContext} from '../app/presentation';
-import {localized} from '../app/presentation';
+import {configurePresentation,localized} from '../app/presentation';
 import type {AppCommand,AppSnapshot,FeedbackState,ForegroundFlow,VPNEditorState} from '../app/contract';
 import {AppStore} from '../app/store';
 import {LavaActionButton} from '../src';
@@ -582,6 +586,30 @@ test('native Save consumes the latest rename text and emoji after validity stays
   act(()=>mockNavigation.setOptions.mock.calls.at(-1)![0].unstable_headerRightItems()[0].onPress());await act(async()=>{});
   expect(command).toHaveBeenCalledWith({type:'foreground.submit',id:'visit',name:'Final edit',emoji:'🍐'});
 });
+
+test.each(['en','ja'])('the %s library review keeps renamed identities separate from localized change actions',async locale=>{
+  configurePresentation({locale,textScales:null});
+  const command=jest.fn(async(_action:AppCommand)=>null);
+  const flow:ForegroundFlow={id:'visit',kind:'deleteFilters',name:'',emoji:'',dismissAttempt:0,canCreate:false,templates:[],
+    groups:[{title:'Renamed filter',added:['Cancel'],removed:['Retry']}],hasDeletions:false};
+  try{
+    render(<ReviewContext.Provider value={{app:{command},live:{foregroundFlow:flow,security:{readRevision:1}}} as unknown as ReviewState}><ForegroundFlowScreen/></ReviewContext.Provider>);
+    await act(async()=>{});
+    for(const [action,value,symbol,tone] of [['Added','Cancel','plus','green'],['Removed','Retry','minus','error']] as const){
+      const row=screen.getByLabelText(localized(action));
+      expect(row.props.accessible).toBe(true);
+      expect(row.props.accessibilityValue).toEqual({text:value});
+      expect(within(row).getByText(value)).toBeOnTheScreen();
+      const glyphs=within(row).UNSAFE_getAllByType(require('../specs/LavaDecorationNativeComponent').default).filter(node=>node.props.symbol===symbol);
+      expect(glyphs).toHaveLength(1);
+      expect(glyphs[0]!.props)
+        .toMatchObject({symbol,tone,accessible:false,accessibilityElementsHidden:true});
+    }
+    fireEvent.press(screen.getByRole('button',{name:localized('Confirm changes')}));
+    await act(async()=>{});
+    expect(command).toHaveBeenCalledWith({type:'foreground.submit',id:'visit'});
+  }finally{configurePresentation();}
+});
 test('a retained rename replays a rejected dirty hint only after real AppStore hydration settles, without an own-ACK loop',async()=>{
   const emit=controlledLifecycle();
   const fixture=foregroundStoreFixture({id:'visit',kind:'renameFilter',name:'Core',emoji:'🌱',dismissAttempt:0,canCreate:true,templates:[]},true);
@@ -752,7 +780,8 @@ test('feedback coalesces a typing burst and Review waits for the final native dr
   const command=jest.fn((action:AppCommand)=>action.type==='feedback.enter'?entry.promise:
     action.type==='feedback.change'&&action.field==='details'?(++edits===1?first.promise:last.promise):Promise.resolve(null));
   render(<ReviewContext.Provider value={{app:{command}} as unknown as ReviewState}><FeedbackFlow id="visit" state={state} dismissAttempt={0}/></ReviewContext.Provider>);
-  for(let count=1;count<=100;count++)fireEvent.changeText(screen.getByLabelText('Details'),'a'.repeat(count));
+  const input=screen.getByLabelText('Details');
+  act(()=>{for(let count=1;count<=100;count++)fireEvent.changeText(input,'a'.repeat(count));});
   expect(command.mock.calls.filter(([action])=>action.type==='feedback.change')).toHaveLength(1);
   fireEvent.press(screen.getByRole('button',{name:'Review'}));
   fireEvent.press(screen.getByRole('button',{name:'Review'}));

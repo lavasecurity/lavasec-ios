@@ -5,23 +5,27 @@ navigation bar, tab controller, Back semantics and interactive dismissal.
 
 ## One header surface
 
-All custom toolbar controls use `toolbarButton` in `review/scaffold.tsx`. It
-supplies `hidesSharedBackground: true` and the canonical `LavaIconButton`, so the
-app's circle is the only painted control. This includes Activity's calendar and
-the isolated review host's Close control, with `review.close` preserved.
+Toolbar controls use `toolbarButton` in `review/scaffold.tsx`, which supplies
+native navigation items with canonical SF Symbols, tints and grouping. UIKit
+owns their size and spacing. Ordinary plain actions share the native background;
+the optional `none` background hides its fill without replacing the native items.
+The isolated review host's Close control retains `review.close`.
 
-The former Activity `headerRight` took a different native-stack path. In the
-installed `@react-navigation/native-stack` 7.18.10 `useHeaderConfigProps.tsx`,
-custom header items forward `hidesSharedBackground`; the legacy `headerRight`
-wrapper does not. RNScreens 4.27 forwards this flag to the `UIBarButtonItem`.
-That explains the extra white glass surrounding the former painted date pill.
+Activity places Export followed by Clear all logs in one shared native
+toolbar panel at the top right. Export uses the normal navigation foreground; trash uses
+the shared destructive red. Export opens the shared native action dialog with
+Activity chart, Export diagnostics, Export all logs and Cancel. Activity chart
+shares the selected chart and accepted date range through the fixed 4:5 card;
+its install QR, three-line summary and balanced margins stay independent of data.
+The two ZIP actions use the same handlers and app-settings authentication as the
+two rows in Privacy & Data's export panel. Diagnostics omit domain history; all
+logs include retained domain history. Neither ZIP is narrowed by Activity's range.
+Clear all logs retains Privacy & Data's authentication and destructive confirmation.
 
-Today / Week / Month remain quick presets. The calendar is always named
-“Change activity dates” through the existing localized key. An accepted custom
-range appears once in the body (`activity.custom-range`), with no selected
-preset. Cancel preserves the accepted range and preset. Returning to a preset
-removes the custom summary. Native picker behavior and calendar arithmetic stay
-unchanged.
+Today / 7 days / Month / Custom live in the body. An accepted custom range
+appears once (`activity.custom-range`); cancel preserves the accepted range and
+preset. Returning to a preset removes the custom summary. Native picker behavior
+and calendar arithmetic stay unchanged.
 
 ## One ordinary-page transition
 

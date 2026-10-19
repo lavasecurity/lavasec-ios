@@ -11,6 +11,7 @@ import {useAppQuery} from '../app/queries';
 import {LiveRenderBoundary,ReviewContext,type ReviewState} from '../review/ReviewContext';
 import {foundation} from '../src/foundation';
 import {CatalogSheet} from '../review/story-scaffold';
+import {Section} from '../review/primitives';
 
 const mockNavigation={setOptions:jest.fn(),addListener:jest.fn((_name:string,_listener:(event:{data:{closing:boolean}})=>void)=>()=>{})};
 jest.mock('@react-navigation/native',()=>({useNavigation:()=>mockNavigation,useIsFocused:()=>true}));
@@ -173,7 +174,7 @@ test('retained native header callbacks are inert through all-off resume and cove
   } finally {disconnect();listener.mockRestore();AppState.currentState=previousState;}
 });
 
-test('a separately presented native sheet keeps its direct ScrollView covered and inert until fresh scoped reads commit',async()=>{
+test.each(['form','list'] as const)('a separately presented native %s sheet keeps its direct ScrollView covered and inert until fresh scoped reads commit',async scrollMode=>{
   const previousState=AppState.currentState;AppState.currentState='active';
   const lifecycle=jest.spyOn(AppState,'addEventListener').mockReturnValue({remove(){}});
   const live={schema:1,fullApp:true,revision:1,backgroundPrivacyCoverRequired:true} as AppSnapshot;
@@ -181,7 +182,7 @@ test('a separately presented native sheet keeps its direct ScrollView covered an
   const native={getSnapshot:()=>new Promise<string>(()=>{}),command:jest.fn(()=>new Promise<string>(done=>{resolve=done;})),
     onSnapshot:(callback:(value:string)=>void)=>{publish=callback;return {remove(){}};}} as unknown as Spec;
   const app=new AppStore(native,live),disconnect=app.connect();
-  function PrivateSheet(){const query=useAppQuery<string>({type:'share.query',id:'same-id'});return <Sheet header={<Text>Private header</Text>} footer={<Text>Private footer</Text>}><Text>{query.value??'Loading filter'}</Text></Sheet>;}
+  function PrivateSheet(){const query=useAppQuery<string>({type:'share.query',id:'same-id'});return <Sheet scrollMode={scrollMode} header={<Text>Private header</Text>} footer={<Text>Private footer</Text>}><Text>{query.value??'Loading filter'}</Text></Sheet>;}
   function NativeModalLayer(){const state=useSyncExternalStore(app.subscribe,app.getSnapshot),gate=useSyncExternalStore(app.subscribe,app.getPresentationHydration);
     useLayoutEffect(()=>{if(state.snapshot)app.completePresentationLayout(gate.epoch);},[state.snapshot,gate.epoch]);
     return <ReviewContext.Provider value={{app,live:state.snapshot??undefined} as ReviewState}><View testID="separate-uikit-controller"><LiveRenderBoundary component={PrivateSheet} retainBody={false}/></View></ReviewContext.Provider>;}
@@ -285,7 +286,7 @@ test.each([false,true])('short and empty content preserves the inset without inv
   screen.rerender(content(true));
   expect(screen.UNSAFE_getByType(ScrollView)).toBe(scroll);
   if(pinned){
-    expect(scroll.props.contentInsetAdjustmentBehavior).toBe('automatic');
+    expect(scroll.props.contentInsetAdjustmentBehavior).toBe('always');
     expect(scroll.props.contentInset).toBeUndefined();
     expect(scroll.props.contentOffset).toBeUndefined();
     expect(scroll.props.stickyHeaderIndices).toBeUndefined();
@@ -307,13 +308,13 @@ test('changing a catalog search reveals its new results below the controls witho
   scrollTo.mockClear();
   fireEvent.scroll(screen.UNSAFE_getAllByType(ScrollView)[0]!,{nativeEvent:{contentOffset:{x:0,y:300}}});
   screen.rerender(content('no match'));
-  expect(scrollTo).toHaveBeenLastCalledWith({y:0,animated:false});
+  expect(scrollTo).toHaveBeenLastCalledWith({y:-56,animated:false});
   expect(screen.getByText('No results')).toBeOnTheScreen();
   screen.rerender(content('no match'));
   screen.rerender(content('no match',70));
   expect(scrollTo).toHaveBeenCalledTimes(1);
   screen.rerender(content('',70));
-  expect(scrollTo).toHaveBeenLastCalledWith({y:0,animated:false});
+  expect(scrollTo).toHaveBeenLastCalledWith({y:-70,animated:false});
 });
 
 test('a pinned form header keeps editor sizing instead of adopting catalog scroll bounds',()=>{
@@ -331,7 +332,14 @@ test('catalog controls live outside scrolling results and reserve their measured
   </HeaderHeightContext.Provider>;
   const view=render(content(70));const scroll=screen.getByTestId('sheet.results');
   const controls=screen.getByTestId('sheet.pinned-header');const input=screen.getByLabelText('Search');
-  expect(StyleSheet.flatten(scroll.props.style).marginTop).toBe(70);
+  // The form-sheet native owner sizes a direct results scroll view. A flex
+  // wrapper leaves it on the legacy frame-correction path after a reopen.
+  const scrollComponent=screen.UNSAFE_getAllByType(ScrollView)[0]!;
+  for(let ancestor=scrollComponent.parent;ancestor&&ancestor.type!==Sheet;ancestor=ancestor.parent)
+    expect(ancestor.type).not.toBe(View);
+  expect(scroll.props.pointerEvents).toBe('auto');
+  expect(controls.props.pointerEvents).toBe('box-none');
+  expect(StyleSheet.flatten(scroll.props.style).marginTop).toBeUndefined();
   for(let ancestor=controls.parent;ancestor;ancestor=ancestor.parent)expect(ancestor).not.toBe(scroll);
   expect(StyleSheet.flatten(controls.props.style)).toMatchObject({position:'absolute',top:70});
   fireEvent(controls,'layout',{nativeEvent:{layout:{x:0,y:70,width:390,height:128}}});
@@ -340,5 +348,17 @@ test('catalog controls live outside scrolling results and reserve their measured
   expect(screen.getByTestId('sheet.results')).toBe(scroll);
   expect(screen.getByLabelText('Search')).toBe(input);
   expect(StyleSheet.flatten(controls.props.style).top).toBe(54);
-  expect(StyleSheet.flatten(scroll.props.style).marginTop).toBe(54);
+  expect(StyleSheet.flatten(scroll.props.style).marginTop).toBeUndefined();
+});
+
+test('catalog category jumps account for the native bar while preserving space for fixed controls',()=>{
+  render(<HeaderHeightContext.Provider value={70}>
+    <CatalogSheet sections={[{title:'All',items:['A result']}]} search="" onSearch={()=>{}}
+      searchLabel="Search" renderRow={item=><Text key={item}>{item}</Text>}/>
+  </HeaderHeightContext.Provider>);
+  const ref=screen.UNSAFE_getByType(Sheet).props.scrollRef;
+  const scrollTo=jest.spyOn(ref.current,'scrollTo').mockImplementation(()=>{});
+  fireEvent(screen.UNSAFE_getByType(Section).parent!,'layout',{nativeEvent:{layout:{x:0,y:320,width:390,height:100}}});
+  fireEvent.press(screen.getByRole('button',{name:'All'}));
+  expect(scrollTo).toHaveBeenLastCalledWith({y:250,animated:true});
 });

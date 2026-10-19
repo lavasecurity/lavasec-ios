@@ -131,15 +131,21 @@ extension AppViewModel {
     /// DNS may leave the tunnel — so a silent disagreement here is a privacy surface lying about
     /// its own state.
     ///
-    /// The tunnel is told, because the rung is derived from the LATCHED configuration: without
-    /// the reload the running session keeps the value it started with and the switch appears to
-    /// do nothing until the next connect.
+    /// An applicable tunnel is told, because the rung is derived from the LATCHED
+    /// configuration. Only a confirmed current full tunnel leaves this consent dormant:
+    /// a saved full-tunnel profile may still be awaiting replacement of a live split
+    /// tunnel, which must still receive changes to its latched consent.
     /// pinned: ChainedUpstreamStagingWiringSourceTests.testTheFallbackToggleIsPersistedAndPushedToTheTunnel
     func setChainedTierOneFallbackEnabled(_ enabled: Bool) {
         guard configuration.chainedTierOneFallbackEnabled != enabled else { return }
         configuration.chainedTierOneFallbackEnabled = enabled
         do {
             try persistConfigurationOnly()
+            let status = chainedUpstreamSurfaceStatus
+            guard dnsSettingsPresentation(from: status).shouldApplyFallbackPreferenceChange(
+                isChainedSessionLive: tunnelHealth.isChainedUpstreamActive,
+                runningGeneration: tunnelHealth.runningChainedUpstreamGeneration,
+                storedGeneration: status.storedConfigurationGeneration) else { return }
             requestChainedSettingsApply()
             Task {
                 await self.sendTunnelMessage(LavaSecAppGroup.reloadConfigurationMessage)
@@ -229,7 +235,6 @@ extension AppViewModel {
         // independently saved toggle, including an explicit OFF during editing.
         let setup = configuration.wireGuardSetupEnabled
         let enabled = routingEnabled ?? configuration.chainedUpstreamEnabled
-        let fallback = configuration.chainedTierOneFallbackEnabled
         guard !isStagingChainedUpstreamForQA else { throw WireGuardChainFailure.changed }
         let status = chainedUpstreamSurfaceStatus
         guard status.storedConfigurationGeneration == draft.generation else { throw WireGuardChainFailure.changed }
@@ -242,13 +247,12 @@ extension AppViewModel {
         }
         isStagingChainedUpstreamForQA = true
         let oldEnabled = configuration.chainedUpstreamEnabled
-        let oldFallback = configuration.chainedTierOneFallbackEnabled
         var profilesCommitted = false
         defer {
             isStagingChainedUpstreamForQA = false
             refreshDNSSettingsPresentation()
             if oldEnabled != configuration.chainedUpstreamEnabled
-                || (configuration.chainedUpstreamEnabled && (profilesCommitted || oldFallback != configuration.chainedTierOneFallbackEnabled))
+                || (configuration.chainedUpstreamEnabled && profilesCommitted)
                 || (profilesCommitted && draft.rows.isEmpty && tunnelHealth.isChainedUpstreamActive) {
                 requestChainedSettingsApply()
             }
@@ -273,17 +277,15 @@ extension AppViewModel {
             }
             profilesCommitted = true
         }
-        let beforeSettings = (configuration.wireGuardSetupEnabled, configuration.chainedUpstreamEnabled,
-                              configuration.chainedTierOneFallbackEnabled)
+        let beforeSettings = (configuration.wireGuardSetupEnabled, configuration.chainedUpstreamEnabled)
         configuration.wireGuardSetupEnabled = setup
         configuration.chainedUpstreamEnabled = wantsEnabled
-        configuration.chainedTierOneFallbackEnabled = fallback && !draft.containsFullTunnel
-        if beforeSettings.0 != setup || beforeSettings.1 != wantsEnabled || beforeSettings.2 != configuration.chainedTierOneFallbackEnabled {
+        // Profile edits preserve fallback consent, even when full tunnel bypasses it.
+        if beforeSettings.0 != setup || beforeSettings.1 != wantsEnabled {
             do { try persistConfigurationOnly() }
             catch {
                 configuration.wireGuardSetupEnabled = beforeSettings.0
                 configuration.chainedUpstreamEnabled = beforeSettings.1
-                configuration.chainedTierOneFallbackEnabled = beforeSettings.2
                 throw error
             }
         }

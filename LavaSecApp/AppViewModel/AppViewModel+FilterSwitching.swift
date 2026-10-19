@@ -98,8 +98,14 @@ extension AppViewModel {
         let switchToken = configurationReplacementGate.begin(ownsPreparationCover: presentsPreparationCover)
         // A switch is a Filters-tab action, so the Filters cover (not Domain History) owns it.
         filterPreparationOrigin = .filters
+        let preparationAttemptID: UUID?
         if presentsPreparationCover {
+            filterDrafts.beginPreparationPresentation()
+            filterDrafts.preparationReplacementEpoch = switchToken
+            preparationAttemptID = filterDrafts.preparationPresentation.id
             isFilterPreparationScreenPresented = true
+        } else {
+            preparationAttemptID = nil
         }
 
         do {
@@ -115,6 +121,8 @@ extension AppViewModel {
             var publication = try await prepareSwitchPublication(
                 target: target,
                 configuration: nextConfiguration,
+                switchToken: switchToken,
+                preparationAttemptID: preparationAttemptID,
                 progressPresenter: progressPresenter,
                 presentsPreparationCover: presentsPreparationCover,
                 diagnosticFailureEvent: captureDiagnosticFailureEvent
@@ -126,7 +134,8 @@ extension AppViewModel {
                 // Only churn the preparation UI state when a cover is actually showing — a silent
                 // Focus apply must not flip filterPreparationState (nothing renders it, and callers
                 // like endViewingFilterDetail/guardFiltersHaveIssue observe it).
-                if presentsPreparationCover {
+                if presentsPreparationCover, self.configurationReplacementGate.isCurrent(switchToken),
+                   self.filterDrafts.preparationPresentation.id == preparationAttemptID {
                     self.filterPreparationState = state
                 }
             }
@@ -165,7 +174,8 @@ extension AppViewModel {
             // A newer replacement superseded this one while it was preparing. Don't touch
             // config/library (the newer owner has them); dismiss the preparation cover this switch
             // put up ONLY if the newer owner is a non-cover-driver (restore/import) that won't.
-            guard configurationReplacementGate.isCurrent(switchToken) else {
+            guard configurationReplacementGate.isCurrent(switchToken),
+                      !presentsPreparationCover || filterDrafts.preparationPresentation.id == preparationAttemptID else {
                 dismissPreparationCoverIfStrandedBySupersession()
                 return
             }
@@ -197,7 +207,8 @@ extension AppViewModel {
                         for: switchConfiguration,
                         reportProgress: { update in
                             await progressPresenter.present(update) { state in
-                                if presentsPreparationCover {
+                                if presentsPreparationCover, self.configurationReplacementGate.isCurrent(switchToken),
+                                   self.filterDrafts.preparationPresentation.id == preparationAttemptID {
                                     self.filterPreparationState = state
                                 }
                             }
@@ -210,7 +221,8 @@ extension AppViewModel {
             }
             // Rebuilding against live settings is another suspension, so a newer replacement may
             // have taken ownership while it ran. Do not commit this switch over that newer owner.
-            guard configurationReplacementGate.isCurrent(switchToken) else {
+            guard configurationReplacementGate.isCurrent(switchToken),
+                      !presentsPreparationCover || filterDrafts.preparationPresentation.id == preparationAttemptID else {
                 dismissPreparationCoverIfStrandedBySupersession()
                 return
             }
@@ -292,7 +304,8 @@ extension AppViewModel {
             // the LIVE configuration, so running it here would leave caches describing THIS switch
             // while config is the newer owner's — a later persist would then serialize wrong rules.
             // The newer owner drives the UI/tunnel; dismiss our cover only if it's a non-cover-driver.
-            guard configurationReplacementGate.isCurrent(switchToken) else {
+            guard configurationReplacementGate.isCurrent(switchToken),
+                      !presentsPreparationCover || filterDrafts.preparationPresentation.id == preparationAttemptID else {
                 dismissPreparationCoverIfStrandedBySupersession()
                 return
             }
@@ -390,7 +403,8 @@ extension AppViewModel {
                 // notify/restore above are suspensions since the last ownership check: recheck BEFORE
                 // writing the saving-top frame so a superseded switch/apply can't paint a stale 3/4
                 // frame over (or hold up) the newer preparation's cover. (Codex #284 P2)
-                guard configurationReplacementGate.isCurrent(switchToken) else {
+                guard configurationReplacementGate.isCurrent(switchToken),
+                      !presentsPreparationCover || filterDrafts.preparationPresentation.id == preparationAttemptID else {
                     dismissPreparationCoverIfStrandedBySupersession()
                     return
                 }
@@ -399,16 +413,18 @@ extension AppViewModel {
                 await progressPresenter.present(
                     FilterPreparationProgressUpdate(progress: 1.0, phase: .saving)
                 ) { state in
+                    guard self.configurationReplacementGate.isCurrent(switchToken),
+                          self.filterDrafts.preparationPresentation.id == preparationAttemptID else { return }
                     self.filterPreparationState = state
                 }
-                // Yield so the 3/4 saving-top frame actually renders + eases before Success —
-                // otherwise SwiftUI coalesces it away in the same main-actor turn and the bar sweeps
-                // straight to 100% (see the matching note in prepareAndApplyFilterDraft). (Codex #284 P3)
+                // Preserve the saving-top render hold. A delayed RN mount stages
+                // this same quarter before accepting its final-fill acknowledgment.
                 try? await Task.sleep(nanoseconds: 500_000_000)
                 // Recheck ownership after the render yield: a newer switch/apply may have superseded us
                 // during it, and a stale task must not write Success / fire the haptic / dismiss the
                 // shared cover over the newer preparation's UI. (Codex #284 P2)
-                guard configurationReplacementGate.isCurrent(switchToken) else {
+                guard configurationReplacementGate.isCurrent(switchToken),
+                      !presentsPreparationCover || filterDrafts.preparationPresentation.id == preparationAttemptID else {
                     dismissPreparationCoverIfStrandedBySupersession()
                     return
                 }
@@ -418,9 +434,13 @@ extension AppViewModel {
                 // Hold long enough for the bar to sweep to a full 100% (~0.55s) and then show the
                 // checkmark for a beat (the cover fills the bar, then cross-fades to the glyph).
                 try? await Task.sleep(nanoseconds: 1_200_000_000)
+                await filterDrafts.waitForPreparationSuccessPresentation(id: preparationAttemptID) {
+                    self.configurationReplacementGate.isCurrent(switchToken)
+                }
                 // Same as the draft path: recheck ownership after the lengthened success hold so a
                 // stale task never dismisses a newer preparation's cover. (Codex #284 P2)
-                guard configurationReplacementGate.isCurrent(switchToken) else {
+                guard configurationReplacementGate.isCurrent(switchToken),
+                      !presentsPreparationCover || filterDrafts.preparationPresentation.id == preparationAttemptID else {
                     dismissPreparationCoverIfStrandedBySupersession()
                     return
                 }
@@ -431,7 +451,8 @@ extension AppViewModel {
             // Only the current owner may roll back. A superseded attempt that failed must not
             // restore its previousActiveID over a newer switch/restore/import that committed; it
             // only dismisses its own cover if the new owner won't.
-            guard configurationReplacementGate.isCurrent(switchToken) else {
+            guard configurationReplacementGate.isCurrent(switchToken),
+                      !presentsPreparationCover || filterDrafts.preparationPresentation.id == preparationAttemptID else {
                 dismissPreparationCoverIfStrandedBySupersession()
                 return
             }
@@ -574,9 +595,13 @@ extension AppViewModel {
     /// recompile + republish on a refreshed catalog, so a warm flip would race it. Bailing to a cold
     /// compile (which coalesces with / follows the sync) keeps the warm fast path quiescent-only —
     /// instant in the common case, never racing a refresh.
+    /// Keep the caller's entry identities across the warm lookup; a newer silent replacement may
+    /// advance the epoch without replacing the visible preparation attempt.
     private func prepareSwitchPublication(
         target: Filter,
         configuration: AppConfiguration,
+        switchToken: Int,
+        preparationAttemptID: UUID?,
         progressPresenter: FilterPreparationProgressPresenter,
         // False for a silent Focus reconcile apply: the cold-compile progress must not churn
         // filterPreparationState (nothing renders it, and it would spuriously read as in-progress
@@ -597,7 +622,8 @@ extension AppViewModel {
             for: configuration,
             reportProgress: { update in
                 await progressPresenter.present(update) { state in
-                    if presentsPreparationCover {
+                    if presentsPreparationCover, self.configurationReplacementGate.isCurrent(switchToken),
+                       self.filterDrafts.preparationPresentation.id == preparationAttemptID {
                         self.filterPreparationState = state
                     }
                 }
