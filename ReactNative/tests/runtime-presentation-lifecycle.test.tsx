@@ -21,6 +21,7 @@ let mockHydrationQueryScope=0;
 let mockFocused=true;
 let mockRootState:NavigationState|undefined;
 const mockNavigationDispatch=jest.fn();
+const mockTabNavigate=jest.fn();
 const mockNavigationListeners=new Set<()=>void>();
 const mockSubscribeNavigation=(listener:()=>void)=>{mockNavigationListeners.add(listener);return()=>{mockNavigationListeners.delete(listener);};};
 
@@ -70,7 +71,7 @@ function mockNativeNavigator() {
   const React=require('react');const {View}=require('react-native');
   return {
     Navigator:({children,initialRouteName,screenOptions}:{children:import('react').ReactNode;initialRouteName?:string;screenOptions?:unknown})=>{
-      const routes=React.Children.toArray(children) as import('react').ReactElement<{name:string}>[];
+      const routes=React.Children.toArray(children) as import('react').ReactElement<{name:string;options?:{title?:string;tabBarIcon?:(state:{focused:boolean})=>unknown};listeners?:(args:{navigation:unknown})=>{tabPress?:()=>void}}>[];
       const state=React.useSyncExternalStore(mockSubscribeNavigation,()=>mockRootState);
       const activeTab=state?.routes[state.index];
       const stack=initialRouteName==='Guard'||initialRouteName==='Settings'?activeTab?.state:undefined;
@@ -78,7 +79,11 @@ function mockNativeNavigator() {
       const child=routes.find(route=>route.props.name===(destination??initialRouteName))??routes[0]??null;
       return typeof screenOptions==='function'?React.createElement(View,{testID:'native-tab-shell',
         nativeSelectionEnabled:screenOptions({route:{name:'GuardTab'}}).tabBarSelectionEnabled,
-        nativeTabBarHidden:screenOptions({route:{name:'GuardTab'}}).tabBarStyle?.display==='none'},child):child;
+        nativeSelectionEnabledByTab:routes.map(route=>screenOptions({route:{name:route.props.name}}).tabBarSelectionEnabled),
+        nativeTabBarHidden:screenOptions({route:{name:'GuardTab'}}).tabBarStyle?.display==='none',
+        onPressSettings:()=>routes.find(route=>route.props.name==='SettingsTab')?.props.listeners?.({navigation:{getState:()=>state,dispatch:mockNavigationDispatch,navigate:mockTabNavigate}}).tabPress?.(),
+        nativeTabs:routes.map(route=>({name:route.props.name,title:route.props.options?.title,
+          icons:[false,true].map(focused=>route.props.options?.tabBarIcon?.({focused}))}))},child):child;
     },
     Screen:({component:Component,children,name,options}:{component?:import('react').ComponentType;children?:()=>import('react').ReactNode;name:string;options?:{title?:string}})=>
       React.createElement(View,{testID:`native-route.${name}`,nativeTitle:options?.title},Component?React.createElement(Component):children?.()),
@@ -87,7 +92,7 @@ function mockNativeNavigator() {
 jest.mock('@react-navigation/native-stack',()=>({createNativeStackNavigator:()=>mockNativeNavigator()}));
 jest.mock('@react-navigation/bottom-tabs/unstable',()=>({createNativeBottomTabNavigator:()=>mockNativeNavigator()}));
 jest.mock('../review/navigation-scaffold',()=>({...jest.requireActual('../review/navigation-scaffold'),useOrdinaryPushPresentation:()=>({})}));
-jest.mock('../review/scaffold',()=>({fullScreenModalPresentation:{},fullSheetPresentation:{},nativeFlowHeader:()=>({}),onboardingHeaderOptions:{},toolbarButton:jest.fn()}));
+jest.mock('../review/scaffold',()=>({fullScreenModalPresentation:{},fullSheetPresentation:{},nativeFlowHeader:()=>({}),onboardingHeaderOptions:{},toolbarButton:jest.fn(),toolbarAction:jest.fn()}));
 jest.mock('../review/primitives',()=>{
   const React=require('react');const {Text,View}=require('react-native');
   return {
@@ -177,7 +182,7 @@ beforeEach(()=>{
   restoreLifecycle=()=>{AppState.addEventListener=previousListener;Object.defineProperty(AppState,'currentState',{configurable:true,value:originalState});};
   reads=[];
   mockHydrationQueryCount=0;mockHydrationQueryScope=0;mockFocused=true;
-  mockRootState=undefined;mockNavigationDispatch.mockClear();mockNavigationListeners.clear();
+  mockRootState=undefined;mockNavigationDispatch.mockClear();mockTabNavigate.mockClear();mockNavigationListeners.clear();
   mockGetSnapshot.mockReset().mockImplementation(()=>{const read=deferred<string>();reads.push(read);return read.promise;});
   mockCommand.mockReset().mockResolvedValue(JSON.stringify({snapshot:JSON.parse(snapshot(1)),result:null}));
   mockOnSnapshot.mockReset().mockImplementation(callback=>{emitSnapshot=value=>act(()=>callback(value));return {remove:jest.fn()};});
@@ -254,33 +259,80 @@ test.each([
   await act(async()=>{});
   expect(screen.getByTestId('native-route.Guard').props.nativeTitle).toBe(title);
   expect(screen.getByTestId('native-route.GuardTab').props.nativeTitle).toBe(title);
+  const tabs=screen.getByTestId('native-tab-shell').props.nativeTabs;
+  expect(tabs).toEqual([
+    {name:'GuardTab',title,icons:[{type:'sfSymbol',name:'shield.fill'},{type:'sfSymbol',name:'shield.fill'}]},
+    {name:'SettingsTab',title:require('../app/presentation').localized('Settings'),icons:[{type:'sfSymbol',name:'gearshape.fill'},{type:'sfSymbol',name:'gearshape.fill'}]},
+  ]);
 });
 
-test.each([false,true])('only its current onboarding owner hides the retained native tabs (preview=%s)',async onboardingPreview=>{
-  render(<LavaUIReview fullApp onboardingPreview={onboardingPreview} initialSnapshot={snapshot(1,false)}/>);
+test.each([
+  [false,false],[false,true],[true,false],[true,true],
+])('current onboarding retains the final native tab layout and gates selection through its handoff (preview=%s, protected Settings=%s)',async(onboardingPreview,protectedSettings)=>{
+  mockRootState=redirectState('GuardTab','Guard');
+  const currentSnapshot=(revision:number)=>{
+    const value=JSON.parse(snapshot(revision,false));
+    value.session.protectedActions['Update App Settings']=protectedSettings;
+    return value;
+  };
+  render(<LavaUIReview fullApp onboardingPreview={onboardingPreview} initialSnapshot={JSON.stringify(currentSnapshot(1))}/>);
   await act(async()=>{});
   const tabs=screen.getByTestId('native-tab-shell');
   const guard=screen.getByTestId('private-route-body');
   const navigation=screen.getByTestId('native-navigation-container');
   expect(tabs.props.nativeTabBarHidden).toBe(false);
-  const update=(revision:number,mock:boolean)=>{
-    const value=JSON.parse(snapshot(revision,false));
-    value.onboardingSetup={id:`setup-${revision}`,mock,page:5,phase:'ready',history:[0,1,2,3,4],visited:[0,1,2,3,4,5]};
+  expect(tabs.props.nativeSelectionEnabledByTab).toEqual([true,!protectedSettings]);
+  const update=(revision:number,mock:boolean,phase:'setup'|'arriving'|'ready'|'opening'|'released')=>{
+    const value=currentSnapshot(revision);
+    value.onboardingSetup={id:mock===onboardingPreview?'current-setup':'unrelated-setup',mock,page:phase==='setup'?0:5,phase,history:[0,1,2,3,4],visited:[0,1,2,3,4,5]};
     emitSnapshot(JSON.stringify(value));
   };
-  update(2,!onboardingPreview);
+  update(2,!onboardingPreview,'ready');
   expect(screen.getByTestId('native-tab-shell').props.nativeTabBarHidden).toBe(false);
-  update(3,onboardingPreview);
-  expect(screen.getByTestId('native-tab-shell',{includeHiddenElements:true}).props.nativeTabBarHidden).toBe(true);
-  expect(screen.getByTestId('native-tab-shell',{includeHiddenElements:true})).toBe(tabs);
-  expect(screen.getByTestId('private-route-body',{includeHiddenElements:true})).toBe(guard);
-  emitSnapshot(snapshot(4,false));
+  expect(screen.getByTestId('native-tab-shell').props.nativeSelectionEnabledByTab).toEqual([true,!protectedSettings]);
+  for(const [index,phase] of (['setup','arriving','ready','opening','released'] as const).entries()){
+    update(3+index,onboardingPreview,phase);
+    const retainedTabs=screen.getByTestId('native-tab-shell',{includeHiddenElements:true});
+    expect(retainedTabs.props.nativeTabBarHidden).toBe(false);
+    expect(retainedTabs.props.nativeSelectionEnabledByTab).toEqual([false,false]);
+    expect(retainedTabs).toBe(tabs);
+    expect(screen.getByTestId('private-route-body',{includeHiddenElements:true})).toBe(guard);
+    fireEvent(retainedTabs,'pressSettings');
+    expect(mockCommand.mock.calls.filter(([request])=>JSON.parse(request).type==='navigation.authorize')).toHaveLength(0);
+    expect(mockTabNavigate).not.toHaveBeenCalled();
+    expect(mockNavigationDispatch).not.toHaveBeenCalled();
+  }
+  emitSnapshot(JSON.stringify(currentSnapshot(8)));
   expect(screen.getByTestId('native-tab-shell').props.nativeTabBarHidden).toBe(false);
+  expect(screen.getByTestId('native-tab-shell').props.nativeSelectionEnabledByTab).toEqual([true,!protectedSettings]);
   expect(screen.getByTestId('private-route-body')).toBe(guard);
   expect(screen.getByTestId('native-navigation-container')).toBe(navigation);
   expect(mockNavigationMount).toHaveBeenCalledTimes(1);
   expect(mockNavigationUnmount).not.toHaveBeenCalled();
   expect(mockBodyUnmount).not.toHaveBeenCalled();
+  if(protectedSettings){
+    mockCommand.mockResolvedValueOnce(JSON.stringify({snapshot:currentSnapshot(9),result:null}));
+    fireEvent(screen.getByTestId('native-tab-shell'),'pressSettings');
+    await act(async()=>{});
+    expect(mockCommand.mock.calls.filter(([request])=>JSON.parse(request).type==='navigation.authorize').map(([request])=>JSON.parse(request)))
+      .toEqual([{type:'navigation.authorize',surface:'appSettings',newTurn:true}]);
+    expect(mockTabNavigate).toHaveBeenCalledWith('SettingsTab');
+  }
+});
+
+test.each([false,true])('another onboarding owner preserves protected Settings authentication (preview=%s)',async onboardingPreview=>{
+  mockRootState=redirectState('GuardTab','Guard');
+  const initial=JSON.parse(snapshot(1,false));
+  initial.session.protectedActions['Update App Settings']=true;
+  initial.onboardingSetup={id:'unrelated-setup',mock:!onboardingPreview,page:5,phase:'ready',history:[0,1,2,3,4],visited:[0,1,2,3,4,5]};
+  render(<LavaUIReview fullApp onboardingPreview={onboardingPreview} initialSnapshot={JSON.stringify(initial)}/>);
+  await act(async()=>{});
+  mockCommand.mockResolvedValueOnce(JSON.stringify({snapshot:{...initial,revision:2},result:null}));
+  fireEvent(screen.getByTestId('native-tab-shell'),'pressSettings');
+  await act(async()=>{});
+  expect(mockCommand.mock.calls.filter(([request])=>JSON.parse(request).type==='navigation.authorize').map(([request])=>JSON.parse(request)))
+    .toEqual([{type:'navigation.authorize',surface:'appSettings',newTurn:true}]);
+  expect(mockTabNavigate).toHaveBeenCalledWith('SettingsTab');
 });
 
 function expectConcealed() {
@@ -999,4 +1051,24 @@ test('a read from a blurred route cannot hold the resumed visible interface cove
   expect(screen.queryByTestId('lava-privacy-cover')).toBeNull();
   await settleQuery(requests[1]!,4,['offscreen-reply']);
   expect(screen.queryByText('Painted first query offscreen-reply',{includeHiddenElements:true})).toBeNull();
+});
+
+
+test.each(['backupRestore','passcode'] as const)('accepted all-off native credential editors keep their same-visit ancestor without input or AX authority: %s',async kind=>{
+  const initial=JSON.parse(foregroundSnapshot(1,{kind,ownerID:'credential-visit'}));
+  delete initial.foregroundFlow.vpnEditor;
+  if(kind==='backupRestore')initial.foregroundFlow.accountBackup={mode:'recoveryCode',review:null};
+  else initial.passcode={id:'credential-visit',authenticating:false};
+  render(<LavaUIReview fullApp foregroundContext="credential-visit" initialSnapshot={JSON.stringify(initial)}/>);
+  await act(async()=>{});
+  const body=screen.getByTestId('foreground-retained-body');const frame=screen.getByTestId('lava-render-frame');
+  const edit=body.props.onRequestNativeEdit as ()=>Promise<unknown>;mockCommand.mockClear();
+  for(const state of ['inactive','background','active'] as const){
+    emitState(state);
+    expect(screen.getByTestId('lava-render-frame',{includeHiddenElements:true})).toBe(frame);
+    expect(frame.props).toMatchObject({pointerEvents:'box-only',accessibilityElementsHidden:true,importantForAccessibility:'no-hide-descendants'});
+    expect(screen.getByTestId('foreground-retained-body',{includeHiddenElements:true})).toBe(body);
+    await act(async()=>{await expect(edit()).rejects.toThrow('Read access changed.');});
+  }
+  expect(mockCommand).not.toHaveBeenCalled();
 });

@@ -108,6 +108,48 @@ test('a foreground dismissal guard reaches UIKit before queued feedback sampling
     expect(store.getSnapshot().snapshot?.revision).toBe(10);
   }finally{sampling.resolve(response(2));disconnect();}
 });
+test('foreground Close retires its visit during pending account deletion without releasing queued settings',async()=>{
+  const {store,native,disconnect}=setup(),deletion=deferred<string>(),settings=deferred<string>();
+  native.command.mockImplementation(async request=>{
+    const type=JSON.parse(request).type;
+    return type==='accountBackup.command'?deletion.promise:type==='settings.set'?settings.promise:response(10);
+  });
+  const pending=store.command({type:'accountBackup.command',id:'account-visit',command:{action:'account.delete'}});
+  await Promise.resolve();
+  const queued=store.command({type:'settings.set',key:'haptics',value:false});
+  const cleanup={type:'foreground.dismiss' as const,id:'account-visit'};
+  const retiring=store.command(cleanup);
+  try{
+    await Promise.resolve();await Promise.resolve();
+    expect(native.command.mock.calls.map(([request])=>JSON.parse(request).type)).toEqual(['accountBackup.command','foreground.dismiss']);
+    expect(JSON.parse(native.command.mock.calls[1]![0])).toEqual(cleanup);
+    await retiring;
+    expect(store.getSnapshot().snapshot?.revision).toBe(10);
+    deletion.resolve(response(2));await pending;await Promise.resolve();
+    expect(native.command.mock.calls.map(([request])=>JSON.parse(request).type)).toEqual(['accountBackup.command','foreground.dismiss','settings.set']);
+    expect(store.getSnapshot().snapshot?.revision).toBe(10);
+    settings.resolve(response(11));await queued;
+    expect(store.getSnapshot().snapshot?.revision).toBe(11);
+  }finally{deletion.resolve(response(2));settings.resolve(response(11));await Promise.allSettled([pending,queued,retiring]);disconnect();}
+});
+test.each(['leave','close','detail.close','detail.back'] as const)('QA %s reaches native before staging finishes without releasing queued edits',async action=>{
+  const {store,native,disconnect}=setup(),staging=deferred<string>();
+  native.command.mockImplementation(async request=>JSON.parse(request).action==='stage'?staging.promise:response(10));
+  const pending=store.command({type:'qa.command',id:'visit',action:'stage'});await Promise.resolve();
+  const queued=store.command({type:'qa.command',id:'visit',action:'search',value:'next'});
+  const cleanup={type:'qa.command' as const,id:'visit',...(action.startsWith('detail.')?{detail:'check'}:{}),action};
+  const retiring=store.command(cleanup);
+  try{
+    await Promise.resolve();await Promise.resolve();
+    expect(native.command.mock.calls.map(([request])=>JSON.parse(request).action)).toEqual(['stage',action]);
+    expect(JSON.parse(native.command.mock.calls[1]![0])).toEqual(cleanup);
+    await retiring;
+    expect(store.getSnapshot().snapshot?.revision).toBe(10);
+    staging.resolve(response(2));await Promise.all([pending,queued]);
+    expect(native.command.mock.calls.map(([request])=>JSON.parse(request).action)).toEqual(['stage',action,'search']);
+    expect(store.getSnapshot().snapshot?.revision).toBe(10);
+  }finally{staging.resolve(response(2));await Promise.allSettled([pending,queued,retiring]);disconnect();}
+});
 test('failed writes never invent a successful settings snapshot',async()=>{
   const {store,native}=setup();await store.refresh();native.command.mockRejectedValueOnce(new Error('Authentication cancelled.'));
   await expect(store.command({type:'settings.set',key:'deviceDNS',value:true})).rejects.toThrow('Authentication cancelled');
@@ -150,6 +192,22 @@ test('scrub haptics acknowledge without repainting app state while real native o
   native.command.mockRejectedValueOnce(new Error('Invalid haptic.'));
   await expect(store.command({type:'haptic',kind:'changed'})).rejects.toThrow('Invalid haptic.');
   expect(listener).toHaveBeenCalledTimes(1);disconnect();
+});
+test('foreground layout accepts result-only ACKs without repainting or invalidating reads',async()=>{
+  const {store,native,emit,disconnect}=setup();await store.refresh();
+  const before=store.getSnapshot(),epoch=store.getInvalidation(),listener=jest.fn();store.subscribe(listener);
+  native.command.mockResolvedValue(JSON.stringify({result:null}));
+  try{
+    await expect(store.command({type:'foreground.layout',id:'import-visit',stageID:'entry-stage',height:412})).resolves.toBeNull();
+    expect(store.getSnapshot()).toBe(before);expect(store.getInvalidation()).toBe(epoch);expect(listener).not.toHaveBeenCalled();
+    emit(snapshot(4));expect(store.getSnapshot().snapshot?.revision).toBe(4);expect(listener).toHaveBeenCalledTimes(1);
+  }finally{disconnect();}
+});
+test('a foreground layout ACK cannot complete after its runtime disconnects',async()=>{
+  const {store,native,disconnect}=setup();await store.refresh();const pending=deferred<string>();native.command.mockReturnValueOnce(pending.promise);
+  const command=store.command({type:'foreground.layout',id:'import-visit',stageID:'entry-stage',height:412});
+  const rejected=expect(command).rejects.toThrow('screen closed');await Promise.resolve();disconnect();
+  pending.resolve(JSON.stringify({result:null}));await rejected;
 });
 test('state-changing commands still reject an effect-only response',async()=>{
   const {store,native,disconnect}=setup();await store.refresh();const before=store.getSnapshot();
@@ -661,15 +719,33 @@ test('concealed owner retirement reaches native without admitting new reads or m
   try {
     await store.refresh();emit(policySnapshot(2,true));events.emit('inactive');
     const retiring:import('../app/contract').AppCommand[]=[{type:'vpn.cancel',id:'old-draft'},{type:'customEntry.dismiss',id:'old-form'},
-      {type:'domains.cancel',token:'old-domain-page'},{type:'activity.visibility',token:'old-period',visible:false}];
+      {type:'domains.cancel',token:'old-domain-page'},{type:'activity.visibility',token:'old-period',visible:false},
+      ...(['leave','close','detail.close','detail.back'] as const).map(action=>({type:'qa.command' as const,id:'qa-visit',action,
+        ...(action.startsWith('detail.')?{detail:'qa-check'}:{})}))];
     for(const command of retiring)await store.command(command);
-    expect(native.command).toHaveBeenCalledTimes(4);
+    expect(native.command).toHaveBeenCalledTimes(8);
     expect(store.getSnapshot().snapshot).toBeNull();expect(store.getSnapshot().displaySnapshot).toBeNull();
     await expect(store.command({type:'activity.visibility',token:'new-period',visible:true})).rejects.toThrow('Read access changed.');
     await expect(store.command({type:'vpn.rowToggle',generation:'draft',index:0,value:true})).rejects.toThrow('Read access changed.');
+    await expect(store.command({type:'qa.command',id:'qa-visit',action:'stage'})).rejects.toThrow('Read access changed.');
     await expect(store.command({type:'share.query',id:'private'})).rejects.toThrow('Read access changed.');
-    expect(native.command).toHaveBeenCalledTimes(4);
+    expect(native.command).toHaveBeenCalledTimes(8);
   } finally {disconnect();events.restore();}
+});
+
+test('account backup uses the existing foreground cleanup admission without recovering concealed reads',async()=>{
+  const events=lifecycle();const {store,native,emit,disconnect}=setup();
+  try{
+    await store.refresh();emit(policySnapshot(2,true));events.emit('inactive');
+    native.command.mockResolvedValue(response(3));
+    await store.command({type:'foreground.dismiss',id:'retained-backup'});
+    expect(native.command.mock.calls.map(([request])=>JSON.parse(request))).toEqual([{type:'foreground.dismiss',id:'retained-backup'}]);
+    expect(store.getSnapshot().snapshot).toBeNull();
+    await expect(store.command({type:'accountBackup.command',id:'retained-backup',command:{action:'setup.validate'}})).rejects.toThrow('Read access changed.');
+    await expect(store.command({type:'accountBackup.command',id:'retained-backup',command:{action:'account.delete'}})).rejects.toThrow('Read access changed.');
+    await expect(store.command({type:'stats.query'})).rejects.toThrow('Read access changed.');
+    expect(native.command).toHaveBeenCalledTimes(1);
+  }finally{disconnect();events.restore();}
 });
 
 test.each(['inactive','blocked'])('a %s boundary publishes revoked fields atomically with its new hydration epoch',async boundary=>{

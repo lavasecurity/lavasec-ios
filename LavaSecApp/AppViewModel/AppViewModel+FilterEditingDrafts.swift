@@ -196,6 +196,26 @@ extension AppViewModel {
     }
 
     func stageDomainHistoryDomainAction(_ rawDomain: String, target: DomainHistoryDomainTarget) -> DomainDraftResult {
+        stageActiveFilterDomainAction(rawDomain, message: target == .blocked
+            ? "This domain will be blocked after you confirm." : "This exception will take effect after you confirm.") {
+            try $0.applyingDomainHistoryDomainAction(rawDomain, target: target,
+                allowlistValidator: AllowlistValidator(nonAllowableThreatRules: threatGuardrail)).configuration
+        }
+    }
+
+    func stageDomainCheckRuleAction(_ rawDomain: String, action: DomainCheckRuleAction) -> DomainDraftResult {
+        let message = action == .blocked ? "This domain will be blocked after you confirm."
+            : action == .allowed ? "This exception will take effect after you confirm."
+            : action == .removeBlockedDomain ? "This blocked domain will be removed after you confirm."
+            : "This exception will be removed after you confirm."
+        return stageActiveFilterDomainAction(rawDomain, message: message) {
+            try $0.applyingDomainCheckRuleAction(rawDomain, action: action,
+                allowlistValidator: AllowlistValidator(nonAllowableThreatRules: threatGuardrail))
+        }
+    }
+
+    private func stageActiveFilterDomainAction(_ rawDomain: String, message: String,
+                                               update: (AppConfiguration) throws -> AppConfiguration) -> DomainDraftResult {
         // Domain History edits the ACTIVE filter's draft (keyed by activeFilterID). Per-filter
         // storage means a preserved draft for a *different* (non-active) filter is untouched — but
         // an in-progress edit of the ACTIVE filter would still be overwritten, so refuse only in
@@ -208,11 +228,8 @@ extension AppViewModel {
             )
         }
         do {
-            let result = try configuration.applyingDomainHistoryDomainAction(
-                rawDomain,
-                target: target,
-                allowlistValidator: AllowlistValidator(nonAllowableThreatRules: threatGuardrail)
-            )
+            let domain = try DomainName.normalize(rawDomain)
+            let result = try update(configuration)
 
             // Domain History edits the ACTIVE filter, so write its keyed draft directly and force
             // the detail context to the active filter (target nil) so the review sheet diffs against
@@ -220,17 +237,12 @@ extension AppViewModel {
             // "View" page may stay mounted on the Guard tab; resetting the target re-points the proxy
             // at the active filter (MyListCover.onAppear re-asserts its own target on return).
             filterEditTargetID = nil
-            activeFilterDraft = FilterEditDraft(configuration: result.configuration)
+            activeFilterDraft = FilterEditDraft(configuration: result)
             filterPreparationState = .idle
             isFilterPreparationScreenPresented = false
             ProtectionHapticFeedback.play(.selectionConfirmed)
 
-            switch result.target {
-            case .blocked:
-                return .accepted(result.normalizedDomain, message: "This domain will be blocked after you confirm.")
-            case .allowed:
-                return .accepted(result.normalizedDomain, message: "This exception will take effect after you confirm.")
-            }
+            return .accepted(domain, message: message)
         } catch let actionError as DomainHistoryDomainActionError {
             ProtectionHapticFeedback.play(.selectionRejected)
             let limitReached: Bool

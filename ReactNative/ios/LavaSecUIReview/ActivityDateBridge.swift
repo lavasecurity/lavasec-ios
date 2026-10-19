@@ -96,6 +96,16 @@ private final class ActivityDateCompletion {
 @MainActor
 final class FilterChoiceBridge: NSObject {
     @objc static func choose(name: String, canSwitch: Bool, canShare: Bool, completion: @escaping (String?) -> Void) {
+        present(title: name, options: [("switch", "Switch to this filter", canSwitch),
+            ("view", "View or edit only", true), ("share", "Share", canShare), ("cancel", "Cancel", true)], completion: completion)
+    }
+
+    @objc static func chooseActivityExport(canShareChart: Bool, completion: @escaping (String?) -> Void) {
+        present(title: "Export".lavaLocalized, options: [("chart", "Activity chart", canShareChart),
+            ("diagnostics", "Export diagnostics", true), ("logs", "Export all logs", true), ("cancel", "Cancel", true)], completion: completion)
+    }
+
+    private static func present(title: String, options: [(String, String, Bool)], completion: @escaping (String?) -> Void) {
         guard let root = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene })
             .flatMap(\.windows).first(where: \.isKeyWindow)?.rootViewController else { completion(nil); return }
         var presenter = root
@@ -106,16 +116,16 @@ final class FilterChoiceBridge: NSObject {
               !LavaAppBridge.shared.security.isAppUnlockPrivacyMaskVisible else { completion(nil); return }
         #endif
         let result = FilterChoiceCompletion(completion)
-        let controller = UIAlertController(title: name, message: nil, preferredStyle: .actionSheet)
-        for (action, title, enabled) in [
-            ("switch", "Switch to this filter", canSwitch),
-            ("view", "View or edit only", true), ("share", "Share", canShare), ("cancel", "Cancel", true)
-        ] {
+        let controller = UIAlertController(title: title, message: nil, preferredStyle: .actionSheet)
+        for (action, title, enabled) in options {
             // UIKit omits a .cancel action in its popover presentation. Keep an
             // explicit native row on every size class; both this row and native
             // outside dismissal resolve the same once-only cancellation owner.
-            let item = UIAlertAction(title: title.lavaLocalized, style: .default) { _ in
-                result.finish(action == "cancel" ? nil : action)
+            let item = UIAlertAction(title: title.lavaLocalized, style: .default) { [weak controller] _ in
+                guard let controller else { result.finish(nil); return }
+                // Export may immediately present another native sheet. Resolve
+                // only after this dialog has relinquished its presenter.
+                controller.dismiss(animated: true) { result.finish(action == "cancel" ? nil : action) }
             }
             item.isEnabled = enabled
             controller.addAction(item)

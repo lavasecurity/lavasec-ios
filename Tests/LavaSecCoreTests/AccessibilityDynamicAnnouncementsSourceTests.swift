@@ -12,37 +12,14 @@ final class AccessibilityDynamicAnnouncementsSourceTests: XCTestCase {
 
     // MARK: FL1 — filter prepare/apply terminal outcome
 
-    func testFilterPreparationAnnouncesTerminalOutcome() throws {
-        let block = try sourceBlock(
-            in: try readSource(.filterReviewFlowView),
-            startingAt: "struct FilterPreparationScreen: View {",
-            endingBefore: "struct PreparationTickerTitle: View {"
-        )
-        // The outcome must be announced whether it PREDATES mount (a validation failure sets
-        // `.failed` before presenting the cover) or FOLLOWS it (async success/failure). Both route
-        // through one helper: `.onAppear` for the state already set at mount, `.onChange` after.
-        XCTAssertTrue(
-            block.contains(".onAppear {"),
-            "The prepare screen must announce a terminal state already set at mount (fail-before-present)."
-        )
-        XCTAssertTrue(
-            block.contains(".onChange(of: drafts.preparationState)"),
-            "The prepare screen must announce terminal states reached after presentation."
-        )
-        // Helper defined once + called from both .onAppear and .onChange → three occurrences.
-        XCTAssertEqual(
-            block.components(separatedBy: "announceFilterPreparationOutcome(").count - 1, 3,
-            "The announce helper must be defined once and called from both .onAppear and .onChange."
-        )
-        XCTAssertTrue(
-            block.contains("LavaAccessibilityAnnouncer.announce(\"Filters updated.\".lavaLocalized)"),
-            "A successful prepare/apply must announce completion to VoiceOver."
-        )
-        // Failure reuses the on-screen heading string so it stays localized without a new key.
-        XCTAssertTrue(
-            block.contains("\"We couldn't update your filter\".lavaLocalized"),
-            "A failed prepare/apply must announce the failure (reusing the on-screen heading)."
-        )
+    func testFilterPreparationHasOneNativeAttemptScopedAnnouncementOwner() throws {
+        let source = try readSource(.reactNativeAppPreparation)
+        XCTAssertTrue(source.contains("drafts.announcePreparationOutcome(id: id)"))
+        let owner = try readSource(.filterDraftController)
+        XCTAssertTrue(owner.contains("preparationPresentation.claimAnnouncement(id: id, outcome: outcome.key)"))
+        XCTAssertTrue(owner.contains("LavaAccessibilityAnnouncer.announce(outcome.message)"))
+        XCTAssertTrue(owner.contains("\"Filters updated.\".lavaLocalized"))
+        XCTAssertFalse(try readSource(.filterReviewFlowView).contains("LavaAccessibilityAnnouncer"))
     }
 
     // MARK: S6 — Privacy & Data clear completion
@@ -51,10 +28,9 @@ final class AccessibilityDynamicAnnouncementsSourceTests: XCTestCase {
 
     func testBackupRestoreAnnouncesSettledOutcome() throws {
         let source = try readSource(.backupRestoreView)
-        // Each in-place transition is announced, including the new mandatory review step.
         XCTAssertTrue(source.contains("LavaAccessibilityAnnouncer.announce(RestoreStatus.reviewing.title.lavaLocalized)"))
         XCTAssertTrue(source.contains("restoreStatus.title.lavaLocalized + \" \" + restoreStatus.detail.lavaLocalized"))
-        XCTAssertTrue(source.contains("LavaAccessibilityAnnouncer.announce(status.title.lavaLocalized + \" \" + status.detail.lavaLocalized)"))
+        XCTAssertTrue(source.contains("LavaAccessibilityAnnouncer.announce(restoreStatus.title.lavaLocalized"))
     }
 
     func testBackupSetupAnnouncesCompletion() throws {

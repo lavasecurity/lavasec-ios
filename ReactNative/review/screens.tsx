@@ -62,7 +62,7 @@ export function GuardScreen() {
   const mood = mascotInteraction.grateful&&protection?.mood==='awake'?'grateful':protection?.mood ?? "sleeping";
   const pauseOptions=protection?.canPause?(protection.pauseOptions??[5,10,15].map(minutes=>({minutes,title:localizedFormat('Pause for %d minutes',minutes)}))).map(option=>({id:String(option.minutes),title:option.title,symbol:'pause.circle'})):[];
   const pause=(id:string)=>{if(pauseOptions.some(option=>option.id===id))void app?.command({type:'protection.pause',minutes:Number(id) as 5|10|15}).catch(error=>{if(error.message!=='Authentication cancelled.')Alert.alert('Lava',error.message);});};
-  return <Screen wide><StoryColumns primary={<View ref={anchors.panel} collapsable={false}><ProtectionHero ready={ready} title={protection?.title ?? 'Protection Off'}
+  return <Screen wide><StoryColumns primary={<View testID="guard.panel" ref={anchors.panel} collapsable={false}><ProtectionHero ready={ready} title={protection?.title ?? 'Protection Off'}
     materialIntent={protection?.materialIntent}
     active={focused&&foreground&&!concealed}
     description={protection?.subtitle ?? 'Tap once to add local protection'}
@@ -70,7 +70,7 @@ export function GuardScreen() {
     onAccessibilityAction={event=>{if(event.nativeEvent.actionName==='playSudoku')nav.navigate('Sudoku');else if(event.nativeEvent.actionName==='changeGuardian')reveal();}}
     mascot={<View ref={anchors.mascot} collapsable={false} style={{opacity:shared.setup&&shared.setup.phase!=='released'?0:1}}><Guardian testID="guard.mascot" look={look} mood={mood} gesturesEnabled={focused&&foreground}
       onGesture={value=>{if(value==='end')gesture('end');else if(focused&&foreground){if(value==='reveal')reveal();else if(value==='tap')mascotTap();else gesture('start');}}}/></View> }
-    action={<View ref={anchors.action} collapsable={false}><ContextMenu testID="guard.pause-menu" actions={pauseOptions} onAction={pause}>
+    action={<View testID="guard.action" ref={anchors.action} collapsable={false}><ContextMenu testID="guard.pause-menu" actions={pauseOptions} onAction={pause}>
       <LavaActionButton stablePill tone={protection?.actionTone} title={ready?'Open Guard':protection?.action ?? 'Turn On'} subtitle={protection?.canPause?'Long-press for pause options':undefined}
         disabled={protection?.disabled} busy={protection?.configuring} onPress={command}
         accessibilityActions={pauseOptions.map(option=>({name:option.id,label:localized(option.title)}))} onAccessibilityAction={event=>pause(event.nativeEvent.actionName)}/>

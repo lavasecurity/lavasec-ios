@@ -4,3 +4,5 @@ export type {LavaSelectionAccessoryProps} from './contracts';
 export type {LavaIconAction, LavaIconButtonProps} from './contracts';
 export {LavaChoice} from './choice';
 export {LavaControlContent,LavaRowLabel} from './row-content';
+export type {LavaUIAdapter,LavaToolbarAction,LavaPurposeChoiceProps} from './ui/contracts';
+export {LavaSingleChoice,LavaOptionStepper,LavaPageIndicator} from './ui/components/choice';

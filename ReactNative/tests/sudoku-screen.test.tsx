@@ -1,3 +1,5 @@
+// QA's independent native navigator is qualified by device-qa-presentation-lifecycle.
+jest.mock('../review/QAFlowAdapter.ios',()=>({QAFlowAdapter:()=>null}));
 import {useLayoutEffect,useState,useSyncExternalStore,type ComponentRef,type PropsWithChildren} from 'react';
 import {AccessibilityInfo,Alert,Animated,AppState,PanResponder,Pressable,ScrollView,StyleSheet,Text,View} from 'react-native';
 import {act,fireEvent,render,screen} from '@testing-library/react-native';
@@ -338,6 +340,13 @@ test('a solved board keeps cells selectable and swipes trackable while entry and
     // The solved board ignores edits even though selection moved.
     expect(screen.getByLabelText('Sudoku board, solved')).toBeOnTheScreen();
   } finally {measure.mockRestore();responder.mockRestore();}
+});
+test.each([undefined,1,2] as const)('the solved board uses persisted reveal version %s',revealVersion=>{
+  let game=newGame({...referencePuzzle,revealVersion});
+  referencePuzzle.solution.forEach((digit,index)=>{game=editCell(game,index,digit);});
+  render(<Provider initialGame={game}><SudokuScreen /></Provider>);
+  fireEvent.press(screen.getByTestId('sudoku-cell-0'));
+  expect(screen.getByText(revealVersion===2?'❤️':'🦋',{includeHiddenElements:true})).toBeOnTheScreen();
 });
 test('a solved board brushes an opaque tile that lingers after release then clears',()=>{
   jest.useFakeTimers();
@@ -984,7 +993,7 @@ test('landscape centers the surface around the home indicator and clears the top
   } finally {insets.mockRestore();dimensions.mockRestore();}
 });
 
-test('the landscape rail tightens its gaps to keep all five buttons in a short viewport',()=>{
+test('a very short landscape rail scrolls rather than shrinking its six targets',()=>{
   const dimensions=jest.spyOn(require('react-native'),'useWindowDimensions')
     .mockReturnValue({width:700,height:320,scale:3,fontScale:1});
   const insets=jest.spyOn(require('react-native-safe-area-context'),'useSafeAreaInsets')
@@ -992,9 +1001,10 @@ test('the landscape rail tightens its gaps to keep all five buttons in a short v
   try {
     render(<Provider><SudokuScreen/></Provider>);
     const band=320-2*(21+foundation.space.md);
-    const gap=(band-5*foundation.control.target-2*foundation.space.sm)/5;
-    expect(screen.getByTestId('sudoku-rail')).toHaveStyle({gap});
-    expect(gap).toBeLessThan(foundation.space.md);
+    expect(band).toBeLessThan(6*foundation.control.target+2*foundation.space.sm);
+    expect(screen.getByTestId('sudoku-rail')).toHaveStyle({gap:0});
+    expect(screen.getByTestId('sudoku-rail-scroll')).toBeOnTheScreen();
+    expect(tool('sudoku-correctness-toggle')).toHaveStyle({width:44,height:44});
   } finally {insets.mockRestore();dimensions.mockRestore();}
 });
 
@@ -1109,19 +1119,20 @@ test('landscape spreads the six rail controls at one uniform distance',()=>{
   try {
     render(<Provider><SudokuScreen/></Provider>);
     const band=landscapeDimensions.height-2*(Math.max(0,21,foundation.space.md)+foundation.space.md);
-    const gap=Math.max(0,Math.min(foundation.space.md,(band-6*foundation.control.target-2*foundation.space.sm)/6));
+    const gap=Math.max(0,Math.min(foundation.space.md,(band-6*foundation.control.target-2*foundation.space.sm)/5));
     expect(screen.getByTestId('sudoku-rail')).toHaveStyle({justifyContent:'space-between',gap});
     expect(tool('sudoku-two-player')).toHaveStyle({borderRadius:foundation.radius.control});
     expect(screen.queryByTestId('sudoku-p2-digit-group')).toBeNull();
   } finally {dimensions.mockRestore();}
 });
 
-test('a landscape band too short for six targets keeps the five-control rail',()=>{
+test('a compact landscape band keeps two-player reachable in a scrolling rail',()=>{
   const dimensions=jest.spyOn(require('react-native'),'useWindowDimensions').mockReturnValue({width:700,height:320,scale:3,fontScale:1});
   try {
     render(<Provider><SudokuScreen/></Provider>);
     expect(tool('sudoku-rail')).toBeOnTheScreen();
-    expect(screen.queryByTestId('sudoku-two-player')).toBeNull();
+    expect(tool('sudoku-two-player')).toBeOnTheScreen();
+    expect(tool('sudoku-rail-scroll')).toBeOnTheScreen();
   } finally {dimensions.mockRestore();}
 });
 
@@ -1276,4 +1287,112 @@ test('rotation during the rail fade cancels it and restores the single-player me
     expect(screen.queryByTestId('sudoku-p2-rail-layer',{includeHiddenElements:true})).toBeNull();
     expect(screen.getByTestId('sudoku-menu-rail-layer')).toHaveStyle({opacity:1});
   } finally {animation.mockRestore();dimensions.mockRestore();jest.useRealTimers();}
+});
+
+
+test('eye-on assistance marks empty cells without revealing digits and recomputes after edits',()=>{
+  const game=newGame({...referencePuzzle,givens:referencePuzzle.solution.map((value,index)=>[0,1,80].includes(index)?0:value)});
+  render(<Provider initialGame={game}><SudokuScreen/></Provider>);
+  expect(screen.queryByTestId('sudoku-hints-toggle')).toBeNull();
+  expect(tool('sudoku-correctness-toggle')).toHaveProp('accessibilityLabel','Puzzle assistance off');
+  expect(screen.queryByTestId('sudoku-hint-0',{includeHiddenElements:true})).toBeNull();
+  const labels=Array.from({length:81},(_,index)=>screen.getByTestId(`sudoku-cell-${index}`).props.accessibilityLabel);
+  pressTool('sudoku-correctness-toggle');
+  expect(tool('sudoku-correctness-toggle')).toHaveProp('accessibilityState',expect.objectContaining({selected:true}));
+  expect(tool('sudoku-correctness-toggle')).toHaveProp('accessibilityLabel','Puzzle assistance on');
+  expect(Array.from({length:81},(_,index)=>screen.getByTestId(`sudoku-cell-${index}`).props.accessibilityLabel)).toEqual(labels);
+  expect(screen.getAllByTestId(/^sudoku-hint-\d+$/,{includeHiddenElements:true})).toHaveLength(3);
+  expect(screen.getByTestId('sudoku-cell-0')).toHaveProp('accessibilityValue',{text:'Hint available'});
+  fireEvent.press(screen.getByTestId('sudoku-cell-0'));
+  expect(screen.getByTestId('sudoku-cell-0')).toHaveProp('accessibilityState',expect.objectContaining({selected:true}));
+  expect(screen.getByTestId('sudoku-hint-0',{includeHiddenElements:true})).toHaveProp('pointerEvents','none');
+  expect(screen.getByTestId('sudoku-hint-0',{includeHiddenElements:true})).toHaveProp('accessibilityElementsHidden',true);
+  expect(screen.getByTestId('sudoku-hint-0',{includeHiddenElements:true})).toHaveStyle({top:5,right:5,borderTopColor:colors.lavaOrangeText});
+  pressTool('sudoku-notes-toggle');
+  for(let digit=1;digit<=9;digit++)fireEvent.press(screen.getByTestId(`sudoku-digit-${digit}`));
+  expect(screen.getByTestId('sudoku-cell-0')).toHaveProp('accessibilityLabel','Row 1, column 1: notes 1 2 3 4 5 6 7 8 9');
+  expect(screen.getByTestId('sudoku-hint-0',{includeHiddenElements:true})).toBeOnTheScreen();
+  pressTool('sudoku-notes-toggle');
+  fireEvent.press(screen.getByTestId(`sudoku-digit-${referencePuzzle.solution[0]}`));
+  expect(screen.queryByTestId('sudoku-hint-0',{includeHiddenElements:true})).toBeNull();
+  fireEvent.press(screen.getByTestId('sudoku-eraser'));
+  expect(screen.getByTestId('sudoku-hint-0',{includeHiddenElements:true})).toBeOnTheScreen();
+  fireEvent.press(screen.getByTestId('sudoku-digit-1'));
+  expect(screen.queryAllByTestId(/^sudoku-hint-\d+$/,{includeHiddenElements:true})).toHaveLength(0);
+  fireEvent.press(screen.getByTestId('sudoku-eraser'));
+  expect(screen.getByTestId('sudoku-hint-0',{includeHiddenElements:true})).toBeOnTheScreen();
+  pressTool('sudoku-correctness-toggle');
+  expect(screen.queryAllByTestId(/^sudoku-hint-\d+$/,{includeHiddenElements:true})).toHaveLength(0);
+  expect(screen.getByTestId('sudoku-cell-0')).toHaveProp('accessibilityValue',{text:''});
+});
+
+test('eye-on assistance follows the RN board across rotation and a 320pt rail retains full hit targets',()=>{
+  let window={width:320,height:568,scale:2,fontScale:1};
+  const dimensions=jest.spyOn(require('react-native'),'useWindowDimensions').mockImplementation(()=>window);
+  try {
+    const view=render(<Provider><SudokuScreen/></Provider>);
+    pressTool('sudoku-correctness-toggle');
+    const hints=screen.getAllByTestId(/^sudoku-hint-\d+$/,{includeHiddenElements:true}).map(marker=>marker.props.testID);
+    const rail=StyleSheet.flatten(tool('sudoku-rail').props.style);
+    expect(5*44+5*rail.gap+2*rail.paddingHorizontal).toBeLessThanOrEqual(320);
+    expect(tool('sudoku-correctness-toggle')).toHaveStyle({width:44,height:44});
+    window={...landscapeDimensions};view.rerender(<Provider><SudokuScreen/></Provider>);
+    expect(tool('sudoku-rail')).toHaveStyle({flexDirection:'column'});
+    expect(screen.getAllByTestId(/^sudoku-hint-\d+$/,{includeHiddenElements:true}).map(marker=>marker.props.testID)).toEqual(hints);
+    expect(tool('sudoku-correctness-toggle')).toHaveProp('accessibilityState',expect.objectContaining({selected:true}));
+  } finally {dimensions.mockRestore();}
+});
+
+test('stale assistance callbacks cannot change a restored RN presentation',async()=>{
+  const fixture=authorizedSudoku(newGame());
+  const command=jest.spyOn(fixture.app,'command');
+  const view=render(<fixture.Harness/>);
+  try {
+    fireEvent(screen.getByTestId('sudoku-screen'),'layout',{nativeEvent:{layout:{x:0,y:0,width:390,height:844}}});
+    const stale=screen.UNSAFE_getByType(SudokuRail).props.tools.find((item:{id:string})=>item.id==='sudoku-correctness-toggle').onPress;
+    fixture.emit('background');fixture.emit('active');await act(async()=>fixture.restore());
+    command.mockClear();
+    act(()=>stale());
+    expect(tool('sudoku-correctness-toggle')).toHaveProp('accessibilityState',expect.objectContaining({selected:false}));
+    expect(command).not.toHaveBeenCalledWith(expect.objectContaining({type:'haptic',controlID:expect.stringMatching(/^sudoku\.assist@/)}));
+    pressTool('sudoku-correctness-toggle');
+    expect(command).toHaveBeenCalledWith({type:'haptic',kind:'selected',controlID:expect.stringMatching(/^sudoku\.assist@/),value:'true'});
+    expect(screen.getAllByTestId(/^sudoku-hint-\d+$/,{includeHiddenElements:true}).length).toBeGreaterThan(0);
+  } finally {command.mockRestore();view.unmount();fixture.close();}
+});
+
+
+test.each([1,2,3,4,5,6,7,8,9])('pencil marks fold %i notes into a compact square grid clear of the hint',count=>{
+  let game=newGame();
+  for(let digit=1;digit<=count;digit++)game=editCell(game,3,digit,true);
+  render(<SudokuBoard game={game} side={297} selected={3} notesMode assist loading={false} ready boardRef={null} onChoose={()=>{}} panHandlers={{}}/>);
+  const grid=screen.getByTestId('sudoku-notes-3'),columns=count===1?1:count<=4?2:3;
+  expect(grid.children).toHaveLength(columns);
+  for(const row of grid.children)expect(typeof row==='string'?[]:row.props.children).toHaveLength(columns);
+  expect(grid.findAllByType(Text).map((note:{props:{children?:unknown}})=>note.props.children)).toEqual(Array.from({length:count},(_,index)=>index+1));
+  const noteFrame=StyleSheet.flatten(grid.props.style),markerFrame=StyleSheet.flatten(screen.getByTestId('sudoku-hint-3',{includeHiddenElements:true}).props.style);
+  // All rows keep the full cell height; the tightly packed glyph slots clear
+  // the marker to their right instead of losing an entire strip above them.
+  expect(noteFrame.left+noteFrame.width+2).toBeLessThanOrEqual(33-markerFrame.right-markerFrame.width);
+  expect(noteFrame.left).toBeGreaterThanOrEqual(3);
+  expect(noteFrame.top).toBeGreaterThanOrEqual(3);
+  expect(noteFrame.top+noteFrame.height).toBeLessThanOrEqual(30);
+  const textStyle=StyleSheet.flatten(grid.findAllByType(Text)[0]!.props.style);
+  expect(textStyle.fontSize).toBeGreaterThanOrEqual(count===1?18:count<=4?12:8);
+});
+
+test('hint chips own real bounds and clear straight and rounded outer borders',()=>{
+  const game=newGame({...referencePuzzle,givens:referencePuzzle.solution.map((value,index)=>index<9||index%9===8?0:value)});
+  render(<SudokuBoard game={game} side={297} notesMode={false} assist loading={false} ready boardRef={null} onChoose={()=>{}} panHandlers={{}}/>);
+  for(const index of [0,2,3,5,6,8,17,26,80]){
+    const frame=StyleSheet.flatten(screen.getByTestId(`sudoku-hint-${index}`,{includeHiddenElements:true}).props.style);
+    expect(frame.width).toBeGreaterThanOrEqual(6);expect(frame.width).toBeLessThanOrEqual(8);
+    expect(frame.height).toBe(frame.width);
+    expect(frame.right).toBeGreaterThanOrEqual(5);expect(frame.top).toBeGreaterThanOrEqual(5);
+    expect(frame.right+frame.width).toBeLessThan(33);expect(frame.top+frame.height).toBeLessThan(33);
+    if(index===8){
+      const radius=foundation.radius.compact;
+      expect(Math.hypot(radius-frame.top,radius-frame.right)+2).toBeLessThanOrEqual(radius-3);
+    }
+  }
 });

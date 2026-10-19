@@ -3,6 +3,34 @@ import XCTest
 @testable import LavaSecKit
 
 final class SudokuPuzzleTests: XCTestCase {
+    func testNewPuzzlesPersistExpandedRevealVersion() throws {
+        let puzzle = SudokuPuzzle.generate(seed: 648)
+        XCTAssertEqual(puzzle.revealVersion, 2)
+        let restored = try JSONDecoder().decode(SudokuPuzzle.self, from: JSONEncoder().encode(puzzle))
+        XCTAssertEqual(restored, puzzle)
+    }
+
+    func testLegacyPuzzleKeepsOriginalRevealVersionAcrossSaves() throws {
+        let puzzle = SudokuPuzzle.generate(seed: 648)
+        let data = try JSONSerialization.data(withJSONObject: ["givens": puzzle.givens, "solution": puzzle.solution])
+        let legacy = try JSONDecoder().decode(SudokuPuzzle.self, from: data)
+        XCTAssertEqual(legacy.revealVersion, 1)
+        let restored = try JSONDecoder().decode(SudokuPuzzle.self, from: JSONEncoder().encode(legacy))
+        XCTAssertEqual(restored, legacy)
+        XCTAssertEqual(restored.givens, puzzle.givens)
+        XCTAssertEqual(restored.solution, puzzle.solution)
+    }
+
+    func testDecodeRejectsUnsupportedRevealVersion() throws {
+        let puzzle = SudokuPuzzle.generate(seed: 648)
+        for version in [-1, 0, 3] {
+            let data = try JSONSerialization.data(withJSONObject: [
+                "givens": puzzle.givens, "solution": puzzle.solution, "revealVersion": version
+            ])
+            XCTAssertThrowsError(try JSONDecoder().decode(SudokuPuzzle.self, from: data))
+        }
+    }
+
     func testGeneratedBoardIsAValidSolvedGrid() {
         let puzzle = SudokuPuzzle.generate(seed: 1)
         let solution = puzzle.solution

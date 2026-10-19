@@ -108,7 +108,7 @@ final class DNSLeakCanaryEmitterSourceTests: XCTestCase {
         XCTAssertTrue(arm.contains("LavaSecAppGroup.leakCanaryResolverIPKey"))
         XCTAssertTrue(arm.contains("--canary-nonce"))
         // The Admin/QA control is wired to the arm + disarm actions.
-        let qaView = try readSource(.adminQAView)
+        let qaView = try readSource(.reactNativeAppQA)
         XCTAssertTrue(qaView.contains("viewModel.armDNSLeakCanaryForQA(resolverIP:"))
         XCTAssertTrue(qaView.contains("viewModel.disarmDNSLeakCanaryForQA()"))
     }

@@ -29,7 +29,7 @@ enum LavaAppSheetSizing {
 
 @MainActor
 struct LavaAppNativeFlow: Identifiable {
-    let id = UUID()
+    var id = UUID()
     let name: String
     var wireGuardIndex = 0
     var wireGuardGeneration: UInt64? = nil
@@ -86,6 +86,12 @@ extension LavaAppBridge {
             result["groups"] = groups
             result["hasDeletions"] = !session.stagedDeletions.isEmpty
         }
+        if flow.isImport {
+            guard let state = importProjection(flow) else { return nil }; result["import"] = state
+        }
+        if ["account", "backupSetup", "backupRestore"].contains(flow.name) {
+            guard let state = accountBackupProjection(flow) else { return nil }; result["accountBackup"] = state
+        }
         if flow.name == "licenses" {
             result["notices"] = BundledForegroundNotices.combined
         }
@@ -98,7 +104,23 @@ extension LavaAppBridge {
         guard let flow, flow.usesReactPresentation, input["id"] as? String == flow.id.uuidString else {
             throw CommandError("The app screen closed before this action started.")
         }
+        if action == "foreground.layout" {
+            guard flow.isImport, canReadPresentation(.appUnlock), UIApplication.shared.applicationState == .active,
+                  importSession?.id == flow.id, input["stageID"] as? String == importSession?.stageID.uuidString,
+                  let height = input["height"] as? Double, height.isFinite, height > 0, height <= 100_000 else {
+                throw CommandError("Read access changed.")
+            }
+            if foregroundNaturalHeights[flow.id] != CGFloat(height) {
+                foregroundNaturalHeights[flow.id] = CGFloat(height)
+                objectWillChange.send()
+            }
+            return NSNull()
+        }
         if action == "foreground.dismiss" {
+            guard !flow.isImport else { throw CommandError("Read access changed.") }
+            if ["account", "backupSetup", "backupRestore"].contains(flow.name) {
+                return try await accountBackupCommand(["id": flow.id.uuidString, "command": ["action": "close"]])
+            }
             if flow.name == "vpnConfiguration" {
                 // Native Content and file imports can become dirty before RN
                 // observes their projection. Only explicit Discard may retire
@@ -129,7 +151,13 @@ extension LavaAppBridge {
         }
         // Read-only help/notices follow native.flow's App Unlock boundary.
         // Library entry and every editing command retain their stronger scope.
-        if action == "foreground.enter", ["automation", "licenses"].contains(flow.name) {
+        if action == "foreground.enter", flow.isImport {
+            try await authorize(.appUnlock, "Unlock Lava")
+        } else if action == "foreground.enter", ["account", "backupSetup", "backupRestore", "phoneQA"].contains(flow.name) {
+            try await authorize(.appSettings, "Open Lava settings")
+        } else if action == "foreground.enter", ["passcode", "phoneQASheet"].contains(flow.name) {
+            try await authorize(.appUnlock, "Unlock Lava")
+        } else if action == "foreground.enter", ["automation", "licenses"].contains(flow.name) {
             try await authorize(.appUnlock, "Unlock Lava")
         } else {
             try await authorize(.filterEditing, "Manage filters")
@@ -226,7 +254,7 @@ extension LavaAppBridge {
 }
 
 extension LavaAppNativeFlow {
-    var usesReactPresentation: Bool { ["createFilter", "renameFilter", "deleteFilters", "automation", "licenses", "feedback", "vpnConfiguration"].contains(name) }
+    var usesReactPresentation: Bool { ["createFilter", "renameFilter", "deleteFilters", "automation", "licenses", "feedback", "vpnConfiguration", "account", "backupSetup", "backupRestore", "passcode", "import", "importCode", "importScan", "deepLinkImport", "phoneQA", "phoneQASheet"].contains(name) }
 }
 
 /// Native system and security flows retain their established presentation,
@@ -244,10 +272,11 @@ struct LavaAppNativeFlowView: View {
             } else {
                 Group {
                     if flow.usesReactPresentation {
-                        // Feedback's scroll body paints through the bottom
-                        // container inset; its shared footer owns safe padding.
+                        // Feedback and QA paint through the bottom container
+                        // inset, as their original native scroll bodies did.
+                        // Their footer/scroll owners supply safe content padding.
                         LavaAppForegroundContent(id: flow.id.uuidString)
-                            .ignoresSafeArea(.container, edges: flow.name == "feedback" ? .bottom : [])
+                            .ignoresSafeArea(.container, edges: ["feedback", "phoneQA", "phoneQASheet"].contains(flow.name) ? .bottom : [])
                     }
                     else { flowContent(flow.name) }
                 }.overlay {
@@ -263,105 +292,11 @@ struct LavaAppNativeFlowView: View {
     }
     @ViewBuilder private func flowContent(_ name: String) -> some View {
         switch name {
-        case "preparation": FilterPreparationScreen(origin: bridge.model.filterPreparationOrigin)
-        case "deepLinkImport": ImportFiltersFlow(startMode: flow.importStartMode ?? .chooseMethod,
-            completion: flow.importCompletion,
-            authorizeImport: { await security.requireFreshAuthentication(for: .filterEditing, reason: "Import filter") })
-        #if DEBUG || LAVA_QA_TOOLS
-        case "phoneQASheet": PhoneQASheetView(showWelcome: { flow.showWelcome?() }, showUserBugReport: { bridge.flow = LavaAppNativeFlow(name: "feedback") })
-        #endif
-        case "account": AccountSheet()
-        case "backupSetup": BackupSetupView()
-        case "backupRestore": BackupRestoreView()
-        case "passcode": SecurityPasscodeSetupView()
-        case "automation": AutoSwitchHowToSheet()
-        case "createFilter":
-            if let library = flow.library, let create = flow.createFilterDraft { CreateFilterSheet(library: library, onCreateDraft: create) }
-        case "renameFilter":
-            if let library = flow.library, let id = flow.filterID {
-                RenameFilterSheet(initialName: flow.filterName ?? "", initialEmoji: flow.filterEmoji ?? "🌿", isNameAvailable: { library.isFilterNameAvailable($0, excluding: id) }, onRename: { library.renameFilter(id: id, to: $0, emoji: $1) })
-            } else if let id = flow.filterID {
-                RenameFilterSheet(initialName: flow.filterName ?? "", initialEmoji: flow.filterEmoji ?? "🌿",
-                    isNameAvailable: { bridge.model.isFilterNameAvailable($0, excluding: id) },
-                    onRename: { name, emoji in
-                        let model = bridge.model
-                        guard (model.filterEditTargetID ?? model.activeFilterID) == id,
-                              model.filterEditDraft != nil, !model.isFilterFrozen(id) else { return false }
-                        return model.renameFilter(id: id, to: name, emoji: emoji)
-                    })
+        case "preparation":
+            if let id = bridge.currentPreparationAttemptID {
+                LavaAppPreparationContent(id: id.uuidString).modifier(LavaPreparationUpgradePresentation())
             }
-        case "deleteFilters":
-            if let library = flow.library { DeleteFiltersConfirmationSheet(session: library.editSession, confirm: { flow.confirmLibraryDeletion?() ?? false }) }
-        case "import", "importCode", "importScan":
-            ImportFiltersFlow(startMode: name == "importCode" ? .enterCode : name == "importScan" ? .scanCode : .chooseMethod,
-                completion: flow.importCompletion,
-                authorizeImport: { await security.requireFreshAuthentication(for: .filterEditing, reason: "Import filter") })
-        case "licenses": NavigationStack { BundledLibraryNoticesView().lavaFullSheetHeader("Full License Texts", close: { bridge.flow = nil }) }
-        case "feedback": BugReportSheetView(isReportDirty: $bridge.feedbackDraftIsDirty)
-        case "customDNS": NavigationStack { DNSResolverSettingsView(onDismissRequested: { bridge.flow = nil }) }
-        case "vpnConfiguration":
-            VPNChainingConfigurationEditor(
-                reportRemovalFailure: { flow.reportConfigurationRemovalFailure?($0) },
-                onFinish: { bridge.model.refreshDNSSettingsPresentation(); bridge.flow = nil; bridge.publish() },
-                rowIndex: flow.wireGuardIndex, expectedGeneration: flow.wireGuardGeneration,
-                initialName: flow.wireGuardName, isExisting: flow.wireGuardExists,
-                savePendingDraft: flow.saveWireGuardDraft ?? { _, _ in WireGuardChainFailure.changed.localizedDescription })
-        #if DEBUG || LAVA_QA_TOOLS
-        case "phoneQA": NavigationStack { PhoneQASettingsView().lavaFullSheetHeader("Phone QA", close: { bridge.flow = nil }) }
-        #endif
-        case "customBlocklist": NavigationStack {
-            BringYourOwnListView(isOverBudget: bridge.model.enabledIDsExceedSoftRuleBudget(flow.blocklistSelection ?? []),
-                allowsCustomBlocklists: bridge.model.configuration.limits.allowsCustomBlocklists,
-                upgradeAccessory: .chevron,
-                addCustomSource: { name, url in
-                    guard let id = flow.filterID, (bridge.model.filterEditTargetID ?? bridge.model.activeFilterID) == id,
-                          bridge.model.filterEditDraft != nil, !bridge.model.isFilterFrozen(id) else {
-                        return "The displayed filter changed. Reopen it before editing."
-                    }
-                    return bridge.model.filterDrafts.addCustomBlocklistToDraft(displayName: name, rawURL: url)
-                },
-                showUpgrade: { bridge.flow = nil; bridge.requestNavigation(tab: "SettingsTab", screen: "Upgrade") })
-                .lavaFullSheetHeader("Bring your own list", close: { bridge.flow = nil })
-        }
         default: EmptyView()
-        }
-    }
-}
-
-/// Uses the very same custom-entry scaffold as BringYourOwnListView. Save only
-/// returns a validated choice to the picker; tier persistence belongs to its parent.
-struct LavaCustomDNSDraftView: View {
-    @State private var name: String
-    @State private var primary: String
-    @State private var secondary: String
-    @State private var message: String?
-    let save: (DNSResolutionSelection) -> String?
-
-    init(initial: DNSResolutionSelection?, save: @escaping (DNSResolutionSelection) -> String?) {
-        _name = State(initialValue: initial?.name ?? "")
-        _primary = State(initialValue: initial?.primary ?? "")
-        _secondary = State(initialValue: initial?.secondary ?? "")
-        self.save = save
-    }
-    var body: some View {
-        LavaSheetScaffold(spacing: 18, scrolls: true) {
-            LavaCustomEntryForm(actionTitle: "Save", actionSymbol: "checkmark", enabled: !primary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, submit: {
-                message = save(DNSResolutionSelection(id: DNSResolverPreset.customID, name: name, primary: primary, secondary: secondary))
-            }) {
-                LavaTextInputRow(title: "Name (optional)") {
-                    TextField("Custom DNS".lavaLocalized, text: $name).lavaTextInputBody()
-                }
-                Divider()
-                LavaTextInputRow(title: "Primary DNS") {
-                    TextField("IPv4/6, https://, tls://, doq://, quic://, or sdns://".lavaLocalized, text: $primary).lavaTextInputBody(keyboardType: .URL)
-                }
-                Divider()
-                LavaTextInputRow(title: "Secondary DNS (optional)") {
-                    TextField("Same transport as Primary".lavaLocalized, text: $secondary).lavaTextInputBody(keyboardType: .URL)
-                }
-            } notice: {
-                if let message { DomainRejectPanel(title: "Custom DNS cannot be saved", message: message) }
-            }
         }
     }
 }

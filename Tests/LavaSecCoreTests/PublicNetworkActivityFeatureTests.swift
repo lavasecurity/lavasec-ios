@@ -1,21 +1,6 @@
 import XCTest
 
 final class PublicNetworkActivityFeatureTests: XCTestCase {
-    func testNetworkActivityControlsAreNotQAGated() throws {
-        let settingsSource = try readSource(.privacySecuritySettingsView)
-
-        assertPhraseNotInsideQAConditional("Toggle(\"Keep local network activity\"", in: settingsSource)
-        assertPhraseNotInsideQAConditional("localLogClearButton(.networkActivity)", in: settingsSource)
-        assertPhraseNotInsideQAConditional("network activity can be kept", in: settingsSource)
-    }
-
-    func testNetworkActivityLogViewIsNotQAGated() throws {
-        let diagnosticsSource = try readSource(.diagnosticsNetworkActivity)
-
-        assertPhraseNotInsideQAConditional(".localLogSubpageChrome(", in: diagnosticsSource)
-        assertPhraseNotInsideQAConditional("struct NetworkActivityLogView", in: diagnosticsSource)
-    }
-
     func testNetworkActivityLoggingIsNotQAGated() throws {
         let appViewModelSource = try readAppViewModelSource()
         let tunnelSource = try readPacketTunnelProviderSource()

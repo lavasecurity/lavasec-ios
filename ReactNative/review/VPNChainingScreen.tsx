@@ -58,8 +58,6 @@ export function VPNChainingScreen() {
     void app?.command({type:'vpn.cancel',id}).catch(()=>{});
   },[app,needsPlus]);
   const enabled=!!vpn?.enabled;
-  // Fallback and enablement always describe SAVED profiles, never uncommitted rows.
-  const canChangeFallback=!!vpn?.canChangeFallback;
   const locked=busy||!!vpn?.busy;
   const report=(error:unknown)=>{if((error as Error).message!=='Authentication cancelled.')Alert.alert('Lava',(error as Error).message);};
   const stage=(value:VPNDraft,begin=false)=>{
@@ -145,10 +143,9 @@ export function VPNChainingScreen() {
       {!!vpn?.rotationNote&&<Quiet>{vpn.rotationNote}</Quiet>}
       {!!vpn?.error&&<Quiet>{vpn.error}</Quiet>}
       <Section title="DNS fallback"><Group>
-        <Toggle testID="vpn.fallback-toggle" title="Use Lava DNS settings as fallback" value={canChangeFallback&&!!vpn?.fallback} disabled={locked||!canChangeFallback} onChange={value=>toggle('fallback',value)}/>
+        <Toggle testID="vpn.fallback-toggle" title="Use Lava DNS settings as fallback" value={!!vpn?.fallback} disabled={locked} onChange={value=>toggle('fallback',value)}/>
       </Group>
-        {canChangeFallback?<QuietFooter note="Split-tunnel VPNs only. These lookups leave the VPN tunnel and go to your selected DNS providers." title="Review DNS settings" onPress={openDNS}/>
-          :<Quiet>DNS fallback is unavailable with an active full-tunnel VPN.</Quiet>}
+        <QuietFooter note="Uses your DNS settings outside the VPN when needed. Full-tunnel VPNs don’t use fallback." title="Review DNS settings" onPress={openDNS}/>
       </Section>
     </>}
     </>}

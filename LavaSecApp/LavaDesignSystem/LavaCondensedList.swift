@@ -1,19 +1,6 @@
 import SwiftUI
 import LavaSecKit
 
-/// A row owns its content insets once, regardless of first/last position or refresh.
-struct LavaTableRow<Content: View>: View {
-    @ViewBuilder var content: Content
-
-    var body: some View {
-        content
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, LavaRowHeight.horizontalInset)
-            .padding(.vertical, LavaRowHeight.verticalInset)
-            .frame(minHeight: LavaRowHeight.standard)
-    }
-}
-
 struct LavaCondensedList<Content: View>: View {
     let content: Content
     let surface: LavaSurface.Role

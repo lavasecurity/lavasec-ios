@@ -9,7 +9,7 @@ import {usePresentationReadiness} from '../app/use-presentation-readiness';
 import {LiveRenderBoundary,useReview} from './ReviewContext';
 import {useReviewNavigation,type ReviewRoutes} from './navigation';
 import {Copy} from './primitives';
-import {Group,Info,InputRow,ListRow,Sheet,nativeInlineHeader,toolbarButton,useToolbar} from './scaffold';
+import {Group,Info,InputRow,ListRow,Sheet,nativeInlineHeader,toolbarAction,useToolbar} from './scaffold';
 import {usePlusEntry} from './plus-entry';
 import {FormField,FormPanel,FormDivider} from './form-scaffold';
 import {PresentationCover} from './PresentationCover';
@@ -48,7 +48,7 @@ export function CustomEntryScreen(){
   const active=useRef(true);const pending=useRef(false);
   useLayoutEffect(()=>{if(entry&&!initial.current){initial.current=entry;setName(entry.name);setPrimary(entry.primary);setSecondary(entry.secondary);setFieldReset(value=>value+1);setInitialized(true);}},[entry]);
   useToolbar({...nativeInlineHeader,title:isDNS?'Custom DNS':'Bring your own list',headerBackVisible:false,
-    unstable_headerLeftItems:()=>[toolbarButton('Close','xmark',()=>nav.goBack(),busy)]},[isDNS,busy]);
+    unstable_headerLeftItems:()=>[toolbarAction('Close','close',()=>nav.goBack(),busy)]},[isDNS,busy]);
   useEffect(()=>{active.current=true;return()=>{active.current=false;void app?.command({type:'customEntry.dismiss',id:token}).catch(()=>{});};},[app,token]);
   const enter=async()=>{if(!app||!focused||entry||!presentationAuthority||authorizing.current||AppState.currentState!=='active')return;
     authorizing.current=true;try{await app.command({type:'customEntry.enter',id:token});}

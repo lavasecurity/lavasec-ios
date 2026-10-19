@@ -160,10 +160,13 @@ final class DNSEventLogWiringSourceTests: XCTestCase {
         XCTAssertTrue(export.contains("domainHistory: domainHistory"))
     }
 
-    func testStandardExportNeverIncludesDomainHistory() throws {
-        let action = try sourceBlock(in: readSource(.reactNativeAppBridge), startingAt: "case \"logs.export\":", endingBefore: "case \"share.present\":")
+    func testDomainHistoryExportRequiresExplicitSelectionAfterAuthorization() throws {
+        let action = try sourceBlock(in: readSource(.reactNativeAppBridge), startingAt: "case \"logs.export\":", endingBefore: "case \"share.card\":")
         let auth = try XCTUnwrap(action.range(of: "try await authorize(.appSettings,"))
-        let build = try XCTUnwrap(action.range(of: "model.makeLocalLogExportArchive(includeDomainHistory: false)"))
+        let selection = try XCTUnwrap(action.range(of: "let includeDomainHistory = input[\"domains\"] as? Bool == true"))
+        let build = try XCTUnwrap(action.range(of: "model.makeLocalLogExportArchive(includeDomainHistory: includeDomainHistory)"))
+        XCTAssertLessThan(auth.lowerBound, selection.lowerBound)
+        XCTAssertLessThan(selection.lowerBound, build.lowerBound)
         XCTAssertLessThan(auth.lowerBound, build.lowerBound)
     }
 

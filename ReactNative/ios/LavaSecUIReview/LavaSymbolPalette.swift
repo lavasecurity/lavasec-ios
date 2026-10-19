@@ -6,6 +6,7 @@ import UIKit
 enum LavaSymbolPalette {
     static func color(for tone: String, colorScheme: String = "") -> UIColor {
         let color: UIColor = switch tone {
+        case "label": .label
         case "primary": UIColor(LavaStyle.primaryText)
         case "error": UIColor(LavaStyle.errorText)
         case "white": UIColor(LavaStyle.actionForeground)

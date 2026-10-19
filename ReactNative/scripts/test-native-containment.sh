@@ -44,6 +44,7 @@ SDKROOT="$sdk" xcrun --sdk iphonesimulator swiftc -swift-version 6 -warnings-as-
   -target "$arch-apple-ios18.0-simulator" -module-cache-path "$test_root/cache" \
   -import-objc-header tests/native-containment/NativeControlTrackingTests.h \
   ios/LavaSecUIReview/LavaNativeContainment.swift ios/LavaSecUIReview/LavaSymbolPalette.swift \
+  ios/LavaSecUIReview/LavaSheetScrollEdge.swift \
   ../LavaSecApp/LavaDesignSystem/LavaTokens.swift tests/native-containment/NativeContainmentTests.swift \
   "$test_root/control-tracking.o" "$test_root/control-tracking-tests.o" -o "$app/NativeScaffoldTests"
 codesign --force --sign - "$app" >/dev/null

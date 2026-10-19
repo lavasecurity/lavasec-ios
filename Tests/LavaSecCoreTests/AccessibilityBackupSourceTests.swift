@@ -9,54 +9,34 @@ final class AccessibilityBackupSourceTests: XCTestCase {
     // MARK: BackupSetupView — step chrome + card rows
 
     func testBackupSetupUsesSharedAccessibleTaskTitle() throws {
-        XCTAssertTrue(try readSource(.backupSetupView).contains("LavaTaskSheet(title: step.title"))
-        XCTAssertTrue(try readSource(.lavaScaffold).contains(".lavaFullSheetHeader(title, leading:"))
+        let source = try readSource(.reactNativeAccountBackupAdapter)
+        XCTAssertTrue(source.contains("title:state.title"))
+        XCTAssertTrue(source.contains("useToolbar("))
     }
 
     func testBackupSetupFactRowHidesIconAndCombines() throws {
-        let block = try sourceBlock(
-            in: try readSource(.backupSetupView),
-            startingAt: "private struct BackupSetupFactRow",
-            endingBefore: "private struct BackupRecoveryPhraseWord"
-        )
-        XCTAssertTrue(
-            block.contains(".accessibilityHidden(true)"),
-            "The fact row's decorative leading SF Symbol must be hidden from accessibility."
-        )
-        XCTAssertTrue(
-            block.contains(".accessibilityElement(children: .combine)"),
-            "The fact row must read its title + detail as a single VoiceOver element."
-        )
+        let source = try readSource(.reactNativeAccountBackupFlow)
+        let fact = try sourceBlock(in: source, startingAt: "function Fact(")
+        XCTAssertTrue(fact.contains("<View accessible"))
+        XCTAssertTrue(fact.contains("<Symbol name={icon}"))
+        XCTAssertTrue(fact.contains("<Copy role=\"section\" color={labelColor}>{title}</Copy>"))
     }
 
     func testBackupSetupRecoveryWordCombinesNumberAndWord() throws {
-        let block = try sourceBlock(
-            in: try readSource(.backupSetupView),
-            startingAt: "private struct BackupRecoveryPhraseWord",
-            endingBefore: "\n}\n"
-        )
-        XCTAssertTrue(
-            block.contains(".accessibilityElement(children: .combine)"),
-            "Each recovery-phrase word chip must read its position number + word as one VoiceOver element."
-        )
+        let source = try readSource(.reactNativeBackupCredentials)
+        XCTAssertTrue(source.contains(".accessibilityElement(children: .combine)"))
     }
 
-    // MARK: BackupRestoreView — sheet chrome + editable word grid
-
     func testBackupRestoreUsesSharedAccessibleTaskTitle() throws {
-        XCTAssertTrue(try readSource(.backupRestoreView).contains("LavaTaskSheet(title: \"Restore Backup\""))
-        XCTAssertTrue(try readSource(.lavaScaffold).contains(".lavaFullSheetHeader(title, leading:"))
+        let source = try readSource(.reactNativeAccountBackupAdapter)
+        XCTAssertTrue(source.contains("title:state.title"))
+        XCTAssertTrue(try readSource(.reactNativeAppAccountBackup).contains("Restore Backup"))
     }
 
     func testBackupRestoreWordFieldHidesRedundantNumber() throws {
-        let block = try sourceBlock(
-            in: try readSource(.backupRestoreView),
-            startingAt: "private struct BackupRecoveryWordField",
-            endingBefore: "enum BackupRestoreMode"
-        )
-        XCTAssertTrue(
-            block.contains(".accessibilityHidden(true)"),
-            "The word field's decorative position number must be hidden — the field's own 'Word N' label already carries it."
-        )
+        let source = try readSource(.reactNativeBackupCredentials)
+        XCTAssertTrue(source.contains(".frame(width: 18, alignment: .trailing).accessibilityHidden(true)"))
+        XCTAssertTrue(source.contains("Word %lld"))
     }
+
 }

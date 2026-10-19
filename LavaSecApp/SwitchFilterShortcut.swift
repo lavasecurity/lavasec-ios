@@ -228,8 +228,8 @@ struct LavaShortcuts: AppShortcutsProvider {
                 "Switch filter in \(.applicationName)"
             ],
             shortTitle: "Switch Filter",
-            // Reuses the app's filter glyph (LavaIconRole.filters / FiltersView toolbar) so the Shortcuts
-            // action reads as "the filter action".
+            // Match the filter glyph used by the app so this Shortcuts action
+            // remains recognizable as the filter action.
             systemImageName: "line.3.horizontal.decrease.circle"
         )
     }

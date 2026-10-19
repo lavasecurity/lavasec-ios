@@ -1,16 +1,15 @@
 import XCTest
 
 final class FilterLibraryControllerSourceTests: XCTestCase {
-    func testScreenOwnsItsControllerAndSheetObservesTheSameSession() throws {
-        let screen = try readSource(.filterLibraryView)
+    func testReactFlowUsesTheSharedNativeLibrarySession() throws {
         let controller = try readSource(.filterLibraryController)
         let composition = try readSource(.reactNativeAppFilters)
         XCTAssertTrue(composition.contains("let library = libraryEditor"))
         XCTAssertTrue(composition.contains("library: library"))
         XCTAssertTrue((try readSource(.reactNativeAppBridge)).contains("FilterLibraryController(hub: model)"))
-        XCTAssertTrue((try readSource(.reactNativeAppFlows)).contains("CreateFilterSheet(library: library"))
-        XCTAssertTrue(screen.contains("@ObservedObject var library: FilterLibraryController"))
-        XCTAssertFalse(screen.contains("@State private var stagedDeletions"))
+        let flows = try readSource(.reactNativeAppFlows)
+        XCTAssertTrue(flows.contains("flow.createFilterDraft?(input[\"template\"] as? String)"))
+        XCTAssertTrue(flows.contains("flow.library?.canBeginCreatingFilter"))
         XCTAssertTrue(controller.contains("private weak var hub: (any FilterLibraryHubBridging)?"))
         XCTAssertTrue(controller.contains("hub.libraryChanges.sink { [weak self] _ in"))
         XCTAssertFalse(controller.contains("Task {"), "Screen lifetime cannot own accepted native operations.")
@@ -33,6 +32,6 @@ final class FilterLibraryControllerSourceTests: XCTestCase {
         XCTAssertTrue(controller.contains("editSession.rename(filter.id, to: name, emoji: emoji)"))
         XCTAssertFalse(controller.contains("hub?.renameFilter(id: id, to: name, emoji: emoji)"))
         XCTAssertTrue((try readSource(.reactNativeAppFilters)).contains("guard library.editSession == reviewedSession, library.commitStagedDeletions()"))
-        XCTAssertTrue(rnFlow.contains("library.renameFilter(id: id, to: $0, emoji: $1)"))
+        XCTAssertTrue(rnFlow.contains("library.renameFilter(id: id, to: name, emoji: emoji)"))
     }
 }

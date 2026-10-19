@@ -93,73 +93,21 @@ final class LavaSheetScaffoldSourceTests: XCTestCase {
         XCTAssertTrue(task.contains("action: back"))
         XCTAssertTrue(task.contains("action: close"))
         XCTAssertTrue(task.contains(".disabled(actionsDisabled)"))
-        XCTAssertTrue(try readSource(.onboardingFlowView).contains(".lavaFullSheetHeader(\"\", leading:"))
     }
 
     func testFullSheetAdoptersPreserveDismissalAndNativePushBoundaries() throws {
-        let imports = try readSource(.shareableFiltersUI)
-        for title in ["Enter a code", "Scan a QR code", "Review import", "Replace a filter"] {
-            XCTAssertTrue(imports.contains(".importFullSheetHeader(\"\(title)\""))
-        }
-        XCTAssertTrue(imports.contains(".lavaFullSheetHeader(\"Import a filter\", close: onClose)"))
-        let feedback = try readSource(.bugReportSettingsView)
-        XCTAssertTrue(feedback.contains("isPresented: onDismissRequested != nil && !usesPageNavigation && !isShowingThankYou"))
-        let mask = try XCTUnwrap(feedback.range(of: "LavaSheetLockMask("))
-        let header = try XCTUnwrap(feedback.range(of: ".lavaFullSheetHeader(\"Feedback\""))
-        XCTAssertLessThan(mask.lowerBound, header.lowerBound, "Dismissal chrome must remain outside the privacy mask.")
-        let dns = try readSource(.dnsResolverSettingsView)
-        XCTAssertTrue(dns.contains("accessibilityLabel: \"Close\", role: .close, action: requestCustomResolverDismiss"))
-        XCTAssertTrue(dns.contains("if let onDismissRequested { onDismissRequested() }"))
-        XCTAssertTrue(dns.contains("case .dismiss:\n            dismissCustomResolver()"))
-        XCTAssertTrue(dns.contains(".interactiveDismissDisabled(isFullSheet && customResolverHasUnsavedDraft)"))
-        XCTAssertTrue(try readSource(.reactNativeAppFlows).contains("DNSResolverSettingsView(onDismissRequested: { bridge.flow = nil })"))
-        for source in [SourceFile.dnsResolverSettingsView] {
-            XCTAssertTrue(try readSource(source).contains(".toolbar(.visible, for: .navigationBar)"))
-        }
-    }
-
-    func testPermissionIllustrationsShareAnIntrinsicEnvelope() throws {
-        let illustration = try sourceBlock(in: try readSource(.lavaScaffold),
-                                            startingAt: "struct LavaSetupPermissionIllustration:")
-        XCTAssertTrue(illustration.contains("enum Kind: String, CaseIterable"))
-        XCTAssertTrue(illustration.contains("ZStack {"))
-        XCTAssertTrue(illustration.contains("ForEach(Kind.allCases"))
-        XCTAssertTrue(illustration.contains(".opacity(kind == variant ? 1 : 0)"))
-        XCTAssertTrue(illustration.contains(".accessibilityHidden(true)"))
-        XCTAssertTrue(illustration.contains("LavaGuardianShieldShape()"))
-        XCTAssertFalse(illustration.contains(".lineLimit("))
-        XCTAssertFalse(illustration.contains(".clipped()"))
-    }
-
-    func testAllBottomSheetCallSitesUseSharedSheetScaffold() throws {
-        let appSources = [
-            try readSource(.backupRestoreView),
-            try readSource(.backupSetupView),
-            try readDiagnosticsSourceAggregate(),
-            try readSource(.filterReviewFlowView),
-            try readFiltersSourceAggregate(),
-            try readSource(.onboardingFlowView),
-            try readSettingsSourceAggregate(),
-            try readSource(.shareableFiltersUI)
-        ].joined(separator: "\n")
-
-        XCTAssertEqual(
-            appSources.occurrences(of: "LavaSheetScaffold(") + appSources.occurrences(of: "LavaSheetScaffold {")
-                + appSources.occurrences(of: "LavaTaskSheet("),
-            // Native start/end DatePickers own Activity; new-filter creation
-            // now joins the shared task-sheet family instead of a bespoke Form.
-            // The retired SwiftUI onboarding-account and filter-confirmation sheets
-            // were the last two bespoke call sites; RN owns those routes.
-            // Optional onboarding choices now live in the flow itself; the
-            // separate additional-setup chooser has also been removed.
-            15
-        )
-        XCTAssertFalse(appSources.contains("safeAreaBar(edge: .bottom"))
-    }
-}
-
-private extension String {
-    func occurrences(of needle: String) -> Int {
-        components(separatedBy: needle).count - 1
+        let imports = try readSource(.reactNativeImportFlow)
+        XCTAssertTrue(imports.contains("<FlowSheet compactHeight={compactHeight} onNaturalSize={port.measure} footer={footer}>"))
+        XCTAssertTrue(imports.contains("const compactHeight=window.width>window.height"))
+        XCTAssertFalse(imports.contains("useReview("))
+        let flows = try readSource(.reactNativeAppFlows)
+        XCTAssertTrue(flows.contains("if flow.usesReactPresentation {"))
+        XCTAssertTrue(flows.contains("LavaAppForegroundContent(id: flow.id.uuidString)"))
+        XCTAssertTrue(flows.contains("LavaSheetLockMask {"))
+        XCTAssertTrue(try readSource(.reactNativeAppHost).contains("bridge.flow?.name == \"feedback\" && bridge.feedbackDraftIsDirty"))
+        let custom = try readSource(.reactNativeCustomEntryScreen)
+        XCTAssertTrue(custom.contains("toolbarAction('Close','close'"))
+        XCTAssertTrue(custom.contains("type:'customEntry.dismiss',id:token"))
+        XCTAssertTrue(custom.contains("nav.goBack()"))
     }
 }

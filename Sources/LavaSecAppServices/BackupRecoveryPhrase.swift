@@ -101,6 +101,33 @@ public enum BackupRecoveryPhrase {
     }
 }
 
+/// Native recovery entry keeps its paste fallback only until a word is edited.
+/// It contains secret material and must never enter a presentation projection.
+public struct BackupRecoveryPhraseInput: Equatable, Sendable {
+    /// The last full paste, retained only until a valid manual word edit.
+    public private(set) var pastedPhrase = ""
+    /// The eight native word fields currently displayed to the user.
+    public private(set) var words = Array(repeating: "", count: BackupRecoveryPhrase.wordCount)
+    /// Creates an empty native-only recovery draft.
+    public init() {}
+    /// The visible complete words, or the still-current unedited paste fallback.
+    public var secret: String {
+        guard words.allSatisfy({ !BackupRecoveryPhrase.normalizedWord($0).isEmpty }) else {
+            return pastedPhrase.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return BackupRecoveryPhrase.phrase(from: words)
+    }
+    /// Replaces the paste and all displayed word slots together.
+    public mutating func setPastedPhrase(_ value: String) {
+        pastedPhrase = value; words = BackupRecoveryPhrase.fillSlots(from: value)
+    }
+    /// Edits one valid slot and revokes the old paste fallback.
+    public mutating func setWord(_ value: String, at index: Int) {
+        guard words.indices.contains(index) else { return }
+        pastedPhrase = ""; words[index] = value
+    }
+}
+
 /// Generates device-held random material used to wrap a backup key.
 public enum BackupDeviceSecret {
     /// Returns random bytes as unpadded URL-safe Base64, or throws when secure randomness fails.

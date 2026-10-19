@@ -61,21 +61,25 @@ extension LavaAppBridge {
                   FilterArtifactStore(directoryURL: root).readableStore().directoryURL == grant.snapshot.directoryURL else {
                 throw CommandError("The filter changed. Check the domain again before changing its rules.")
             }
-            guard let choice = input["decision"] as? String, ["allowed", "blocked"].contains(choice) else {
+            guard let choice = input["decision"] as? String, let action = DomainCheckRuleAction(rawValue: choice) else {
                 throw CommandError("Choose an allowed or blocked domain action.")
             }
-            if choice == "blocked" {
-                var after = model.configuration
-                after.allowedDomains.remove(grant.domain)
-                guard !after.allowRuleSet.containsNormalized(grant.domain) else {
-                    throw CommandError("A broader allowed domain still lets this through. Change that rule in Filters first.")
+            if action == .removeAllowedException {
+                guard !(try grant.configuration.allowedExceptions(matching: grant.domain)).isEmpty else {
+                    throw CommandError("The filter changed. Check the domain again.")
                 }
-            } else if grant.snapshot.decision(for: try DomainCheckInput(grant.domain)).reason == .threatGuardrail {
-                throw CommandError("Some dangerous domains cannot be allowed.")
+            } else if action == .removeBlockedDomain {
+                guard grant.configuration.blockedDomains.contains(grant.domain) else {
+                    throw CommandError("The filter changed. Check the domain again.")
+                }
+            } else if action == .allowed {
+                if grant.snapshot.decision(for: try DomainCheckInput(grant.domain)).reason == .threatGuardrail {
+                    throw CommandError("Some dangerous domains cannot be allowed.")
+                }
             }
             presentationSourceGeneration &+= 1
             presentationCache.invalidate()
-            let result = model.stageDomainHistoryDomainAction(grant.domain, target: choice == "allowed" ? .allowed : .blocked)
+            let result = model.stageDomainCheckRuleAction(grant.domain, action: action)
             guard result.isAccepted else {
                 return ["rejection": ["title": result.title, "message": result.message,
                                       "limitReached": result.limitReached && !model.configuration.hasLavaSecurityPlus]]
@@ -134,6 +138,13 @@ extension LavaAppBridge {
                 }.value
             }
         }
+        #if DEBUG && targetEnvironment(simulator)
+        // Keep a real check pending long enough for XCTest to observe loading.
+        // Revalidate below after the delay; this fixture grants no extra authority.
+        if ProcessInfo.processInfo.environment["LAVA_UI_TEST_DELAY_DOMAIN_CHECKS"] == "1" {
+            try await Task.sleep(for: .seconds(5))
+        }
+        #endif
         try validate()
         guard let (snapshot, effectiveCatalog) = loaded,
               snapshot.directoryURL == FilterArtifactStore(directoryURL: root).readableStore().directoryURL,
@@ -149,7 +160,8 @@ extension LavaAppBridge {
             "reason": decision.reason.rawValue, "filterID": filterID, "filterName": filter.name, "filterEmoji": filter.emoji, "proof": proof,
             "ignoredURLParts": parsed.ignoredURLParts, "repairedScheme": parsed.repairedScheme,
             "alreadyAllowed": configuration.allowedDomains.contains(parsed.domain),
-            "alreadyBlocked": configuration.blockedDomains.contains(parsed.domain)]
+            "alreadyBlocked": configuration.blockedDomains.contains(parsed.domain),
+            "allowedExceptions": try configuration.allowedExceptions(matching: parsed.domain).sorted()]
         if let until = model.temporaryProtectionPauseUntil, until > Date() { result["protection"] = "paused" }
         else if !model.configuration.protectionEnabled { result["protection"] = "off" }
         return AuthorizedPresentationResult(value: result) { try validate() }
@@ -159,11 +171,11 @@ extension LavaAppBridge {
         SecurityController.tracePresentation("query.begin")
         defer { SecurityController.tracePresentation("query.end") }
         guard let policy = PresentationReadPolicy(rawValue: name) else { throw CommandError("Unknown query.") }
-        let surface: SecurityProtectedSurface = [.activity, .domains, .network, .stats].contains(policy) ? .activityViewing : policy == .share ? .appUnlock : .filterEditing
+        let surface: SecurityProtectedSurface = [.activity, .activityShare, .domains, .network, .stats].contains(policy) ? .activityViewing : policy == .share ? .appUnlock : .filterEditing
         // `share.query` pins the module retirement epoch across BOTH of its
         // authorizations: a module invalidation during either biometric suspension
         // must abort before `shareCardQuery` mints a grant for a torn-down module.
-        let shareModuleEpoch = policy == .share ? shareCardModuleEpoch : nil
+        let shareModuleEpoch = policy == .share || policy == .activityShare ? shareCardModuleEpoch : nil
         try await authorize(surface, surface == .activityViewing ? "View Activities" : "View filter", fresh: name == "domains.stage")
         // `share.query` also requires `.filterEditing`. Authorize it BEFORE the
         // presentation read ticket opens: when it is protected, the biometric
@@ -178,7 +190,7 @@ extension LavaAppBridge {
             }
         }
         // Normalize/prune the local source before pinning its revision.
-        if policy == .activity || policy == .domains { model.reports.refreshDiagnostics() }
+        if policy == .activity || policy == .activityShare || policy == .domains { model.reports.refreshDiagnostics() }
         let revision = security.viewAuthenticationRevision
         let scope = presentationScope(name, input)
         let sourceGeneration = presentationSourceGeneration
@@ -186,6 +198,7 @@ extension LavaAppBridge {
             let current = presentationScope(name, input)
             return canReadPresentation(surface) && security.viewAuthenticationRevision == revision
                 && presentationSourceGeneration == sourceGeneration && current.owner == scope.owner && current.logPolicy == scope.logPolicy
+                && (policy != .activityShare || shareModuleEpoch == shareCardModuleEpoch)
                 && (!(policy == .activity || policy == .domains) || current.sourceRevision == scope.sourceRevision)
         }
         let ticket = try presentationCache.beginRead(query: name, scope: scope, authorize: allowed)
@@ -236,7 +249,7 @@ extension LavaAppBridge {
         return "\(modified?.timeIntervalSince1970 ?? 0):\(floor)"
     }
 
-    private func presentationScope(_ name: String, _ input: [String: Any]) -> PresentationCacheScope {
+    func presentationScope(_ name: String, _ input: [String: Any]) -> PresentationCacheScope {
         let source = LavaSecAppGroup.containerURL?.appendingPathComponent(LavaSecAppGroup.diagnosticsFilename)
         let attributes = source.flatMap { try? FileManager.default.attributesOfItem(atPath: $0.path) }
         let modified = (attributes?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
@@ -323,6 +336,8 @@ extension LavaAppBridge {
                  "metadata": "%@ times".lavaLocalizedFormat($0.count.formatted())]
             }
 
+        case "activity.card.query":
+            return try activityShareQuery(input)
         case "share.query":
             return try await shareCardQuery(input)
         case "network.query":

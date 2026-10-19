@@ -7,6 +7,7 @@ import {foundation} from '../src/foundation';
 import {Text,localized,localizedFormat} from '../app/presentation';
 import {useTextScale} from '../app/text-metrics';
 import {Copy,Symbol} from './primitives';
+import {Group,ListRow} from './scaffold';
 import {useReducedMotionPreference} from './navigation-scaffold';
 import {OnboardingLavaDrawing} from '../src/OnboardingDrawing';
 import type {Anchor} from './onboarding-geometry';
@@ -59,12 +60,19 @@ export function OnboardingWelcome({showTitle=true}:{showTitle?:boolean}){return 
 export function OnboardingFeature({title,symbol}:{title:string;symbol:string}){const scale=useTextScale('subheadline');return <View style={{paddingHorizontal:foundation.row.horizontalInset,paddingVertical:foundation.row.verticalInset,minHeight:foundation.row.standard,backgroundColor:colors.cardBackground,borderRadius:foundation.radius.control,borderCurve:'continuous',flexDirection:'row',alignItems:'center',gap:12}}>
   <Symbol name={symbol} tone="primary" size={24} pointSize={foundation.control.glyph}/><View style={{flex:1,marginVertical:-scale}}><Copy role="row" lineHeight={20}>{title}</Copy></View>
 </View>;}
-export function OnboardingChoice({title,summary,emoji,symbol,selected,busy=false,disabled=false,onPress,testID}:{title:string;summary?:string;emoji?:string;symbol?:string;selected:boolean;busy?:boolean;disabled?:boolean;onPress?:()=>void;testID?:string}){
-  const body=<><View style={{flex:1,gap:4}}><View style={{flexDirection:'row',gap:8,alignItems:'baseline'}}>{emoji&&<Copy verbatim role="row">{emoji}</Copy>}<View style={{flex:1}}><Copy role="row" color={selected?'white':colors.primaryText}>{title}</Copy></View></View>
-    {summary&&<Copy role="supporting" color={selected?'rgba(255,255,255,.85)':colors.secondaryText}>{summary}</Copy>}</View>
-    <View style={{width:foundation.control.accessory,height:foundation.control.glyphSlot,alignItems:'center',justifyContent:'center'}}>{busy?<ActivityIndicator/>:selected||symbol?<Symbol name={selected?'checkmark.circle.fill':symbol!} tone={selected?'white':'primary'} size={24} pointSize={foundation.control.glyph}/>:null}</View></>;
-  const style={flexDirection:'row' as const,alignItems:'center' as const,gap:12,paddingHorizontal:foundation.row.horizontalInset,paddingVertical:foundation.row.verticalInset,minHeight:foundation.row.standard,borderRadius:foundation.radius.control,borderCurve:'continuous' as const,backgroundColor:selected?colors.safeControlGreen:colors.cardBackground};
-  const a11y={testID,accessibilityLabel:[localized(title),summary?localized(summary):undefined].filter(Boolean).join(', '),accessibilityValue:{text:localized(selected?'On':'Off')},accessibilityState:{selected,disabled,busy}};
+// Choices use the same neutral surface, label, and selection accessory as the
+// catalogs. Their owner decides whether a press selects one option or toggles it.
+export function OnboardingChoice({title,summary,emoji,symbol,selected,disabled=false,onPress,testID}:{title:string;summary?:string;emoji?:string;symbol?:string;selected:boolean;disabled?:boolean;onPress:()=>void;testID?:string}){
+  return <Group><ListRow title={title} subtitle={summary} icon={symbol} selected={selected} disabled={disabled} onPress={onPress} testID={testID}
+    leading={emoji?<View accessible={false} accessibilityElementsHidden importantForAccessibility="no-hide-descendants"><Copy verbatim role="row">{emoji}</Copy></View>:undefined}/></Group>;
+}
+// Installation and permission rows report completed work, rather than a current
+// choice. Keep their progress and success presentation separate from selection.
+export function OnboardingSetupAction({title,symbol,completed,busy=false,disabled=false,onPress,testID}:{title:string;symbol:string;completed:boolean;busy?:boolean;disabled?:boolean;onPress?:()=>void;testID?:string}){
+  const body=<><View style={{flex:1}}><Copy role="row" color={completed?'white':colors.primaryText}>{title}</Copy></View>
+    <View style={{width:foundation.control.accessory,height:foundation.control.glyphSlot,alignItems:'center',justifyContent:'center'}}>{busy?<ActivityIndicator/>:<Symbol name={completed?'checkmark.circle.fill':symbol} tone={completed?'white':'primary'} size={24} pointSize={foundation.control.glyph}/>}</View></>;
+  const style={flexDirection:'row' as const,alignItems:'center' as const,gap:12,paddingHorizontal:foundation.row.horizontalInset,paddingVertical:foundation.row.verticalInset,minHeight:foundation.row.standard,borderRadius:foundation.radius.control,borderCurve:'continuous' as const,backgroundColor:completed?colors.safeControlGreen:colors.cardBackground};
+  const a11y={testID,accessibilityLabel:localized(title),accessibilityValue:{text:localized(completed?'On':'Off')},accessibilityState:{selected:completed,disabled,busy}};
   return onPress?<Pressable {...a11y} accessible accessibilityRole="button" disabled={disabled||busy} onPress={onPress} style={({pressed})=>[style,{opacity:pressed?.65:1}]}>{body}</Pressable>:<View {...a11y} accessible style={style}>{body}</View>;
 }
 export function OnboardingPageScroll({welcome,landscape=false,children}:PropsWithChildren<{welcome?:boolean;landscape?:boolean}>){return <ScrollView showsVerticalScrollIndicator={false} contentInsetAdjustmentBehavior="never" contentContainerStyle={{paddingHorizontal:24,paddingTop:welcome&&!landscape?72:8,paddingBottom:24,width:'100%',maxWidth:600,alignSelf:'center'}}>{children}</ScrollView>;}

@@ -70,102 +70,7 @@ final class AccessibilitySourceTests: XCTestCase {
         )
     }
 
-    // MARK: GuardView — protection status surfaces (WS-G)
-
-    // MARK: OnboardingFlowView — first-run flow (WS-O)
-
-    func testOnboardingStepHeadingIsHeader() throws {
-        let block = try sourceBlock(
-            in: try readSource(.lavaScaffold),
-            startingAt: "struct LavaSetupStepHeading",
-            endingBefore: "struct LavaSetupChoiceRow"
-        )
-        XCTAssertTrue(
-            block.contains(".accessibilityAddTraits(.isHeader)"),
-            "Each onboarding step page's title must be announced as a VoiceOver header."
-        )
-    }
-
-    func testOnboardingProgressAnnouncesStepOfTotalAndSelection() throws {
-        let block = try sourceBlock(
-            in: try readSource(.onboardingFlowView),
-            startingAt: "private var pageDots",
-            endingBefore: "private var footerButtons"
-        )
-        XCTAssertTrue(
-            block.contains("\"Step %lld of %lld\".lavaLocalizedFormat(dotPage.rawValue + 1, OnboardingPage.allCases.count)"),
-            "Progress dots must announce the localized current step and total, not just the bare step number."
-        )
-        XCTAssertTrue(
-            block.contains(".accessibilityAddTraits(dotPage == page ? [.isSelected]"),
-            "The current progress dot must expose the selected trait — a non-color cue for the current step."
-        )
-    }
-
-    func testOnboardingChoicesExposeTheirStateAndFullRowAction() throws {
-        let source = try readSource(.onboardingFlowView)
-        let choices = try sourceBlock(in: source, startingAt: "private struct OnboardingProtectionLevelPanel", endingBefore: "private struct OnboardingConnectionPanel")
-        XCTAssertTrue(choices.contains("ForEach(OnboardingProtectionLevel.allCases"))
-        XCTAssertTrue(choices.contains("isSelected: selection == level"))
-        XCTAssertTrue(choices.contains("selection = level"))
-        XCTAssertTrue(choices.contains(".accessibilityValue(Text(selection == level ? \"On\" : \"Off\"))"))
-        XCTAssertTrue(choices.contains(".accessibilityAddTraits(selection == level ? .isSelected : [])"))
-        let connections = try sourceBlock(in: source, startingAt: "private struct OnboardingConnectionPanel", endingBefore: "private struct OnboardingPermissionButton")
-        XCTAssertTrue(connections.contains("Button { updateOnboardingSelection { isOn.wrappedValue.toggle() } }"))
-        XCTAssertTrue(connections.contains(".accessibilityValue(Text(isOn.wrappedValue ? \"On\" : \"Off\"))"))
-        XCTAssertTrue(connections.contains(".accessibilityAddTraits(isOn.wrappedValue ? .isSelected : [])"))
-        let row = try sourceBlock(in: source, startingAt: "private struct OnboardingSelectionLabel", endingBefore: "private struct OnboardingRowGlyph")
-        XCTAssertTrue(row.contains(".contentShape(RoundedRectangle("))
-        XCTAssertTrue(row.contains(".accessibilityElement(children: .combine)"))
-        XCTAssertFalse(row.contains(".lineLimit("), "Instructions must expand at accessibility sizes.")
-    }
-
-    func testOnboardingPermissionsAreAccessibleCardsWithVPNOnlyGate() throws {
-        let source = try readSource(.onboardingFlowView)
-        XCTAssertTrue(source.contains(".accessibilityIdentifier(\"onboarding.install-vpn\")"))
-        XCTAssertTrue(source.contains(".accessibilityIdentifier(\"onboarding.notifications\")"))
-        XCTAssertTrue(source.contains(".accessibilityElement(children: .combine)"))
-        XCTAssertTrue(source.contains("Enable notifications (optional)"))
-        XCTAssertTrue(source.contains("isDisabled: !vpnInstalled || isBusy"))
-        let install = try sourceBlock(in: source, startingAt: "private func installVPN()", endingBefore: "private func requestNotifications()")
-        XCTAssertTrue(install.contains("guard !isBusy, isMock || !viewModel.isConfiguringVPN"))
-        XCTAssertFalse(install.contains("goForward()"))
-    }
-
-    // MARK: FiltersView — connection-preview picker (WS-FL)
-
-    // MARK: SettingsView — feedback + navigation rows (WS-S)
-
-    func testSettingsFeedbackTopicExposesSelectedTrait() throws {
-        let source = try readSource(.bugReportSettingsView)
-        XCTAssertTrue(
-            source.contains(".accessibilityAddTraits(selectedIssueType == type ? [.isSelected] : [])"),
-            "The bug-report topic row must expose the selected trait (its checkmark/circle glyph is decorative/hidden)."
-        )
-    }
-
-    func testSettingsStepProgressHasNonColorCurrentCue() throws {
-        let adopter = try sourceBlock(
-            in: try readSource(.bugReportSettingsView),
-            startingAt: "private struct BugReportStepProgressView",
-            endingBefore: "private struct BugReportPreviewSectionCard"
-        )
-        let block = try sourceBlock(
-            in: try readSource(.lavaComponents),
-            startingAt: "struct LavaStepNavigation<Step: Identifiable>: View",
-            endingBefore: "struct LavaDiagnosticValueRow: View"
-        )
-        XCTAssertTrue(adopter.contains("LavaStepNavigation("))
-        XCTAssertTrue(adopter.contains("isSelected: { $0 == currentStep }"))
-        XCTAssertTrue(
-            block.contains(".fontWeight(isSelected(step) ? .heavy : .semibold)"),
-            "The current bug-report step needs a non-color weight cue so it survives grayscale, not just the tint swap."
-        )
-        XCTAssertTrue(
-            block.contains(".accessibilityAddTraits(isSelected(step) ? [.isSelected] : [])"),
-            "The current bug-report step must expose the selected trait to VoiceOver."
-        )
-    }
+    // RN onboarding and feedback accessibility is exercised in the component suites.
 
     func testRetiredSettingsNavigationRowIsAbsent() throws {
         let source = try readSource(.settingsView)
@@ -191,7 +96,7 @@ final class AccessibilitySourceTests: XCTestCase {
         let block = try sourceBlock(
             in: try readSource(.securityController),
             startingAt: "struct SecurityPrivacyMaskOverlay",
-            endingBefore: "struct SecurityPasscodeAuthenticationView"
+            endingBefore: "struct SecurityPasscodeDigitsView"
         )
         XCTAssertTrue(
             block.contains(".accessibilityAddTraits(.isModal)"),

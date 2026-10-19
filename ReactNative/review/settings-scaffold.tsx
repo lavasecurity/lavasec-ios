@@ -12,7 +12,7 @@ import {guardAccent} from '../src/guard-accent.ios';
 import {LavaControlContent} from '../src';
 import Slider from '../specs/LavaSliderNativeComponent';
 import {Copy, DisclosureRow, Guardian, Row, RowAccessory, Section, Symbol} from './primitives';
-import {AddAction, SwapOrderAction, Group, ListRow, Quiet, toolbarButton, useToolbar} from './scaffold';
+import {AddAction, SwapOrderAction, Group, ListRow, Quiet, toolbarAction, useToolbar} from './scaffold';
 
 // DNS and WireGuard share native item ownership in both modes. A custom Back
 // and Cancel occupy the same slot, avoiding a system-back/custom-item handoff.
@@ -22,10 +22,10 @@ export function useSettingsEditToolbar({editing,busy,canEdit=true,saveDisabled=f
   const navigation=useNavigation();
   const actions=useRef({onEdit,onCancel,onSave});actions.current={onEdit,onCancel,onSave};
   useToolbar({headerBackVisible:false,gestureEnabled:!editing,
-    unstable_headerLeftItems:()=>[toolbarButton(editing?'Cancel editing':'Back',editing?'xmark':'chevron.left',
+    unstable_headerLeftItems:()=>[toolbarAction(editing?'Cancel editing':'Back',editing?'close':'back',
       ()=>editing?actions.current.onCancel():navigation.goBack(),busy,'lava.settings.leading')],
-    unstable_headerRightItems:()=>editing?[toolbarButton('Save','checkmark',()=>actions.current.onSave(),busy||saveDisabled,'lava.settings.edit')]
-      :canEdit?[toolbarButton('Edit','square.and.pencil',()=>actions.current.onEdit(),busy,'lava.settings.edit')]:[],
+    unstable_headerRightItems:()=>editing?[toolbarAction('Save','confirm',()=>actions.current.onSave(),busy||saveDisabled,'lava.settings.edit')]
+      :canEdit?[toolbarAction('Edit','edit',()=>actions.current.onEdit(),busy,'lava.settings.edit')]:[],
   },[editing,busy,canEdit,saveDisabled]);
 }
 

@@ -1,28 +1,6 @@
 import SwiftUI
 import LavaSecKit
 
-struct LavaPlusUpgradeSheet: View {
-    var context: String? = nil
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            Group {
-                #if LAVA_REACT_NATIVE
-                if let context, LavaAppPlusContent.makeRoot != nil {
-                    LavaAppPlusContent(context: context)
-                } else {
-                    LavaPlusUpgradeDestination()
-                }
-                #else
-                LavaPlusUpgradeDestination()
-                #endif
-            }
-            .lavaFullSheetHeader("Lava Plus", close: dismiss.callAsFunction)
-        }
-    }
-}
-
 private enum FilterActionLabelMetrics {
     static let iconFrameSize: CGFloat = 16
     static let iconPointSize: CGFloat = LavaIconSize.inline

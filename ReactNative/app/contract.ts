@@ -1,3 +1,9 @@
+import type {QAState,QACommand} from '../src/flows/qa/contract';
+import type {PreparationSnapshot,PreparationCommand} from '../src/flows/preparation/contract';
+import type {ImportState,ImportCommand} from '../src/flows/import/contract';
+import type {AccountBackupFlowState,AccountBackupCommand} from '../src/flows/account-backup/types';
+import type {PasscodeState,PasscodeCommand} from '../src/flows/passcode/types';
+import type {Presentation} from './presentation';
 // `name` is display-ready copy; sourceName retains the authored identity used
 // when editing or saving. An empty sourceName means the app supplied a label.
 export type DNSChoice={isEnabled?:boolean;id:string;name:string;sourceName?:string;primary:string;secondary:string;transport:string;metadata:string};
@@ -43,7 +49,7 @@ export type AppSnapshot = {
   tracePresentation?:boolean; // Opt-in DEBUG simulator stage/timing trace.
   traceQueries?: boolean; // Emitted only by the DEBUG simulator delayed-read fixture.
   activityDates?: import('../specs/NativeLavaReview').ActivityDates;
-  presentation: {locale:string;textScales:Record<string,number>|null};
+  presentation: Presentation;
   discoveries?: Partial<Record<DiscoveryID, boolean>>;
   dnsPatch?: {provider?:DNSChoice|null;choices?:DNSChoice[];available:boolean;state:'checking'|'absent'|'different'|'disabled'|'enabled'|'error';busy:boolean};
   settingsSummary: {dns:string;privacy:string;security:string};
@@ -59,7 +65,7 @@ export type AppSnapshot = {
   look: string; draft: PreviewDraft; savedDraft: PreviewDraft; sudoku?: SudokuGame;
   guards: {id: string; title: string; subtitle: string; selectable: boolean; description: string; tip: string}[];
   vpn?: {authorized:boolean;draft?:VPNDraft|null;setup:boolean;enabled:boolean;canEnable:boolean;canEdit:boolean;fallback:boolean;canChangeFallback:boolean;needsPlus:boolean;busy:boolean;restriction:string;error:string;unavailable:boolean;needsRepair?:boolean;rotationNote?:string;generation:string;rows:{name:string;mode:string;isEnabled?:boolean}[]};
-  dns: {customDraft?:DNSChoice|null;customDraftToken?:string;tiers?:DNSChoice[];tiersContext?:string;choices?:DNSChoice[];editable?:boolean;transportDetail?:string;custom?:{name:string;primary:string;secondary:string;valid:boolean;metadata:string;context:string};deviceDetail?:string;fallbackDetail?:string;providers: {id: string; name: string; address: string; selected:boolean}[]; customSelected:boolean; transports: string[]};
+  dns: {unavailableDetail?:string;customDraft?:DNSChoice|null;customDraftToken?:string;tiers?:DNSChoice[];tiersContext?:string;choices?:DNSChoice[];editable?:boolean;transportDetail?:string;custom?:{name:string;primary:string;secondary:string;valid:boolean;metadata:string;context:string};deviceDetail?:string;fallbackDetail?:string;providers: {id: string; name: string; address: string; selected:boolean}[]; customSelected:boolean; transports: string[]};
   liveActivityPauseMinutes: number; liveActivityPause: {available:boolean;label:string;minutes:number[]}; qaTools: boolean;
   limits: {maxAllowedDomains: number; maxBlockedDomains: number; maxFilterRules: number; maxFilters: number; allowsCustomBlocklists: boolean; allowsCustomDNS: boolean};
   filterEditing?: {canSave:boolean;reviewCanConfirm?:boolean;validation?:string;upgradeReason?:import('../review/plus-intents').PlusReason|'';refreshing:boolean;lists:{id:string;pending:boolean;undo:boolean}[];blocked:{id:string;pending:boolean;undo:boolean}[];allowed:{id:string;pending:boolean;undo:boolean}[]};
@@ -67,6 +73,9 @@ export type AppSnapshot = {
   /** Editor-only identity; never included in saved filters or Guard. */
   newFilter?: AppSnapshot['filters'][number];
   filterPreparationPresented: boolean;
+  preparation?:PreparationSnapshot|null;
+  passcode?:PasscodeState|null;
+  qa?:QAState|null;
   logExportBusy: boolean; logExportError: string;
   domainHistoryCount?:number;
   hasDomainHistory: boolean;
@@ -76,21 +85,26 @@ export type AppSnapshot = {
   filters: {emoji?:string;blockedDomainCount?:number;allowedExceptionCount?:number;empty?:boolean;id: string; name: string; frozen: boolean; count: string; lists: string[]; shareable: boolean; shareSummary: string}[];
 };
 export type DiscoveryID = 'ios27Patch.settings' | 'ios27Patch.page';
+export type NativeFlowAlertOwner={kind:'foreground';id:string;stageID?:string}|{kind:'qa';id:string;detailID?:string}|{kind:'dnsPatch';id:string};
+export type NativeFlowAlertRequest={type:'presentation.flowAlert';owner:NativeFlowAlertOwner;requestID:string;readRevision:number;presentationToken:string;
+  title:string;message:string;tint:'app'|'confirmation';buttons:{id:string;title:string;role:'default'|'cancel'|'destructive'}[];preferred?:string};
 
 export type VPNDraft = {id:string;revision:number;changed:boolean;containsFullTunnel:boolean;rows:{name:string;mode:string;isEnabled?:boolean}[]};
 export type FeedbackState={topic:string;site:string;details:string;email:string;diagnostics:boolean;step:number;furthest:number;revision:string;review:string;normalizedSite:string;normalizedDetails:string;normalizedEmail:string;count:number;canContinue:boolean;dirty:boolean;busy:boolean;prepared:boolean;sent:boolean;error:string;receipt:string;copied:boolean;topics:{id:string;title:string}[]};
 export type FeedbackPreview={id:string;title:string;purpose:string;items:{id:string;label:string;value:string}[]};
 export type VPNEditorState={name:string;nameResetRevision:number;dirty:boolean;hasContent:boolean;concealed:boolean;reading:boolean;canEdit:boolean;canSave:boolean;error:string};
-export type ForegroundFlow={id:string;kind:'createFilter'|'renameFilter'|'deleteFilters'|'automation'|'licenses'|'feedback'|'vpnConfiguration';name:string;emoji:string;dismissAttempt:number;canCreate:boolean;templates:{id:string;name:string}[];groups?:{title:string;added:string[];removed:string[]}[];hasDeletions?:boolean;notices?:string;feedback?:FeedbackState;vpnEditor?:VPNEditorState|null};
+export type ForegroundFlow={id:string;kind:'createFilter'|'renameFilter'|'deleteFilters'|'automation'|'licenses'|'feedback'|'vpnConfiguration'|'account'|'backupSetup'|'backupRestore'|'passcode'|'import'|'importCode'|'importScan'|'deepLinkImport'|'phoneQA'|'phoneQASheet';accountBackup?:AccountBackupFlowState|null;import?:ImportState|null;name:string;emoji:string;dismissAttempt:number;canCreate:boolean;templates:{id:string;name:string}[];groups?:{title:string;added:string[];removed:string[]}[];hasDeletions?:boolean;notices?:string;feedback?:FeedbackState;vpnEditor?:VPNEditorState|null};
 
-export type AppCommand =
+export type AppCommand = QACommand | PreparationCommand | ImportCommand | PasscodeCommand | {type:'accountBackup.command';id:string;command:AccountBackupCommand}
+  | NativeFlowAlertRequest | {type:'presentation.flowAlert.cancel';owner:NativeFlowAlertOwner;requestID:string}
   | {type:'feedback.enter'|'feedback.preview'|'feedback.copy';id:string}
   | {type:'feedback.topic';id:string;topic:string}
   | {type:'feedback.change';id:string;field:'site'|'details'|'email';value:string}
   | {type:'feedback.diagnostics';id:string;value:boolean}
   | {type:'feedback.step';id:string;next?:boolean;step?:number}
   | {type:'feedback.submit';id:string;review:string}
-  | {type:'system.open';target:'shortcuts'|'settings'}
+  | {type:'system.open';target:'shortcuts'|'settings'|'connectivityAssist'}
+  | {type:'foreground.layout';id:string;stageID:string;height:number}
   | {type:'foreground.dismiss';id:string;discardConfirmed?:boolean}
   | {type:'foreground.enter';id:string}
   | {type:'vpnEditor.enter'|'vpnEditor.file'|'vpnEditor.save';id:string}
@@ -132,9 +146,11 @@ export type AppCommand =
   | {type: 'account.apple' | 'account.google' | 'account.signOut' | 'account.delete' | 'backup.refresh' | 'backup.now' | 'backup.disable' | 'backup.delete' | 'purchase.restore' | 'purchase.manage' | 'purchase.refresh' | 'purchase.clearMessage'}
   | {type: 'native.flow'; flow: string}
   | {type: 'logs.clear'; kind: string;surface?:'activityViewing'}
-  | {type: 'logs.export'; domains: false}
+  | {type: 'logs.export'; domains: boolean}
+  | {type:'activity.card.query';start:number;end:number;hourly:boolean;chart:'total'|'counts'|'rate';period:'today'|'week'|'month'|'custom'}
+  | {type:'activity.share';token:string}
   | {type: 'sudoku.save'; game: SudokuGame}
-  | {type: 'share.query' | 'share.copy' | 'share.present'; id: string}
+  | {type: 'share.query' | 'share.copy'; id: string}
   | {type:'share.card';id:string;token:string}
   | {type: 'purchase.buy'; id: string}
   | {type: 'sudoku.new'; challenge?: boolean}
@@ -155,4 +171,4 @@ export type AppCommand =
   | {type: 'domains.stage'; domain: string; decision: 'allowed' | 'blocked'}
   | {type:'domainCheck.query';visit:string;input:string;refresh?:boolean}
   | {type:'domainCheck.cancel';visit:string}
-  | {type:'domainCheck.stage';visit:string;proof:string;decision:'allowed'|'blocked'};
+  | {type:'domainCheck.stage';visit:string;proof:string;decision:'allowed'|'blocked'|'removeAllowedException'|'removeBlockedDomain'};

@@ -133,8 +133,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         let settings = try readSource(.settingsView)
         let routeBlock = try sourceBlock(
             in: settings,
-            startingAt: "enum SettingsRoute: Hashable",
-            endingBefore: "struct NativeDNSSettingsDestinationView: View"
+            startingAt: "enum SettingsRoute: Hashable"
         )
         let rootBlock = try sourceBlock(
             in: readSource(.reactNativeSettingsScreens),
@@ -237,8 +236,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         let rootView = try readSource(.rootView)
         let settings = try [
             readSource(.customizationSettingsView),
-            readSource(.upgradeSettingsView),
-            readSource(.bugReportSettingsView),
+            readSource(.lavaSheetLockMask),
         ].joined(separator: "\n")
 
         XCTAssertTrue(attributes.contains("enum GuardianShieldStyle: String, CaseIterable, Identifiable, Codable, Hashable, Sendable"))
@@ -306,7 +304,14 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertFalse(sharedMascot.contains("case plusConcerned"))
         XCTAssertFalse(sharedMascot.contains("case plusGrateful"))
 
-        XCTAssertTrue(settings.contains("shieldStyle: customization.lavaGuardLook"))
+        XCTAssertTrue(try readSource(.reactNativeAppBridge).contains("\"look\": c.lavaGuardLook.rawValue"))
+        XCTAssertTrue(try readSource(.reactNativeSettingsScreens).contains("<SettingsSubscriptionStatus look={live.look}"))
+        let subscriptionMascot = try sourceBlock(
+            in: readSource(.reactNativeSettingsScaffold),
+            startingAt: "export function SettingsSubscriptionStatus(",
+            endingBefore: "export function SettingsLoading("
+        )
+        XCTAssertTrue(subscriptionMascot.contains("mood={interaction.grateful?'grateful':'awake'} look={look}"))
         XCTAssertTrue((try readSource(.reactNativeAppBridge)).contains("lavaGuardAvailability(for:"))
         XCTAssertTrue(settings.contains("case .cherryQuartz:"))
         XCTAssertTrue(settings.contains("case .emerald:"))

@@ -30,7 +30,7 @@ final class AppDeepLinkSourceTests: XCTestCase {
         let settingsRouteMapping = try sourceBlock(
             in: rootSource,
             startingAt: "init?(_ deepLink: LavaSettingsDeepLink)",
-            endingBefore: "struct BugReportSheetView"
+            endingBefore: "#Preview"
         )
         XCTAssertTrue(settingsRouteMapping.contains("case .upgrade:"))
         XCTAssertTrue(settingsRouteMapping.contains("self = .upgrade"))
@@ -75,8 +75,8 @@ final class AppDeepLinkSourceTests: XCTestCase {
 
         // The deeplink-opened importer runs the same protected apply gate as the
         // in-app Filters entry point: fresh auth on the filter-editing surface.
-        XCTAssertTrue((try readSource(.reactNativeAppFlows)).contains("ImportFiltersFlow("))
-        XCTAssertTrue((try readSource(.reactNativeAppFlows)).contains("requireFreshAuthentication(for: .filterEditing, reason: \"Import filter\")"))
+        XCTAssertTrue((try readSource(.reactNativeAppFlows)).contains("importProjection(flow)"))
+        XCTAssertTrue((try readSource(.reactNativeAppImport)).contains("requireFreshAuthentication(for: .filterEditing, reason: \"Import filter\")"))
 
         // The importer sheet presents above the app-unlock overlay, so it must be
         // withheld until App Unlock is satisfied — otherwise a locked device could

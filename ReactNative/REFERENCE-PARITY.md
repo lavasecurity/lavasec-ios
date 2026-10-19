@@ -94,7 +94,8 @@ opens it with five mascot taps within the native 1.2-second idle window. A
 1.2-second hold still opens the Lava Guard picker, and the protection-status
 element exposes both native accessibility actions.
 
-The React screen follows `SudokuEasterEggView.swift`: a full-screen paper board,
+`review/SudokuScreen.tsx` and `review/sudoku-scaffold.tsx` now own the game UI.
+They retain the original SwiftUI behavior: a full-screen paper board,
 locked givens, cell tracking, a scrub-to-preview keypad, contextual eraser, notes,
 assistance counts and correctness glyphs, and reset/new-puzzle confirmations.
 It retains the native minimum board size, safe-area handling, completion colors,

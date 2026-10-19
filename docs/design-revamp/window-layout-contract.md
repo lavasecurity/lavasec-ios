@@ -39,6 +39,16 @@ geometry scale so authored offsets stay attached to their nodes.
 Sudoku's portrait height budget scales its feedback and bottom clearance while
 retaining the measured horizontal keypad band; the same budget controls scrolling.
 
+Migrated iOS tasks opt into `NativeFlowMetrics` around their adapters. They retain
+authored point geometry, insets and gaps with a multiplier of 1 and use their
+actual viewport width instead of the story reading cap. Dynamic Type remains
+active: public preferred-UIFont measurements supply semantic point sizes and
+multiline leading, including negative leading at accessibility sizes. Explicit
+paragraph metrics remain caller-owned. The inline symbol-and-text atom selects
+the matching semantic headline font before measuring its wrapped run. These
+policies are local to migrated iOS tasks; ordinary RN sizing and Android's
+platform metrics retain their own owners.
+
 The shared page clearance grows from 16 to 24 points below the native header.
 There is no Guard-specific top-padding exception or vertical centering. The
 page keeps the normal native header frame, direct scroll root and content-driven
@@ -46,20 +56,23 @@ panel height. Horizontal page gutters keep their existing geometry curve and
 content caps; native title alignment uses that same edge. Sheets continue to
 size themselves and their detached footers from their measured viewport.
 
-Short native utility flows use a separate presentation size, rather than the
-page's wide reading band. Import remains the existing SwiftUI flow hosted above
-RN. The flow declares the shared utility sizing policy. Its UIKit host opts
-into a 640-point preferred form width when the actual
-presenting window has a short side above 480 points. `LavaSheetScaffold` reports
-its natural scroll content and pinned controls through a shared preference;
-the host adds the measured native navigation bar height and supplies both
-dimensions through `preferredContentSize`. The native form sheet owns centering,
-keyboard adjustment and dismissal, without a custom height detent. Measurements
-are coalesced after SwiftUI layout. Width and height are bounded to 85% of the
-presenting window, with a natural height floor of 320 points before that cap.
-Longer stages and accessibility text retain their existing scroll owner.
-Compact app windows keep the full native sheet. The components, native titles,
-stage transitions, keyboard handling and dismissal owners are unchanged.
+Short utility tasks use a separate presentation size from the page's reading
+band. RN owns every import stage inside the existing UIKit sheet. Its host uses
+a preferred width of up to 640 points when the presenting window has a short
+side above 480 points. `FlowSheet` measures natural scroll content and pinned
+controls, excluding the native navigation bar, and the import adapter reports
+the total through `foreground.layout`. The native owner admits only the current
+flow and stage, so an outgoing stage cannot resize its successor. The host adds
+the measured native bar height and supplies `preferredContentSize`.
+
+The native form sheet owns centering, keyboard adjustment and dismissal, without
+a custom height detent. Presentation-size updates are coalesced on the main
+queue. Width and height are bounded to 85% of the presenting window, with a
+natural height floor of 320 points before that cap. Import completion uses the
+larger 85% height presentation. Longer stages and accessibility text keep the RN
+scroll owner; compact app windows keep the full native sheet. Native chrome and
+keyboard integration remain in the host, RN owns stage transitions, and native
+session admission controls whether a stage may dismiss.
 
 The shared `Screen` publishes its centered panel edge to the native navigation
 header on larger windows. The pinned native-stack header adapter forwards this

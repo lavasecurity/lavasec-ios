@@ -174,7 +174,7 @@ final class FocusFilterSwitchWiringSourceTests: XCTestCase {
             endingBefore: "enum SwitchPublication"
         )
         let persistIdx = try XCTUnwrap(switchBlock.range(of: "let publishOutcome = try await persistSharedState(")?.lowerBound)
-        let postPersistGateIdx = try XCTUnwrap(switchBlock.range(of: "guard configurationReplacementGate.isCurrent(switchToken) else {", range: persistIdx..<switchBlock.endIndex)?.lowerBound)
+        let postPersistGateIdx = try XCTUnwrap(switchBlock.range(of: "guard configurationReplacementGate.isCurrent(switchToken),", range: persistIdx..<switchBlock.endIndex)?.lowerBound)
         let stampIdx = try XCTUnwrap(switchBlock.range(of: "PendingFilterSwitchStore.recordForegroundSwitch(")?.lowerBound)
         XCTAssertLessThan(persistIdx, stampIdx, "The stamp must follow the persist (only stamp a switch that durably landed).")
         XCTAssertLessThan(postPersistGateIdx, stampIdx, "The stamp must follow the post-persist gate re-check (only stamp a switch that still owns the gate).")
@@ -551,7 +551,7 @@ final class FocusFilterSwitchWiringSourceTests: XCTestCase {
                       "switchToFilter must branch on an aborted (cross-process-superseded) flip.")
 
         // The abort branch must precede the success path (stamp + 'Success'), and early-return.
-        let gateIdx = try XCTUnwrap(block.range(of: "guard configurationReplacementGate.isCurrent(switchToken) else {")?.lowerBound)
+        let gateIdx = try XCTUnwrap(block.range(of: "guard configurationReplacementGate.isCurrent(switchToken),")?.lowerBound)
         let abortIdx = try XCTUnwrap(block.range(of: "if case .abortedSuperseded = publishOutcome {")?.lowerBound)
         let stampIdx = try XCTUnwrap(block.range(of: "PendingFilterSwitchStore.recordForegroundSwitch(at: switchInitiatedAt")?.lowerBound)
         let successToastIdx = try XCTUnwrap(block.range(of: "message: \"Success\"")?.lowerBound)
@@ -635,7 +635,7 @@ final class FocusFilterSwitchWiringSourceTests: XCTestCase {
         )
         XCTAssertTrue(prepareBlock.contains("presentsPreparationCover: Bool"),
                       "prepareSwitchPublication must accept the presentsPreparationCover flag.")
-        XCTAssertTrue(prepareBlock.contains("if presentsPreparationCover {"),
+        XCTAssertTrue(prepareBlock.contains("if presentsPreparationCover, self.configurationReplacementGate.isCurrent(switchToken),"),
                       "prepareSwitchPublication must gate its cold-compile progress churn on the flag.")
 
         // The reconcile is the caller that passes stampsForegroundSwitch:false (⇒ silent).
@@ -646,6 +646,40 @@ final class FocusFilterSwitchWiringSourceTests: XCTestCase {
         )
         XCTAssertTrue(reconcileBlock.contains("await switchToFilter(id: request.targetFilterID, stampsForegroundSwitch: false)"),
                       "The reconcile replay must drive the silent (stampsForegroundSwitch:false) apply.")
+    }
+
+    func testSwitchPreparationProgressKeepsEntryIdentityAcrossWarmLookup() throws {
+        let app = try readAppViewModelSource()
+        let entry = try sourceBlock(
+            in: app,
+            startingAt: "func switchToFilter(id: String, stampsForegroundSwitch: Bool = true) async {",
+            endingBefore: "enum SwitchPublication"
+        )
+        XCTAssertTrue(sourceContainsInOrder([
+            "let switchToken = configurationReplacementGate.begin(ownsPreparationCover: presentsPreparationCover)",
+            "preparationAttemptID = filterDrafts.preparationPresentation.id",
+            "try await prepareSwitchPublication(",
+            "switchToken: switchToken",
+            "preparationAttemptID: preparationAttemptID"
+        ], in: entry))
+        let preparation = try sourceBlock(
+            in: app,
+            startingAt: "private func prepareSwitchPublication(",
+            endingBefore: "func warmReusableSnapshotForSwitch("
+        )
+        XCTAssertTrue(preparation.contains("switchToken: Int"))
+        XCTAssertTrue(preparation.contains("preparationAttemptID: UUID?"))
+        // A warm lookup suspends. Reading the current epoch or attempt afterward
+        // could adopt a newer replacement's authority instead of this switch's.
+        XCTAssertFalse(preparation.contains("configurationReplacementGate.epoch"))
+        XCTAssertFalse(preparation.contains("= filterDrafts.preparationPresentation.id"))
+        XCTAssertTrue(sourceContainsInOrder([
+            "await warmReusableSnapshotForSwitch(",
+            "reportProgress:",
+            "self.configurationReplacementGate.isCurrent(switchToken)",
+            "self.filterDrafts.preparationPresentation.id == preparationAttemptID",
+            "self.filterPreparationState = state"
+        ], in: preparation))
     }
 
     // MARK: - Source introspection helpers

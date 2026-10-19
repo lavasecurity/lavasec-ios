@@ -18,6 +18,9 @@ public struct SudokuPuzzle: Codable, Equatable, Sendable {
     /// The 81-cell solved board. Always fully filled with `1...9`. The solve check compares a
     /// candidate-filled board to this.
     public let solution: [Int]
+    /// Frozen reveal-pool version. New puzzles use the expanded pool; legacy persisted puzzles
+    /// decode as version 1 so adding emoji never changes a resumed or reset puzzle's picture.
+    public let revealVersion: Int
 
     /// Creates a puzzle from its clue cells and the canonical solution. Enforces the SAME invariants
     /// as the validated decoder (exactly 81 cells, `givens` `0...9`, `solution` `1...9`, every
@@ -49,6 +52,7 @@ public struct SudokuPuzzle: Codable, Equatable, Sendable {
         )
         self.givens = givens
         self.solution = solution
+        self.revealVersion = 2
     }
 
     /// Shape- and range-only construction for testing the solver's robustness to intentionally
@@ -66,10 +70,11 @@ public struct SudokuPuzzle: Codable, Equatable, Sendable {
         )
         self.givens = givens
         self.solution = solution
+        self.revealVersion = 2
     }
 
     private enum CodingKeys: String, CodingKey {
-        case givens, solution
+        case givens, solution, revealVersion
     }
 
     /// Decodes a persisted puzzle with shape + value validation, THROWING (not trapping) on a
@@ -88,6 +93,7 @@ public struct SudokuPuzzle: Codable, Equatable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let givens = try container.decode([Int].self, forKey: .givens)
         let solution = try container.decode([Int].self, forKey: .solution)
+        let revealVersion = try container.decodeIfPresent(Int.self, forKey: .revealVersion) ?? 1
         let validGivens = givens.count == 81 && givens.allSatisfy { (0...9).contains($0) }
         let validSolution = solution.count == 81 && solution.allSatisfy { (1...9).contains($0) }
         // Only run the solver on boards with the correct shape: the solver's masks/conflict checks
@@ -96,16 +102,18 @@ public struct SudokuPuzzle: Codable, Equatable, Sendable {
             && zip(givens, solution).allSatisfy { given, solved in given == 0 || given == solved }
         let solutionIsLegalGrid = validSolution && SudokuPuzzle.solutionIsPermutationGrid(solution)
         let hasUniqueSolution = validGivens && SudokuSolver.countSolutions(in: givens, limit: 2) == 1
-        guard validGivens, validSolution, agreement, solutionIsLegalGrid, hasUniqueSolution else {
+        guard validGivens, validSolution, agreement, solutionIsLegalGrid, hasUniqueSolution,
+              (1...2).contains(revealVersion) else {
             throw DecodingError.dataCorrupted(
                 DecodingError.Context(
                     codingPath: container.codingPath,
-                    debugDescription: "SudokuPuzzle must hold 81 cells with givens 0...9, a legal 1...9 solution grid, every non-zero given agreeing with its solution cell, and a unique solution"
+                    debugDescription: "SudokuPuzzle must hold 81 cells with givens 0...9, a legal 1...9 solution grid, every non-zero given agreeing with its solution cell, a unique solution, and revealVersion 1 or 2"
                 )
             )
         }
         self.givens = givens
         self.solution = solution
+        self.revealVersion = revealVersion
     }
 
     /// Returns `true` if `board` is a fully filled LEGAL Sudoku grid: every row, column, and 3×3 box

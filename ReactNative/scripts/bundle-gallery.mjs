@@ -1,11 +1,12 @@
 import './configure-native-tabs.mjs';
 import {configureNativeToolbar} from './configure-native-toolbar.mjs';
 import './generate-localizations.mjs';
-import {mkdir, stat} from 'node:fs/promises';
+import {mkdir} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import {resolve} from 'node:path';
 import {getDefaultConfig, mergeConfig} from '@react-native/metro-config';
 import Metro from 'metro';
+import {buildIOSBundle,verifyIOSFlowAdapters} from './ios-bundle.mjs';
 
 configureNativeToolbar();
 
@@ -23,8 +24,7 @@ const config = mergeConfig(getDefaultConfig(root), {
   // A one-shot CI bundle does not need a resident Watchman server.
   resolver: {useWatchman: false},
 });
-await Metro.runBuild(config, {
-  entry: review ? 'review/index.ts' : 'gallery/index.ts', platform: 'ios', dev: false, minify: true,
-  out: outputStem, sourceMap: true,
+await buildIOSBundle(Metro.runBuild, config, {
+  entry: review ? 'review/index.ts' : 'gallery/index.ts', outputStem,
 });
-if ((await stat(`${outputStem}.js`)).size === 0) throw new Error('The iOS gallery bundle is empty.');
+if(review)verifyIOSFlowAdapters(`${outputStem}.map`);

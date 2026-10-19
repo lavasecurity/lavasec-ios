@@ -7,7 +7,7 @@ export type BufferedInputHandle=ComponentRef<typeof NativeInput>;
  * replaces its buffer. The iOS leaf also enforces composed-character limits
  * before an asynchronous report acknowledgement can replace a newer edit. */
 export type BufferedInputProps=TextInputProps&{
-  ref?:Ref<BufferedInputHandle>;resetRevision?:number;characterLimit?:number;grows?:boolean;nativeKind?:'wireGuardName';ownerID?:string;
+  ref?:Ref<BufferedInputHandle>;resetRevision?:number;characterLimit?:number;grows?:boolean;nativeKind?:'wireGuardName'|'localLogSearch';ownerID?:string;
 };
 export function BufferedInput({ref,value,defaultValue,resetRevision=0,characterLimit=0,grows=false,nativeKind,ownerID,...props}:BufferedInputProps){
   const input=useRef<BufferedInputHandle>(null);const initial=useRef(value??defaultValue??'');const reset=useRef(resetRevision);

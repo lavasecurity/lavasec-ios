@@ -32,9 +32,9 @@ final class FilterPreparationProgressBarSourceTests: XCTestCase {
             app.components(separatedBy: "filterPreparationState = .preparing(progress: 1, message: \"Success\")").count - 1, 2,
             "Both apply paths must set the terminal Success step at full progress.")
 
-        // Both paths must YIELD between the saving-top tick and Success so SwiftUI actually renders
+        // Both paths must YIELD between the saving-top tick and Success so the renderer observes
         // (and eases to) the 3/4 frame. The same-phase present() returns without suspending, so
-        // without this sleep the two writes land in one main-actor turn and SwiftUI coalesces the
+        // without this sleep the two writes land in one main-actor turn and the bridge batches the
         // 3/4 state away — the bar would sweep straight from the previous saving value to 100%.
         var searchStart = app.startIndex
         for label in ["draft-apply", "switch"] {
@@ -58,39 +58,15 @@ final class FilterPreparationProgressBarSourceTests: XCTestCase {
         }
     }
 
-    // MARK: The cover sweeps the bar to full, then reveals the checkmark
-
-    func testSuccessFillsToFullThenRevealsCheckmark() throws {
-        let block = try sourceBlock(
-            in: try readSource(.filterReviewFlowView),
-            startingAt: "struct FilterPreparationScreen: View {",
-            endingBefore: "struct PreparationTickerTitle: View {"
-        )
-
-        // The checkmark is gated on a reveal flag driven AFTER the fill, so the bar fills to a full
-        // 100% first (Success reads as the bar completing, not vanishing at 3/4).
-        XCTAssertTrue(block.contains("@State private var successGlyphShown = false"),
-                      "The cover needs a reveal flag so the checkmark waits for the fill sweep.")
-        XCTAssertTrue(block.contains("if progress >= 1, successGlyphShown {"),
-                      "The checkmark must be gated on the post-fill reveal flag, not shown the instant progress hits 1.")
-        XCTAssertTrue(block.contains(".task(id: isTerminalSuccess)"),
-                      "A task keyed on the terminal-success state must drive (and reset) the checkmark reveal.")
-
-        // The bar eases between steps — a smooth increase, not a jump between intervals — but the
-        // ease MUST route through LavaFlowTransition.incidental(reduceMotion:) so it lands instantly
-        // under Reduce Motion (matching the sibling PreparationTickerTitle and the app convention).
-        // Pin the gated modifier bound to `progress`, but NOT the cosmetic duration literal (that is
-        // meant to be tuned).
-        XCTAssertTrue(block.contains(".animation(LavaFlowTransition.incidental(") && block.contains(", value: progress)"),
-                      "The progress bar must ease its fill via a LavaFlowTransition.incidental(reduceMotion:)-gated .animation(_:value: progress), so the fill lands instantly under Reduce Motion.")
-
-        // The checkmark reveal must also honor Reduce Motion: the reveal delay collapses (no dead-hold)
-        // and the reveal animation is gated. The opacity fade itself is fine to keep (a fade is motion-free).
-        XCTAssertTrue(block.contains("@Environment(\\.accessibilityReduceMotion) private var reduceMotion"),
-                      "FilterPreparationScreen must read Reduce Motion to gate the fill + reveal.")
-        XCTAssertTrue(block.contains("reduceMotion ? 0 : 550_000_000"),
-                      "The checkmark reveal delay must collapse to 0 under Reduce Motion so there is no full-bar dead-hold.")
-        XCTAssertTrue(block.contains("withAnimation(LavaFlowTransition.incidental("),
-                      "The checkmark reveal must animate through the Reduce-Motion gate too.")
+    // RN behavior/motion tests exercise final fill and glyph ordering. This pin
+    // covers the cross-process acknowledgment at the native dismissal boundary.
+    func testCurrentNativeOperationWaitsForItsRendererBeforeDismissal() throws {
+        let app = try readAppViewModelSource()
+        XCTAssertEqual(app.components(separatedBy: "await filterDrafts.waitForPreparationSuccessPresentation(id: preparationAttemptID)").count - 1, 2)
+        XCTAssertEqual(app.components(separatedBy: "filterDrafts.beginPreparationPresentation()").count - 1, 2)
+        let native = try readSource(.reactNativeAppPreparation)
+        XCTAssertTrue(native.contains("currentPreparationAttemptID == id"))
+        XCTAssertTrue(native.contains("drafts.acknowledgePreparationSuccess(id: id)"))
+        XCTAssertTrue(native.contains("drafts.preparationReplacementEpoch == model.configurationReplacementGate.epoch"))
     }
 }

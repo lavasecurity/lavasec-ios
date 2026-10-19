@@ -2,14 +2,11 @@ import XCTest
 
 final class NavigationCardAnatomySourceTests: XCTestCase {
     func testImportMethodsShareOneGroupedSurfaceAndAllThreeNavigationAccessories() throws {
-        let source = try readSource(.shareableFiltersUI)
-        let chooser = try sourceBlock(in: source, startingAt: "private struct ImportMethodChooserView", endingBefore: "private var photoErrorBinding")
-        XCTAssertEqual(chooser.occurrences(of: "LavaCondensedList {"), 1)
-        XCTAssertEqual(chooser.occurrences(of: "LavaCondensedDivider()"), 2)
-        XCTAssertEqual(chooser.occurrences(of: "accessory: .chevron"), 3)
-        XCTAssertFalse(chooser.contains("accessory: .none"))
-        XCTAssertTrue(chooser.contains("PhotosPicker(selection: $photoItem"))
-        XCTAssertTrue(chooser.contains(".disabled(isDecodingPhoto)"))
+        let source = try readSource(.reactNativeImportFlow)
+        let chooser = try sourceBlock(in: source, startingAt: "state.stage==='chooseMethod'", endingBefore: "state.stage==='enterCode'")
+        XCTAssertEqual(chooser.occurrences(of: "<Method title="), 3)
+        XCTAssertTrue(chooser.contains("<Group>"))
+        XCTAssertTrue(chooser.contains("state.decodingPhoto"))
     }
 
     func testSharedLabelOwnsNavigationCardAnatomyAndAccessibility() throws {
@@ -83,19 +80,12 @@ final class NavigationCardAnatomySourceTests: XCTestCase {
     }
 
     func testImportOptionRowDelegatesAnatomyButKeepsItsInteractionSemantics() throws {
-        let importOption = try sourceBlock(
-            in: try readSource(.shareableFiltersUI),
-            startingAt: "struct ImportOptionRow",
-            endingBefore: "// MARK: Freeform code entry"
-        )
-
-        XCTAssertEqual(importOption.occurrences(of: "LavaNavigationCardLabel("), 1)
-        XCTAssertFalse(importOption.contains(".lavaSurface(.card)"))
-        XCTAssertFalse(importOption.contains(".contentShape(RoundedRectangle(cornerRadius: LavaSurface.cardCornerRadius"))
-        XCTAssertTrue(importOption.contains("badgeSize: 38"))
-        XCTAssertTrue(importOption.contains("rowSpacing: 14"))
-        XCTAssertTrue(importOption.contains("LavaNavigationCardButton(action: action)"))
-        XCTAssertTrue(importOption.contains("summary: subtitle.isEmpty ? .none : .localizedUnclamped(subtitle)"))
+        let source = try readSource(.reactNativeImportFlow)
+        let method = try sourceBlock(in: source, startingAt: "function Method(", endingBefore: "function ReviewContents(")
+        XCTAssertTrue(method.contains("<ListRow"))
+        XCTAssertTrue(method.contains("trailingRole=\"disclosure\""))
+        XCTAssertTrue(method.contains("icon={symbol}"))
+        XCTAssertTrue(method.contains("onPress={onPress}"))
     }
 }
 

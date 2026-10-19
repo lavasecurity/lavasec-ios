@@ -12,9 +12,10 @@ release candidate.
 
 The RN adapter attaches to `LavaProtectionShortcutRuntime.shared`; it must never
 construct a second foreground AppViewModel or make optimistic protection claims.
-Native commands enforce the same authentication and transaction boundaries used
-by SwiftUI. Platform dialogs and existing sensitive setup/review flows remain
-native components presented by the shared root.
+Native commands enforce the original authentication and transaction boundaries.
+RN owns app screen and task composition; the shared root retains native service
+owners, system dialogs, navigation chrome and bounded platform control atoms.
+See the [current ownership contract](../../docs/architecture/rn-only-app.md).
 
 
 Install the [build prerequisites](../../README.md#building), then
@@ -36,14 +37,17 @@ and scrolling using its current adjusted content inset. Only Guard's root scroll
 is disabled. Protected Settings entry authenticates before selection; its active
 tab still accepts native reselection.
 
-VPN chaining embeds its existing native controls in a pushed React navigation
-page, with native nested DNS/Plus pages and the configuration editor sheet.
-Account/passkey setup, import/scanning, OS dialogs, authentication,
-and filter preparation reuse the native flows above React navigation sheets.
-Commands use the existing foreground runtime and enforce native authentication,
-limits and review/apply boundaries. Date ranges, domain history, pagination,
-local-log settings and Sudoku use the native stores. RN text metrics and translated
-copy come from the native customization settings and localization catalog.
+VPN chaining, account connections, backup setup/restore, import, filter
+preparation, passcode setup/authentication, DNS help and Device QA use RN screen
+composition. Their commands use the existing foreground runtime and enforce
+native authentication, limits, review identity and commit boundaries. Native
+credential buffers keep recovery words, passcodes and private configuration out
+of JavaScript; system authentication, file/photo pickers, scanner capture,
+sharing and calendar controls remain native. Date ranges, domain history,
+pagination, local-log settings and Sudoku use the native stores. RN text metrics
+and translated copy come from the native customization settings and localization
+catalog. Migrated iOS tasks retain authored point geometry and native semantic
+text metrics through their scoped adapters; ordinary RN window sizing is unchanged.
 
 Plain `v2.0.0-rc1` and later version-2-or-higher RC tags dispatch the complete RN
 app to both TestFlight lanes: production identity (`com.lavasec.app`, internal

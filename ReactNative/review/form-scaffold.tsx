@@ -1,4 +1,4 @@
-import {WindowSizeContext,useWindowLayout,type WindowSize} from '../src/window-layout';
+import {WindowMetricsContext,WindowSizeContext,useWindowLayout,type WindowSize} from '../src/window-layout';
 import {createContext,useContext,useLayoutEffect,useRef,useState,type ComponentRef,type PropsWithChildren,type ReactNode,type Ref,type RefObject} from 'react';
 import {KeyboardAvoidingView,Platform,PlatformColor,Pressable,ScrollView,StyleSheet,View,useWindowDimensions,type LayoutChangeEvent,type TextProps} from 'react-native';
 import {SafeAreaInsetsContext} from 'react-native-safe-area-context';
@@ -48,7 +48,7 @@ export function FormActions({titles,children}:{titles:readonly string[];children
 
 // A native-hosted modal already has a UIKit sheet. Its RN content owns ordinary
 // scrolling and the bottom action inset without presenting a second sheet.
-type FlowSheetProps=PropsWithChildren<{header?:ReactNode;footer?:ReactNode;scrolls?:boolean;feedback?:boolean;centered?:boolean;nativeKeyboardAvoidance?:boolean}>;
+type FlowSheetProps=PropsWithChildren<{header?:ReactNode;footer?:ReactNode;scrolls?:boolean;feedback?:boolean;centered?:boolean;nativeKeyboardAvoidance?:boolean;compactHeight?:boolean;onNaturalSize?:(height:number)=>void}>;
 export function FlowSheet(props:FlowSheetProps){
   const [viewport,setViewport]=useState<WindowSize|null>(null);
   const measure=(event:LayoutChangeEvent)=>{
@@ -57,27 +57,40 @@ export function FlowSheet(props:FlowSheetProps){
   };
   return <WindowSizeContext.Provider value={viewport}><FlowSheetBody {...props} onViewport={measure}/></WindowSizeContext.Provider>;
 }
-function FlowSheetBody({children,header,footer,scrolls=true,feedback=false,centered=false,nativeKeyboardAvoidance=false,onViewport}:FlowSheetProps&{onViewport:(event:LayoutChangeEvent)=>void}){
+function FlowSheetBody({children,header,footer,scrolls=true,feedback=false,centered=false,nativeKeyboardAvoidance=false,compactHeight,onNaturalSize,onViewport}:FlowSheetProps&{onViewport:(event:LayoutChangeEvent)=>void}){
   const nativeLayout=usePresentationNativeLayout();
-  const layout=useWindowLayout();const insets=useContext(SafeAreaInsetsContext);const {width,height}=layout;const compact=!centered&&width>height;
+  const layout=useWindowLayout();const insets=useContext(SafeAreaInsetsContext);const {width,height}=layout;const compact=!centered&&(compactHeight??width>height);
   const horizontalPadding=insets&&(insets.left!==0||insets.right!==0)?{
     paddingLeft:foundation.space.screenHorizontal*layout.scale+insets.left,paddingRight:foundation.space.screenHorizontal*layout.scale+insets.right,
   }:undefined;
   const horizontalReadingInsets=horizontalPadding?{...horizontalPadding,maxWidth:layout.readingWidth+insets!.left+insets!.right}:undefined;
   const headerInset=useSheetHeaderInset();
   const scroll=useRef<ComponentRef<typeof ScrollView>>(null);const [viewport,setViewport]=useState(0);
-  const content=<View style={{gap:18,...(centered?{flexGrow:1,justifyContent:'center' as const}: {})}}>{children}{compact&&footer&&<View style={{paddingBottom:24}}>{footer}</View>}</View>;
+  // Native utility sheets need intrinsic content, not the currently fitted
+  // viewport. The scroll callback already includes body padding and an inline
+  // compact footer; separately pinned chrome is counted exactly once.
+  const natural=useRef({body:0,header:0,footer:0,last:0});
+  const reportNatural=(part:'body'|'header'|'footer',height:number)=>{
+    if(!onNaturalSize||!Number.isFinite(height)||height<0)return;
+    natural.current[part]=height;
+    if(natural.current.body<=0||header&&natural.current.header<=0||!compact&&footer&&natural.current.footer<=0)return;
+    const total=natural.current.body+(header?natural.current.header:0)+(!compact&&footer?natural.current.footer:0);
+    if(Math.abs(total-natural.current.last)<0.5)return;
+    natural.current.last=total;onNaturalSize(total);
+  };
+  const content=<View onLayout={!scrolls?event=>reportNatural('body',event.nativeEvent.layout.height+16+24):undefined} style={{gap:18,...(centered?{flexGrow:1,justifyContent:'center' as const}: {})}}>{children}{compact&&footer&&<View style={{paddingBottom:24}}>{footer}</View>}</View>;
   // The native WireGuard host already shortens for UIKit's keyboard. Applying
   // padding again creates transient viewports and changes its retained offset.
   // Safe sides pad each content slot once; inline compact actions inherit their
   // scroll body's padding. The scroll viewport remains full-width for UIKit.
   return <SheetScrollContext.Provider value={{height:Math.max(0,viewport-headerInset),headerInset,scroll}}><KeyboardAvoidingView onLayout={onViewport} behavior={Platform.OS==='ios'&&!nativeKeyboardAvoidance?'padding':undefined} style={{flex:1,backgroundColor:colors.groupedBackground}}>
-    {header&&<View style={{paddingHorizontal:foundation.space.screenHorizontal*layout.scale,paddingTop:12*layout.scale,paddingBottom:10,...horizontalPadding}}>{header}</View>}
+    {header&&<View onLayout={event=>reportNatural('header',event.nativeEvent.layout.height)} style={{paddingHorizontal:foundation.space.screenHorizontal*layout.scale,paddingTop:12*layout.scale,paddingBottom:10,...horizontalPadding}}>{header}</View>}
     {scrolls?<ScrollView ref={scroll} onLayout={event=>{nativeLayout(event);setViewport(event.nativeEvent.layout.height);}} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive"
       contentInsetAdjustmentBehavior="automatic" showsVerticalScrollIndicator={false} showsHorizontalScrollIndicator={false}
+      onContentSizeChange={(_width,height)=>reportNatural('body',height)}
       contentContainerStyle={{width:'100%',maxWidth:layout.readingWidth,alignSelf:'center',paddingHorizontal:foundation.space.screenHorizontal*layout.scale,paddingTop:centered?18:feedback?16:28,paddingBottom:centered?18:compact&&footer?0:44,...(centered?{flexGrow:1}: {}),...horizontalReadingInsets}}>{content}</ScrollView>
       :<View onLayout={nativeLayout} style={{flex:1,paddingHorizontal:foundation.space.screenHorizontal,paddingTop:16,paddingBottom:24,...horizontalPadding}}>{content}</View>}
-    {!compact&&footer&&<View>{feedback&&<FormDivider/>}<View style={{width:'100%',maxWidth:layout.readingWidth,alignSelf:'center',paddingHorizontal:foundation.space.screenHorizontal*layout.scale,paddingTop:12*layout.scale,paddingBottom:(feedback?12:24)+(insets?.bottom??0),...horizontalReadingInsets}}>{footer}</View></View>}
+    {!compact&&footer&&<View onLayout={event=>reportNatural('footer',Math.max(0,event.nativeEvent.layout.height-(insets?.bottom??0)))}>{feedback&&<FormDivider/>}<View style={{width:'100%',maxWidth:layout.readingWidth,alignSelf:'center',paddingHorizontal:foundation.space.screenHorizontal*layout.scale,paddingTop:12*layout.scale,paddingBottom:(feedback?12:24)+(insets?.bottom??0),...horizontalReadingInsets}}>{footer}</View></View>}
   </KeyboardAvoidingView></SheetScrollContext.Provider>;
 }
 const formLabel=Platform.OS==='ios'?PlatformColor('label'):colors.primaryText;
@@ -90,8 +103,9 @@ export function FormParagraph({children,textRole='supporting',verbatim=false,...
     textRole==='note'?{fontSize:13,lineHeight:18,ramp:'footnote' as const,leading:1,color:colors.secondaryText}:
     {fontSize:15,lineHeight:20,ramp:'subheadline' as const,leading:1,color:colors.secondaryText};
   const scale=useTextScale(metrics.ramp);
+  const nativeFlow=useContext(WindowMetricsContext)==='nativeFlow'&&Platform.OS==='ios';
   return <Text {...props} verbatim={verbatim} allowFontScaling dynamicTypeRamp={metrics.ramp}
-    style={[{fontSize:metrics.fontSize,lineHeight:metrics.lineHeight,marginVertical:-metrics.leading*scale,color:metrics.color},props.style]}>{children}</Text>;
+    style={[{fontSize:metrics.fontSize,...(nativeFlow?{}:{lineHeight:metrics.lineHeight,marginVertical:-metrics.leading*scale}),color:metrics.color},props.style]}>{children}</Text>;
 }
 export function FormCardTitle({children}:PropsWithChildren){return <Copy role="section" color={formLabel}>{children}</Copy>;}
 export function FormReviewValue({label,value,divider=false,dividerGap=12}:{label:string;value:string;divider?:boolean;dividerGap?:number}){
@@ -101,7 +115,7 @@ export function FormIntro({summary}:{summary:string}){
   return <Group tone="green"><View style={{padding:foundation.space.lg}}><FormParagraph style={{color:colors.primaryText}}>{summary}</FormParagraph></View></Group>;
 }
 
-/** Match LavaDiagnosticValueRow: adjacent natural-width values, or the whole
+/** Keep adjacent natural-width values, or the whole
  * label/value pair stacked when it cannot fit. Values remain verbatim. */
 export function DiagnosticValue({label,value}:{label:string;value:string}){
   const {width:windowWidth}=useWindowDimensions();

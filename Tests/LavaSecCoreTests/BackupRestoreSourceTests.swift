@@ -1,34 +1,44 @@
 import XCTest
 
 final class BackupRestoreSourceTests: XCTestCase {
-    func testRecoveryModeUsesPasteToWordSlots() throws {
-        let source = try readSource(.backupRestoreView)
+    func testDNSConsentUsesThePlainFormSwitchAndNativeAuthoritativeCommand() throws {
+        let source = try readSource(.reactNativeAccountBackupFlow)
+        XCTAssertTrue(source.contains("<FlowConsentToggle testID=\"backup.restore.consent\""))
+        XCTAssertTrue(source.contains("labelColor={labelColor} disabled={s.busy} onChange={value=>command({action:'restore.consent',value})}"))
+        XCTAssertFalse(source.contains("<Toggle title=\"I confirm these DNS changes\""))
+    }
 
+    func testRecoveryModeUsesPasteToWordSlots() throws {
+        let source = try readSource(.reactNativeBackupCredentials)
         XCTAssertTrue(source.contains("Paste full phrase"))
-        XCTAssertTrue(source.contains("BackupRecoveryPhrase.fillSlots"))
         XCTAssertTrue(source.contains("ForEach(0..<BackupRecoveryPhrase.wordCount"))
+        let restore = try readSource(.backupRestoreView)
+        XCTAssertTrue(restore.contains("var recoveryWords: [String] { recoveryInput.words }"))
+        XCTAssertTrue(restore.contains("recoveryInput.setPastedPhrase(value)"))
     }
 
     func testRestoreDefaultsToDeviceUnlock() throws {
         let source = try readSource(.backupRestoreView)
-
-        XCTAssertTrue(source.contains("@State private var mode: BackupRestoreMode = .deviceKey"))
+        XCTAssertTrue(source.contains("var mode: BackupRestoreMode = .deviceKey"))
         XCTAssertTrue(source.contains("case deviceKey"))
         XCTAssertTrue(source.contains("mode.requiresTypedSecret"))
     }
 
     func testRecoveryRestoreUsesNormalizedPhraseFromSlots() throws {
         let source = try readSource(.backupRestoreView)
-
-        XCTAssertTrue(source.contains("BackupRecoveryPhrase.phrase(from: recoveryWords)"))
-        XCTAssertTrue(source.contains("recoverySecretForRestore"))
+        // BackupRecoveryPhraseTests executes normalization and manual-edit
+        // invalidation. Here, bind the displayed fields and submitted secret to
+        // that same native input policy, rather than duplicating its algorithm.
+        XCTAssertTrue(source.contains("var recoveryInput = BackupRecoveryPhraseInput()"))
+        XCTAssertTrue(source.contains("recoveryInput.setWord(value, at: index)"))
+        let secret = try sourceBlock(in: source, startingAt: "var restoreSecret: String {", endingBefore: "var canContinue:")
+        XCTAssertTrue(secret.contains("guard mode == .recoveryCode else { return \"\" }"))
+        XCTAssertTrue(secret.contains("return recoveryInput.secret"))
     }
 
     func testDeviceRestoreUsesKeychainCopy() throws {
-        let source = try readSource(.backupRestoreView)
-
+        let source = try readSource(.reactNativeAccountBackupFlow)
         XCTAssertTrue(source.contains("Use this device's keychain"))
-        XCTAssertFalse(source.contains("Use this device\""))
     }
 
     func testRestoreModesUseDevicePasskeyAndRecoveryWithoutLegacyPassword() throws {
@@ -70,42 +80,24 @@ final class BackupRestoreSourceTests: XCTestCase {
         XCTAssertFalse(controllerSource.contains("decryptWithPasskeySecret"))
         XCTAssertFalse(controllerSource.contains("authorizePasskeyBackupRestore"))
         XCTAssertTrue(unlockSource.contains("decryptWithAssistedRecoveryPhrase"))
-        XCTAssertTrue(restoreSource.contains("case .passkey"))
-        XCTAssertTrue(restoreSource.contains("Use your saved passkey"))
+        XCTAssertTrue(restoreSource.contains("case .deviceKey, .passkey:"))
+        XCTAssertTrue(try readSource(.reactNativeAccountBackupFlow).contains("Use your saved passkey"))
     }
 
     func testRestoreShowsStatusIndicatorPanelInsteadOfMessageLine() throws {
-        let source = try readSource(.backupRestoreView)
-
-        XCTAssertTrue(source.contains("\"Unlock method\""))
-        XCTAssertTrue(source.contains("if restoreStatus != .choosing { RestoreStatusPanel(status: restoreStatus) }"))
-        XCTAssertTrue(source.contains("case failed(reason: String)"))
-        XCTAssertTrue(source.contains("Restored successfully"))
-        XCTAssertTrue(source.contains("Restore failed"))
-        XCTAssertTrue(source.contains("Restore cancelled"))
-        // The crisp status indicator replaces the old free-floating message line.
-        XCTAssertFalse(source.contains("isError ? LavaStyle.lavaOrange : LavaStyle.safeGreen"))
-        // Canary: the negative pins above key on these identifiers - if a rename removes
-        // one from the pinned source, those pins pass vacuously. Fail here instead, then
-        // re-anchor both sides to the new name.
-        XCTAssertTrue(source.contains("LavaStyle"))
-        XCTAssertTrue(source.contains("lavaOrange"))
-        XCTAssertTrue(source.contains("safeGreen"))
+        let source = try readSource(.reactNativeAccountBackupFlow)
+        XCTAssertTrue(source.contains("s.status&&<Info title={s.status.title}"))
+        XCTAssertTrue(try readSource(.backupRestoreView).contains("Restore cancelled"))
+        XCTAssertTrue(try readSource(.backupRestoreView).contains("Restore failed"))
     }
 
     func testRecoveryEntryUsesTextInputScaffoldWithSpaceToAdvance() throws {
-        let source = try readSource(.backupRestoreView)
-
+        let source = try readSource(.reactNativeBackupCredentials)
         XCTAssertTrue(source.contains("LavaTextInputPanel"))
         XCTAssertTrue(source.contains("LavaTextEditorInputRow("))
         XCTAssertTrue(source.contains("@FocusState private var focusedWord: Int?"))
-        XCTAssertTrue(source.contains("@FocusState.Binding var focusedField: Int?"))
-        XCTAssertTrue(source.contains("advanceFocus(after:"))
-        XCTAssertTrue(source.contains("replacingOccurrences(of: \" \", with: \"\")"))
-        // Pin the wiring at the call site, not just the declarations: the field must
-        // bind the shared focus state and invoke the advance hook on space.
         XCTAssertTrue(source.contains(".focused($focusedField, equals: fieldIndex)"))
-        XCTAssertTrue(source.contains("onSpace: { advanceFocus(after: index) }"))
+        XCTAssertTrue(source.contains("replacingOccurrences(of: \" \", with: \"\")"))
     }
 
     func testRestoreCancellationIsDistinctFromFailure() throws {
@@ -124,22 +116,9 @@ final class BackupRestoreSourceTests: XCTestCase {
     }
 
     func testRestoreFlowIsFullSheetWithFooterAction() throws {
-        let source = try readSource(.backupRestoreView)
-        let settings = try readSource(.reactNativeAppFlows)
-        XCTAssertTrue(settings.contains("case \"backupRestore\": "))
-
-        // Presented as a full bottom sheet (covers the tab bar) like Import filters,
-        // matching the backup setup flow, instead of a pushed screen.
-        XCTAssertTrue(source.contains("LavaTaskSheet(title: \"Restore Backup\""))
-        // Footer action stays pinned; Back exists only when leaving a prepared review.
-        XCTAssertTrue(source.contains("} footer: {"))
-        XCTAssertTrue(source.contains("back: sheetBackAction"))
-        XCTAssertFalse(source.contains("LavaScreenContent(spacing: 22)"))
-        XCTAssertFalse(source.contains(".navigationTitle(\"Restore Backup\".lavaLocalized)"))
-        // Canary: the negative pins above key on these identifiers - if a rename removes
-        // one from the pinned source, those pins pass vacuously. Fail here instead, then
-        // re-anchor both sides to the new name.
-        XCTAssertTrue(try readSource(.settingsCommon).contains("LavaScreenContent"))
-        XCTAssertTrue(source.contains("lavaLocalized"))
+        let source = try readSource(.reactNativeAccountBackupFlow)
+        XCTAssertTrue(source.contains("<FlowSheet footer={action(s.busy?'Restoring':s.review?'Restore Backup':'Review Backup'"))
+        XCTAssertFalse(try readSource(.backupRestoreView).contains("struct BackupRestoreView: View"))
     }
+
 }

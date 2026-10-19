@@ -18,6 +18,20 @@ jest.mock('../specs/LavaDecorationNativeComponent',()=>({__esModule:true,default
 }}));
 
 describe('native Lava control contracts', () => {
+  it('keeps a pending action painted and its centered label stable while blocking repeat taps',()=>{
+    const pressed=jest.fn();const content=(busy:boolean)=><LavaActionButton title="Check" busy={busy} disabled={busy} onPress={pressed}/>;
+    const view=render(content(false));
+    const button=screen.getByRole('button',{name:'Check'});const label=screen.getByText('Check');
+    const fill=StyleSheet.flatten(button.props.style).backgroundColor;
+    const layout=label.parent!.children.map((child:{props:{style:unknown}}|string)=>typeof child==='object'?child.props.style:child);
+    view.rerender(content(true));
+    expect(screen.getByText('Check')).toBe(label);
+    expect(StyleSheet.flatten(button.props.style).backgroundColor).toEqual(fill);
+    expect(label.parent!.children.map((child:{props:{style:unknown}}|string)=>typeof child==='object'?child.props.style:child)).toEqual(layout);
+    expect(screen.UNSAFE_getAllByType(ActivityIndicator)).toHaveLength(1);
+    expect(button).toBeDisabled();fireEvent.press(button);expect(pressed).not.toHaveBeenCalled();
+    view.rerender(content(false));fireEvent.press(button);expect(pressed).toHaveBeenCalledTimes(1);
+  });
   it('owns a toggle gesture before a synchronous owner publication can reenter its native callback',async()=>{
     let finish!:()=>void;
     const changed=jest.fn(()=>{

@@ -299,4 +299,27 @@ final class ChainedSurfaceStateTests: XCTestCase {
             fallbackPreference: false, storedIsSplitTunnel: true).canEditDNS)
     }
 
+    func testFallbackPreferenceChangeSkipsApplyOnlyForAKnownCurrentFullTunnel() {
+        for consent in [false, true] {
+            let full = ChainedDNSSettingsPresentation(chainingEnabled: true,
+                fallbackPreference: consent, storedIsSplitTunnel: false)
+            XCTAssertFalse(full.shouldApplyFallbackPreferenceChange(
+                isChainedSessionLive: true, runningGeneration: 7, storedGeneration: 7))
+            for (live, running, stored): (Bool, UInt64, UInt64?) in [
+                (true, 6, 7), (true, 8, 7), (true, 0, 0),
+                (true, 7, nil), (false, 7, 7), (false, 0, nil)
+            ] {
+                XCTAssertTrue(full.shouldApplyFallbackPreferenceChange(
+                    isChainedSessionLive: live, runningGeneration: running, storedGeneration: stored),
+                    "A stale, retired or unknown session must receive the saved consent change.")
+            }
+            for split: Bool? in [true, nil] {
+                let applicable = ChainedDNSSettingsPresentation(chainingEnabled: true,
+                    fallbackPreference: consent, storedIsSplitTunnel: split)
+                XCTAssertTrue(applicable.shouldApplyFallbackPreferenceChange(
+                    isChainedSessionLive: true, runningGeneration: 7, storedGeneration: 7))
+            }
+        }
+    }
+
 }

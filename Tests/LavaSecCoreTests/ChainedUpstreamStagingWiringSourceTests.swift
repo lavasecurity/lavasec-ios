@@ -11,30 +11,16 @@ import XCTest
 /// call may run while another is in flight, and where that is decided.
 final class ChainedUpstreamStagingWiringSourceTests: XCTestCase {
     func testBlockedOffStateKeepsTheConfigurationEditorReachable() throws {
-        let view = try readSource(.vpnChainingSettingsView)
-        let mainSection = try sourceBlock(
-            in: view, startingAt: "if setupEnabled {",
-            endingBefore: "let rotation = rotationFreshness(status)")
-        XCTAssertTrue(mainSection.contains("configurationRow(status)"))
-        XCTAssertTrue(mainSection.contains("configurationRemovalFailure"))
-        XCTAssertFalse(mainSection.contains("Route my traffic through this VPN setup"))
-        XCTAssertTrue(view.contains("setWireGuardRowEnabled(value, index: index"))
-        let editGate = try sourceBlock(in: view, startingAt: "private var canEditConfiguration", endingBefore: "private func requestSaveDraftConfiguration")
-        XCTAssertTrue(editGate.contains("!viewModel.isStagingChainedUpstreamForQA"))
-        XCTAssertTrue(editGate.contains("ChainedSetupPolicy.canEditConfiguration("))
-        let save = try sourceBlock(in: view, startingAt: "private func saveDraftConfiguration()", endingBefore: "validationMessage = savePendingDraft")
-        XCTAssertTrue(save.contains("guard canSaveDraft else { return }"), "Confirmation cannot bypass a later eligibility loss.")
-        XCTAssertTrue(view.contains("canEditConfiguration &&"))
-        XCTAssertTrue(view.contains(".disabled(!canEditConfiguration)"))
+        let source = try readSource(.reactNativeVPNChainingScreen)
+        XCTAssertTrue(source.contains("const setup=!!vpn?.setup&&!needsPlus"))
+        XCTAssertTrue(source.contains("{setup&&<>"))
+        XCTAssertTrue(source.contains("vpn.configuration-panel"))
+        let native = try readSource(.reactNativeAppWireGuardEditor)
+        XCTAssertTrue(native.contains("!bridge.model.isStagingChainedUpstreamForQA"))
+        XCTAssertTrue(native.contains("ChainedSetupPolicy.canEditConfiguration("))
+        XCTAssertTrue(native.contains("guard self.flow?.id == flow.id, visit.canEdit"))
     }
 
-    /// The in-flight flag has to be CHECKED, not merely written.
-    ///
-    /// Written-only, it is a progress indicator: two Stage taps queued before SwiftUI
-    /// renders the disabled state both enter the method, and whichever finishes first runs
-    /// its `defer` and re-enables the clear actions while the other is still suspended — so
-    /// a clear deletes a rotation that call has already committed, and it still reports
-    /// success (Codex, PR #519).
     func testStagingRefusesToRunConcurrentlyWithItself() throws {
         let source = try readAppViewModelSource()
         let staging = try sourceBlock(
@@ -161,7 +147,7 @@ final class ChainedUpstreamStagingWiringSourceTests: XCTestCase {
     /// both wanted, and this is the affordance half. It is the flag on the MODEL, which
     /// outlives the view's recreation.
     func testTheClearActionsAreDisabledWhileStagingIsInFlight() throws {
-        let source = try readSource(.adminQAView)
+        let source = try readSource(.reactNativeAppQA)
         XCTAssertGreaterThanOrEqual(
             source.components(separatedBy: "disabled: viewModel.isStagingChainedUpstreamForQA")
                 .count - 1, 2,
@@ -175,44 +161,21 @@ final class ChainedUpstreamStagingWiringSourceTests: XCTestCase {
     /// proposal, which is why the first fix looked right in code and still slid on device
     /// (Kilo/Codex, PR #549). So the bound is passed INTO the row and applied to the `TextEditor`.
     func testTheConfigEditorHeightIsPinnedOnTheEditorNotAnOuterFrame() throws {
-        let view = try readSource(.vpnChainingSettingsView)
-        let editorPanel = try sourceBlock(
-            in: view,
-            startingAt: "LavaTextInputPanel {",
-            endingBefore: "// Buttons follow the panel")
-        XCTAssertTrue(
-            editorPanel.contains("fixedHeight: 184"),
-            "the height must be passed into the row, the only place it can bind the TextEditor")
-        // The exact pattern the first attempt used and that did not hold on device: an outer
-        // frame on a row whose inner editor grows past it. Its return is the regression.
-        XCTAssertFalse(
-            editorPanel.contains(".frame(height: 184)"),
-            "an outer .frame(height:) does not pin a minHeight TextEditor — do not reintroduce it")
-
-        // The shared row owns the TextEditor's bounds: fixed height normally,
-        // shortened only when a focused sheet viewport cannot expose that height.
-        // Applying a frame to the surrounding panel would still let text overflow.
-        let editorRow = try sourceBlock(
-            in: try readSource(.lavaComponents),
-            startingAt: "struct LavaTextEditorInputRow: View",
-            endingBefore: "extension View")
-        XCTAssertTrue(
-            editorRow.contains(".frame(minHeight: editorMinHeight, maxHeight: editorMaxHeight)"),
-            "the shared row must bound the TextEditor itself, including the focused viewport clamp")
+        let source = try readSource(.reactNativeVPNEditorFlow)
+        XCTAssertTrue(source.contains("useSheetEditorViewport("))
+        XCTAssertTrue(source.contains("184"))
+        XCTAssertTrue(try readSource(.reactNativeFormScaffold).contains("Math.min(fixedHeight,Math.max(44,viewport-16))"))
     }
 
     func testSettingsOffersNoSeparateSuppressionResetControl() throws {
-        let view = try readSource(.vpnChainingSettingsView)
-        XCTAssertFalse(view.contains("Reset & try again"))
-        XCTAssertFalse(view.contains("resetChainedSuppressions"))
+        let source = try readSource(.reactNativeVPNChainingScreen)
+        XCTAssertFalse(source.contains("Reset & try again"))
+        XCTAssertFalse(source.contains("resetChainedSuppressions"))
     }
 
-    func testAdminQAOffersNoSeparateSuppressionResetOrEmptyCard() throws {
-        let view = try readSource(.adminQAView)
-        XCTAssertFalse(view.contains("resetChainedSuppressions"))
-        XCTAssertNil(
-            view.range(of: #"LavaPlainCard\s*\{\s*\}"#, options: .regularExpression),
-            "removing the QA reset control must also remove its empty card container")
+    func testAdminQAOffersNoSeparateSuppressionReset() throws {
+        XCTAssertFalse(try readSource(.reactNativeAppQA).contains("resetChainedSuppressions"))
+        XCTAssertFalse(try readSource(.reactNativeQAFlow).contains("Reset & try again"))
     }
 
     /// A PAUSE CLAIMS THE LIFECYCLE, like every other entry point in this type.
@@ -263,88 +226,26 @@ final class ChainedUpstreamStagingWiringSourceTests: XCTestCase {
     /// Settings exposes stable consent copy while runtime fallback observations remain in
     /// diagnostics. Rendering their restart/disable verdicts here made a toggle flash a panel.
     func testTheFallbackControlKeepsItsStaticExplanationAcrossReconciliation() throws {
-        let view = try readSource(.vpnChainingSettingsView)
-        let panel = try sourceBlock(
-            in: view,
-            startingAt: "\"DNS fallback\",",
-            endingBefore: "private func tierOneFallbackBinding")
-        XCTAssertTrue(panel.contains("footer: alternativeDNSFooter"))
-        XCTAssertTrue(panel.contains("accessibilityHint: alternativeDNSFooter"))
-        XCTAssertFalse(panel.contains("fallbackStatus("))
-        XCTAssertFalse(panel.contains("fallback.deservesSurfacing"))
-        XCTAssertFalse(view.contains("private func fallbackStatus("))
+        let source = try readSource(.reactNativeVPNChainingScreen)
+        XCTAssertTrue(source.contains("title=\"Use Lava DNS settings as fallback\""))
+        XCTAssertTrue(source.contains("note=\"Uses your DNS settings outside the VPN when needed. Full-tunnel VPNs don’t use fallback.\""))
+        XCTAssertFalse(source.contains("fallbackStatus("))
     }
 
-    /// THE SECOND RESOLVER PICKER IS GONE, and nothing in the chaining page offers a choice.
-    ///
-    /// It existed because the T1 rung rode the WireGuard tunnel, which carries plain UDP :53
-    /// and nothing else — so it was the first picker minus every encrypted transport, for a
-    /// resolver the user had already chosen once. PR #590 moved the rung to the physical
-    /// interface, where all four transports work, and the plan's S4 deletes the picker, its
-    /// toggle, its custom-IPv4 field and the five configuration fields behind them.
-    ///
-    /// Pinned because the debt's return is cheap and silent: a `ForEach` over presets on this page
-    /// compiles, renders, and re-splits the one setting into two.
     func testTheChainingPageOffersNoSecondResolverPicker() throws {
-        let view = try readSource(.vpnChainingSettingsView)
-        for gone in [
-            "chainedFallbackResolverEnabled",
-            "chainedFallbackResolverPresetID",
-            "chainedFallbackCustomResolverAddress",
-            "setChainedFallbackResolver(",
-            "fallbackProviders",
-            "Fall back to alternative DNS"
-        ] {
-            XCTAssertFalse(view.contains(gone), "\(gone) is the second picker coming back")
-        }
+        let source = try readSource(.reactNativeVPNChainingScreen)
+        for gone in ["chainedFallbackResolverEnabled", "chainedFallbackResolverPresetID", "chainedFallbackCustomResolverAddress", "setChainedFallbackResolver(", "fallbackProviders"] { XCTAssertFalse(source.contains(gone)) }
+        XCTAssertTrue(source.contains("Review DNS settings"))
     }
 
-    /// The fallback consent keeps one static footer outside its row. Model writes still
-    /// recheck applicability, so a full-tunnel configuration remains effectively off.
     func testTheAlternativeDNSSectionIsAToggleAndOneLine() throws {
-        let view = try readSource(.vpnChainingSettingsView)
-        let section = try sourceBlock(
-            in: view,
-            startingAt: "\"DNS fallback\",",
-            endingBefore: "private func tierOneFallbackBinding")
-
-        XCTAssertTrue(
-            section.contains("title: \"Use Lava DNS settings as fallback\""),
-            "the consent control is a toggle, not a paragraph")
-        XCTAssertTrue(
-            section.contains("isOn: tierOneFallbackBinding(status)"),
-            "and it uses the independent fallback binding")
-        XCTAssertFalse(
-            section.contains("if fallback.deservesSurfacing {"),
-            "runtime verdict panels must not flash beneath the static consent control")
-        XCTAssertFalse(
-            section.contains("if fallback != .off {"),
-            "the old condition surfaced every state but off, which is why Ready was permanent")
-        XCTAssertFalse(
-            view.contains("Text(\"Your resolver\".lavaLocalized)"),
-            "the resolver card restated a selection made one page away")
-
-        // Only profiles are drafts; switches persist independently through their shared setter.
-        let binding = try sourceBlock(
-            in: view,
-            startingAt: "private func tierOneFallbackBinding(_ status: AppViewModel.ChainedUpstreamSurfaceStatus) -> Binding<Bool> {",
-            endingBefore: "// MARK: - Chained DNS fallback (T1)")
-        XCTAssertFalse(binding.contains("beginPageEdit"))
-        XCTAssertTrue(binding.contains("viewModel.setChainedTierOneFallbackEnabled"))
-        XCTAssertTrue(binding.contains("dnsSettingsPresentation(from: status).canChangeFallback"))
-        let commit = try sourceBlock(in: try readAppViewModelSource(), startingAt: "func commitWireGuardPage(", endingBefore: "private func editableWireGuardStore()")
-        XCTAssertTrue(commit.contains("configuration.chainedTierOneFallbackEnabled = fallback && !draft.containsFullTunnel"))
-        XCTAssertTrue(commit.contains("requestChainedSettingsApply()"))
-
+        let source = try readSource(.reactNativeVPNChainingScreen)
+        XCTAssertTrue(source.contains("<Section title=\"DNS fallback\">"))
+        XCTAssertTrue(source.contains("<Toggle testID=\"vpn.fallback-toggle\""))
+        XCTAssertTrue(source.contains("value={!!vpn?.fallback}"))
+        XCTAssertFalse(source.contains("fallback.deservesSurfacing"))
     }
 
-    /// The toggle is PERSISTED and the running tunnel is told.
-    ///
-    /// The rung is derived from the LATCHED configuration, so without the reload message a live
-    /// session keeps the value it started with and the switch appears to do nothing until the
-    /// next connect. The rollback matters for the same reason `setChainedUpstreamEnabled` has
-    /// one: a stored value disagreeing with the switch on screen is a privacy surface lying
-    /// about its own state.
     func testTheFallbackToggleIsPersistedAndPushedToTheTunnel() throws {
         let vm = try readAppViewModelSource()
         let setter = try sourceBlock(
@@ -353,6 +254,15 @@ final class ChainedUpstreamStagingWiringSourceTests: XCTestCase {
             endingBefore: "func stageChainedUpstreamForQA")
 
         XCTAssertTrue(setter.contains("try persistConfigurationOnly()"))
+        XCTAssertTrue(sourceContainsInOrder([
+            "try persistConfigurationOnly()",
+            "guard dnsSettingsPresentation(from: status).shouldApplyFallbackPreferenceChange(",
+            "isChainedSessionLive: tunnelHealth.isChainedUpstreamActive",
+            "runningGeneration: tunnelHealth.runningChainedUpstreamGeneration",
+            "storedGeneration: status.storedConfigurationGeneration) else { return }",
+            "requestChainedSettingsApply()",
+            "sendTunnelMessage(LavaSecAppGroup.reloadConfigurationMessage)"
+        ], in: setter), "Full-tunnel consent must save without reconnecting or reloading an inapplicable fallback.")
         XCTAssertTrue(
             setter.contains("sendTunnelMessage(LavaSecAppGroup.reloadConfigurationMessage)"),
             "a live session latches the old value until it is told")
@@ -390,39 +300,19 @@ final class ChainedUpstreamStagingWiringSourceTests: XCTestCase {
     /// Pinned as a source test because the footer lives in the app target, out of reach of the
     /// package suite, and because the failure mode is a TRUE-looking sentence rather than a crash.
     func testTheAlternativeDNSFooterStatesTheEgressAndItsLimit() throws {
-        let view = try readSource(.vpnChainingSettingsView)
-        let footer = try sourceBlock(
-            in: view,
-            startingAt: "private var alternativeDNSFooter: String {",
-            endingBefore: "// MARK: - Derived state")
+        let source = try readSource(.reactNativeVPNChainingScreen)
+        XCTAssertTrue(source.contains("Uses your DNS settings outside the VPN when needed."))
+        XCTAssertTrue(source.contains("Full-tunnel VPNs don’t use fallback."))
+        XCTAssertFalse(source.contains("always does"))
+    }
 
-        // THE EGRESS, in the user's terms. This is the sentence the consent rests on, and it is
-        // the one clause shortening must never delete: the user chose chaining for privacy and
-        // this is the boundary of what it covers.
-        XCTAssertTrue(
-            footer.contains("leave the VPN tunnel"),
-            "the footer must say the retry leaves the tunnel — that is what is being consented to")
-        XCTAssertTrue(
-            footer.contains("your selected DNS providers"),
-            "and the destination selected on the DNS settings page")
-
-        // THE LIMIT, stated positively. A full tunnel is the one shape where T1 cannot run,
-        // so a user who switches the toggle on there needs to know why nothing happens — and
-        // `unavailableInFullTunnel` only says so once a chained session has actually run.
-        XCTAssertTrue(
-            footer.contains("Split-tunnel VPNs only"),
-            "the requirement is a SPLIT tunnel, and the toggle is switchable in either")
-        XCTAssertFalse(
-            footer.contains("always does"),
-            "a full tunnel no longer works — it is the case with no outside path to use")
-
-        // THE FALSIFIED PROMISES, anchored on their clauses so a rewording trips too.
-        XCTAssertFalse(
-            footer.contains("nothing leaks"),
-            "the rung egresses physically — this claim is now the opposite of the behaviour")
-        XCTAssertFalse(
-            footer.contains("Plain IPv4 only"),
-            "the plain-only restriction existed because the tunnel carried T1; it no longer does")
+    func testTheReactNativeFallbackBridgePreservesConsentAcrossTunnelSetups() throws {
+        let bridge = try readSource(.reactNativeAppSettings)
+        let snapshot = try sourceBlock(in: bridge, startingAt: "func vpnSettingsState()", endingBefore: "private func wireGuardDraftMetadata")
+        XCTAssertTrue(snapshot.contains("\"fallback\": model.configuration.chainedTierOneFallbackEnabled,"))
+        let toggle = try sourceBlock(in: bridge, startingAt: "case \"fallback\":", endingBefore: "default: throw WireGuardChainFailure.changed")
+        XCTAssertTrue(toggle.contains("model.setChainedTierOneFallbackEnabled(value)"))
+        XCTAssertFalse(toggle.contains("guard"), "Routing availability cannot reject a saved fallback preference.")
     }
 
     // MARK: - The running-configuration panel (task #21)
@@ -436,73 +326,25 @@ final class ChainedUpstreamStagingWiringSourceTests: XCTestCase {
     /// `ChainedUpstreamRotationFreshness` — which is in the package and carries real behavioural
     /// tests in `ChainedUpstreamRotationFreshnessTests`.
     func testTheRotationPanelSurfacesOnlyWhenTheVerdictAsks() throws {
-        let source = try readSource(.vpnChainingSettingsView)
-        XCTAssertTrue(
-            source.contains("if rotation.deservesSurfacing && !isApplyingSettings {"),
-            "the panel must be conditional on the verdict, never permanently present")
-        XCTAssertTrue(
-            source.contains("ChainedUpstreamRotationFreshness.verdict("),
-            "the decision belongs to the package policy, not to the view")
-        // A NON-EMPTY LATCH IS NOT THE CONDITION. The policy short-circuits on `0`, so the view
-        // must hand the field over unguarded rather than re-deriving "is a session chained" —
-        // a second opinion here is how the two surfaces drift apart.
-        // THE LIVE FLAG GATES IT. Every chained field in the snapshot outlives the session that
-        // wrote it and the snapshot is persisted, so a file written by a build that forgot to
-        // clear the rotation on stop would let this panel demand a restart for a session that is
-        // not running (Codex P2, PR #613).
-        XCTAssertTrue(
-            source.contains(
-                "runningGeneration: viewModel.tunnelHealth.isChainedUpstreamActive"),
-            "the live flag must gate the published rotation, as it gates the fallback panel")
-        XCTAssertTrue(
-            source.contains("? viewModel.tunnelHealth.runningChainedUpstreamGeneration : 0"),
-            "a session that is not live publishes no rotation to the policy")
+        let source = try readSource(.reactNativeAppSettings)
+        XCTAssertTrue(source.contains("ChainedUpstreamRotationFreshness.verdict("))
+        XCTAssertTrue(source.contains("rotation.deservesSurfacing && !applying ? rotation.detail.lavaLocalized"))
+        XCTAssertTrue(source.contains("runningGeneration: model.tunnelHealth.isChainedUpstreamActive ? model.tunnelHealth.runningChainedUpstreamGeneration : 0"))
     }
 
-    /// A KEY-READ FAILURE MUST NOT DISCARD A ROTATION THE STORE DID ANSWER.
-    ///
-    /// `chainedUpstreamSurfaceStatus` reads the configuration and then the private key inside one
-    /// `do`, so `storeUnavailableReason` means "some read failed" — NOT "the configuration is
-    /// unreadable". Guarding on it first (PR #613) turned a KNOWN mismatch into `.unreadable`,
-    /// which this policy renders as silence, discarding a "restart to use the new configuration"
-    /// that was correct and actionable (Codex P2, PR #614).
-    ///
-    /// Asserts the ORDER, in the direction opposite to the guard PR #613 argued for — and the
-    /// presence of both branches was already true while that guard was wrong, which is why an
-    /// existence check would not have caught it either way.
     func testAKnownRotationIsNotDiscardedByAKeyReadFailure() throws {
-        let source = try readSource(.vpnChainingSettingsView)
-        let mapping = try sourceBlock(
-            in: source,
-            startingAt: "private func storedRotationFreshness(",
-            endingBefore: "private var alternativeDNSFooter")
-        let presentRange = try XCTUnwrap(
-            mapping.range(of: "if let generation = status.storedConfigurationGeneration"),
-            "the value the store DID answer must be tested first")
-        let reasonRange = try XCTUnwrap(
-            mapping.range(of: "status.storeUnavailableReason == nil ? .absent : .unreadable"),
-            "the unavailability reason decides only between the two NILS")
-        XCTAssertTrue(
-            presentRange.upperBound <= reasonRange.lowerBound,
-            "a generation the store answered must win over a reason that may describe the KEY read")
+        let source = try readSource(.reactNativeAppSettings)
+        let present = try XCTUnwrap(source.range(of: "status.storedConfigurationGeneration.map"))
+        let absent = try XCTUnwrap(source.range(of: "status.storeUnavailableReason == nil ? .absent : .unreadable"))
+        XCTAssertLessThan(present.lowerBound, absent.lowerBound)
+        XCTAssertTrue(source.contains(".present(generation: $0)"))
     }
 
-
-    /// The page that reads the running rotation must ask for a fresh one.
-    ///
-    /// The provider republishes it on the mirror — start, stop, explicit flush, ~60 s focus tick
-    /// — but NOT when the driver retires or adopts a runner. Between a transition and the next
-    /// mirror the snapshot names the previous rotation, so a page that renders whatever was last
-    /// persisted can demand a restart for a rotation already adopted (Codex P2, PR #613).
-    ///
-    /// `sampleTunnelHealth` sends the flush the provider answers by re-running the mirror, which
-    /// is why pulling here beats pushing from the driver: publishing at adoption would mean an
-    /// engine-queue callback into `dnsStateQueue`, the direction `INV-QUEUE-1` warns about.
     func testThePanelSamplesHealthSoTheRotationIsFresh() throws {
-        let source = try readSource(.vpnChainingSettingsView)
-        XCTAssertTrue(
-            source.contains(".task { await viewModel.sampleTunnelHealth() }"),
-            "the rotation panel must request a fresh health sample, not render a stale snapshot")
+        let source = try readSource(.reactNativeAppBridge)
+        let refresh = try sourceBlock(in: source, startingAt: "refreshTask = Task", endingBefore: "    func")
+        XCTAssertTrue(refresh.contains("await model.sampleTunnelHealth()"))
+        XCTAssertTrue(refresh.contains("UIApplication.shared.applicationState == .active"))
     }
 
 }

@@ -1,5 +1,5 @@
 import {useRouteViewState} from '../app/use-route-view-state';
-import {Alert, localized} from '../app/presentation';
+import {Alert,isPresentationCancellation,localized} from '../app/presentation';
 import {useAppQuery} from '../app/queries';
 import {useEffect, useRef, useState} from 'react';
 import {AppState, View} from 'react-native';
@@ -9,13 +9,17 @@ import {LavaChoice} from '../src';
 import {colors} from '../src/colors.ios';
 import {foundation} from '../src/foundation';
 import {Copy, Row, Screen} from './primitives';
-import {QuietFooter} from './scaffold';
+import {QuietFooter,toolbarAction,useToolbar} from './scaffold';
 import {useReview} from './ReviewContext';
 import {activityEmpty, activityExample} from './activity-model';
 import {useReviewNavigation} from './navigation';
 import {StorySurface} from './story-scaffold';
 import {ActivityCharts} from './activity-scaffold';
-import {SettingsSurface} from './settings-scaffold';
+import {SettingsMessage,SettingsSurface} from './settings-scaffold';
+import {useLocalLogActions} from './local-log-actions';
+import {ActivityShareCard,type ActivityChartKind} from './ActivityShareCard';
+import {useActivityShare} from './activity-share-actions';
+import {mayInteractWithPresentation} from '../app/read-cache';
 
 function calendarDayKey(){
   const now=new Date();
@@ -27,6 +31,8 @@ function calendarDayKey(){
 export function ActivityScreen() {
   const nav = useReviewNavigation();
   const {app,live,activityExample: showExample} = useReview();
+  const logs=useLocalLogActions();const logActions=useRef(logs);logActions.current=logs;
+  const exportAction=useRef(()=>{});
   const [dates, setDates] = useRouteViewState<ActivityDates | null>(live?.activityDates ?? null);
   const [period,setPeriod]=useRouteViewState<'today'|'week'|'month'|'custom'>('today');
   const dateRequest=useRef(0);
@@ -119,6 +125,25 @@ export function ActivityScreen() {
   });
   const summary = app ? query.value ?? activityEmpty : showExample && period==='today' && dates?.includesToday ? activityExample : activityEmpty;
   const loaded = !app || query.value !== undefined;
+  const [chart,setChart]=useState<ActivityChartKind>('total');
+  const share=useActivityShare({dates,chart,period,loaded});
+  const shareAction=useRef(share);shareAction.current=share;
+  const choosingExport=useRef(false);
+  exportAction.current=()=>{
+    if(choosingExport.current||logs.exportBusy||share.busy||!focused||!foreground||!mayInteractWithPresentation(app))return;
+    const readEpoch=app?.getReadEpoch?.();choosingExport.current=true;
+    void NativeReview.chooseActivityExport(!!app&&loaded&&!!dates).then(choice=>{
+      if(!mounted.current||!canPresentCustom.current||!mayInteractWithPresentation(app)||app?.getReadEpoch?.()!==readEpoch)return;
+      if(choice==='chart')shareAction.current.exportChart();
+      else if(choice==='diagnostics')logActions.current.exportLogs();
+      else if(choice==='logs')logActions.current.exportAllLogs();
+    }).catch(error=>{if(!isPresentationCancellation(error.message))Alert.alert('Lava',error.message);})
+      .finally(()=>{choosingExport.current=false;});
+  };
+  useToolbar({unstable_headerRightItems:()=>[
+    toolbarAction('Export','share',()=>exportAction.current(),logs.exportBusy||share.busy,'activity.export-logs'),
+    toolbarAction('Clear all logs','delete',()=>logActions.current.clearAllLogs(),logs.clearBusy,'activity.clear-logs'),
+  ]},[logs.exportBusy,share.busy,logs.clearBusy]);
   const total = summary.allowed + summary.blocked;
   const qualifies=total>5000&&summary.blocked/total>0.1;
   useEffect(()=>{
@@ -128,10 +153,13 @@ export function ActivityScreen() {
     return()=>{void app.command({type:'activity.visibility',token,visible:false}).catch(()=>{});};
   },[app,dates?.start,dates?.end,focused,foreground,pickerVisible,qualifies]);
   return <Screen onRefresh={app?()=>query.refresh():undefined}>
+    {share.content&&focused&&foreground&&<ActivityShareCard content={share.content} onReady={share.ready}/>}
+    {!!share.error&&<SettingsMessage warning>{share.error}</SettingsMessage>}
+    {!!logs.exportError&&<SettingsMessage warning>{logs.exportError}</SettingsMessage>}
     <LavaChoice testID="activity.period" reselectValue="custom" label={localized('Activity')} options={[{value:'today',label:localized('Today')},{value:'week',label:localized('7 days')},{value:'month',label:localized('Month')},{value:'custom',label:localized('Custom')}]} value={pickerVisible?'custom':period} disabled={pickerVisible} onValueChange={value=>value==='custom'?pickCustom():choosePeriod(value)}/>
     {period==='custom'&&dates&&<Copy testID="activity.custom-range" role="supporting" color={colors.secondaryText} verbatim>{dates.label}</Copy>}
     <StorySurface tone="green" testID="activity.digest"><ActivityCharts buckets={summary.buckets??[]} rangeKey={`${period}:${dates?.start}:${dates?.end}`}
-      allowed={summary.allowed} blocked={summary.blocked} loaded={loaded} pending={!loaded&&!query.error} uptime={summary.uptime}/></StorySurface>
+      allowed={summary.allowed} blocked={summary.blocked} loaded={loaded} pending={!loaded&&!query.error} uptime={summary.uptime} chart={chart} onChartChange={setChart}/></StorySurface>
     {query.error&&<Copy role="supporting" color={colors.secondaryText}>{query.error}</Copy>}
     <SettingsSurface testID="activity.domain-logs">
       <Row intent="page" icon={foundation.symbol.ranking} testID="row.Top domains" title="Top Domains" onPress={() => nav.navigate('TopDomains', dates ? {start:dates.start,end:dates.end} : undefined)} />

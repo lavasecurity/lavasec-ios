@@ -1,8 +1,13 @@
 # Mobile UI ownership and parity baseline
 
-The mobile UI plan first separates native application ownership, then recreates
-the iOS presentation in React Native for review. The production SwiftUI route and
-native background/extension entry points remain available throughout this work.
+This document records the native ownership extraction and React Native parity
+baseline. The current app uses the RN foreground workspace; the standalone
+SwiftUI reference remains in `native-ui-reference-2026-09-08`. Native background
+and extension entry points remain part of the current app.
+
+For current foreground scaffolds and native adapter ownership, use
+[RN application and retained native components](rn-only-app.md). The cuts and
+reference inventory below describe the migration baseline.
 
 Plan: [native scaffolding and React Native iOS parity](https://github.com/lavasecurity/lavasec-infra/blob/main/plans/2026-09-07-mobile-ui-portability-and-app-view-model-separation-plan.md).
 
@@ -93,9 +98,10 @@ of milestones 1 or 2.
 
 ## Reference route/state inventory
 
-This inventory identifies the source of each reference; it does not claim that
-device captures or React Native equivalents have been completed. Capture status
-for every row is pending. Add fixture/build/device identifiers with the captures.
+This historical inventory identifies the original reference sources; retired
+SwiftUI filenames refer to `native-ui-reference-2026-09-08`, not current app
+target membership. It does not establish current device qualification. Current
+foreground ownership is documented in [rn-only-app.md](rn-only-app.md).
 
 | Journey | SwiftUI reference | Required states/interactions |
 |---|---|---|
@@ -112,7 +118,7 @@ for every row is pending. Add fixture/build/device identifiers with the captures
 | Account/backup | `AccountBackupSettingsView.swift`, `BackupSetupView.swift`, `BackupRestoreView.swift` | Signed out/in, setup, recovery/passkey, progress, failures, destructive review |
 | Upgrade | `UpgradeSettingsView.swift` | Products, unavailable/pending/purchase/restore/entitlement outcomes |
 | Diagnostics/feedback/legal | `BugReportSettingsView.swift`, `LegalVersionSettingsView.swift`, diagnostic detail views | Preparation, opt-ins, export/send/error, version/notices |
-| Secondary experiences | `SudokuEasterEggView.swift`, developer/QA views where supported | Entry/exit, input, persistence, accessibility, release visibility |
+| Secondary experiences | Current `ReactNative/review/SudokuScreen.tsx` and `sudoku-scaffold.tsx`; developer/QA views where supported | Entry/exit, input, persistence, accessibility, release visibility |
 
 Each journey needs the same device, OS, build SDK, language, text size, appearance,
 content fixture, and relevant clock state in both implementations. Screenshots

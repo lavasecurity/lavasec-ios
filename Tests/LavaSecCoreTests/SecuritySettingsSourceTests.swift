@@ -18,15 +18,12 @@ final class SecuritySettingsSourceTests: XCTestCase {
     }
 
     func testNestedSettingsNavigationKeepsTheGrantWithoutRestoringExpiredAuthentication() throws {
-        let destination = try readSource(.settingsView)
-        XCTAssertTrue(destination.contains("struct NativeDNSSettingsDestinationView: View"))
-        XCTAssertTrue(destination.contains("security.resetViewAuthenticationTurn()"))
-        XCTAssertFalse(destination.contains("markAuthenticated"))
-        let chaining = try readSource(.vpnChainingSettingsView)
-        XCTAssertTrue(chaining.contains(".navigationDestination(isPresented: $showDNSSettings)"))
-        XCTAssertTrue(chaining.contains("NativeDNSSettingsDestinationView()"))
-        let entry = try sourceBlock(in: chaining, startingAt: "private func openDNSSettings()", endingBefore: "private func requestSaveDraftConfiguration()")
-        XCTAssertTrue(entry.contains("guard await security.requireAuthentication(for: .appSettings"))
+        let source = try readSource(.reactNativeVPNChainingScreen)
+        XCTAssertTrue(source.contains("useVPNPageAdmission()"))
+        XCTAssertTrue(source.contains("nav.navigate('DNS')"))
+        XCTAssertFalse(source.contains("markAuthenticated"))
+        let native = try readSource(.reactNativeAppSettings)
+        XCTAssertTrue(native.contains("try await authorize(.appSettings, \"Open VPN chaining settings\")"))
         let background = try sourceBlock(in: readSource(.securityController), startingAt: "func lockForBackgroundIfNeeded()", endingBefore: "func showAppUnlockPrivacyMaskIfNeeded()")
         XCTAssertTrue(background.contains("lockSession.suspend()"))
     }
@@ -210,38 +207,24 @@ final class SecuritySettingsSourceTests: XCTestCase {
 
     func testPasscodeScreensFillFullScreenAndUseNativeNumberPadFirstResponder() throws {
         let securityController = try readSource(.securityController)
-        let settings = try readSource(.privacySecuritySettingsView)
-        let authenticationBlock = try sourceBlock(
-            in: securityController,
-            startingAt: "struct SecurityPasscodeAuthenticationView: View",
-            endingBefore: "struct SecurityPasscodeDigitsView"
-        )
-        let hiddenFieldBlock = try sourceBlock(
-            in: securityController,
-            startingAt: "struct SecurityHiddenPasscodeField"
-        )
-        let setupPhaseBlock = try sourceBlock(
-            in: settings,
-            startingAt: "private enum SecurityPasscodeSetupPhase",
-            endingBefore: "struct SecurityPasscodeSetupView"
-        )
-        let setupBlock = try sourceBlock(
-            in: settings,
-            startingAt: "struct SecurityPasscodeSetupView: View",
-            endingBefore: "enum LocalLogSetting"
-        )
-
-        XCTAssertTrue(authenticationBlock.contains(".frame(maxWidth: .infinity, maxHeight: .infinity)"))
-        XCTAssertTrue(authenticationBlock.contains(".background(LavaStyle.groupedBackground.ignoresSafeArea())"))
-        XCTAssertTrue(authenticationBlock.contains(".frame(width: 1, height: 1)"))
-        XCTAssertTrue(setupBlock.contains(".frame(maxWidth: .infinity, maxHeight: .infinity)"))
-        XCTAssertTrue(setupBlock.contains(".background(LavaStyle.groupedBackground.ignoresSafeArea())"))
-        XCTAssertTrue(setupBlock.contains(".frame(width: 1, height: 1)"))
-        XCTAssertTrue(setupPhaseBlock.contains("\"Enter a 4-digit code for Lava\""))
-        XCTAssertTrue(setupPhaseBlock.contains("\"Enter it again to confirm\""))
-        XCTAssertFalse(setupPhaseBlock.contains("\"Enter a 4-digit code for Lava.\""))
-        XCTAssertFalse(setupPhaseBlock.contains("\"Enter it again to confirm.\""))
-
+        let native = try readSource(.reactNativeAppPasscode)
+        let presentation = try readSource(.reactNativePasscodeFlow)
+        let hiddenFieldBlock = try sourceBlock(in: securityController, startingAt: "struct SecurityHiddenPasscodeField")
+        XCTAssertFalse(securityController.contains("struct SecurityPasscodeAuthenticationView"))
+        XCTAssertFalse(try readSource(.privacySecuritySettingsView).contains("struct SecurityPasscodeSetupView"))
+        XCTAssertTrue(native.contains("SecurityHiddenPasscodeField(code: Binding"))
+        XCTAssertTrue(native.contains("security.completePasscodeAuthentication(requestID: id, code: code)"))
+        XCTAssertTrue(native.contains("try security.setPasscode(code)"))
+        XCTAssertTrue(presentation.contains("style={{flex:1,padding:24,"))
+        XCTAssertTrue(presentation.contains("gap:28,alignItems:'center'"))
+        // Native navigation/containment supplies residual safe areas. The RN
+        // screen adds them to its existing padding without shrinking its fill.
+        for edge in ["top", "right", "bottom", "left"] {
+            let property = "padding" + edge.prefix(1).uppercased() + edge.dropFirst()
+            XCTAssertTrue(presentation.contains("\(property):24+(contentInsets?.\(edge)??0)"))
+        }
+        XCTAssertTrue(native.contains("Enter a 4-digit code for Lava"))
+        XCTAssertTrue(native.contains("Enter it again to confirm"))
         XCTAssertTrue(hiddenFieldBlock.contains("UIViewRepresentable"))
         XCTAssertTrue(hiddenFieldBlock.contains("UITextField"))
         XCTAssertTrue(hiddenFieldBlock.contains("SecurityPasscodeTextField"))
@@ -257,8 +240,7 @@ final class SecuritySettingsSourceTests: XCTestCase {
         let settings = try readSource(.settingsView)
         let routeBlock = try sourceBlock(
             in: settings,
-            startingAt: "enum SettingsRoute: Hashable",
-            endingBefore: "struct NativeDNSSettingsDestinationView: View"
+            startingAt: "enum SettingsRoute: Hashable"
         )
 
         XCTAssertTrue(routeBlock.contains("var securityPolicy: SecurityAccessPolicy"))
@@ -283,7 +265,7 @@ final class SecuritySettingsSourceTests: XCTestCase {
         XCTAssertTrue(root.contains("SettingsRoute.settingsTabPolicy"))
         XCTAssertTrue(guardSource.contains(".protectionControl"))
         XCTAssertTrue(root.contains("security.resetForegroundSession()"))
-        XCTAssertTrue((try readSource(.reactNativeAppHost)).contains("SecurityPasscodeAuthenticationView"))
+        XCTAssertTrue((try readSource(.reactNativeAppHost)).contains("LavaAppSecurityContent(id: request.id.uuidString)"))
         XCTAssertFalse(root.contains("SecurityLockOverlay"), "Only the scene security window may present Unlock")
         XCTAssertTrue((try readSource(.reactNativeAppHost)).contains("SecurityLockOverlay"))
     }

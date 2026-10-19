@@ -219,6 +219,7 @@ const approvedBuildSettingKeys = new Map([
       "ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES",
       "ASSETCATALOG_COMPILER_APPICON_NAME",
       "ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS",
+      "ASSETCATALOG_COMPILER_OPTIMIZATION",
       "CODE_SIGN_ENTITLEMENTS",
       "GENERATE_INFOPLIST_FILE",
       "INFOPLIST_FILE",
@@ -300,6 +301,12 @@ const approvedBuildSettingKeys = new Map([
 ]);
 const requiredBuildSettingValues = new Map([
   ["LavaSecTunnel", new Map([["OTHER_LDFLAGS", "$(inherited) -lresolv"]])],
+]);
+// Only distribution app catalogs use the measured space optimization. Debug
+// retains Xcode's default; no project-wide or extension override is approved.
+const appAssetCatalogOptimization = new Map([
+  ["QA", "space"],
+  ["Release", "space"],
 ]);
 const projectBaseConfigurationPaths = new Map([
   ["Debug", "Config/Lava.xcconfig"],
@@ -809,6 +816,13 @@ function validateConfigurationList(
       }
       for (const [key, value] of requiredBuildSettingValues.get(context) ?? []) {
         if (canonicalJSON(configuration.buildSettings[key]) !== canonicalJSON(value)) {
+          errors.push(`${context} ${configuration.name} build setting ${key} differs from policy`);
+        }
+      }
+      if (context === "LavaSec") {
+        const key = "ASSETCATALOG_COMPILER_OPTIMIZATION";
+        if (Object.hasOwn(configuration.buildSettings, key) !== appAssetCatalogOptimization.has(configuration.name)
+            || configuration.buildSettings[key] !== appAssetCatalogOptimization.get(configuration.name)) {
           errors.push(`${context} ${configuration.name} build setting ${key} differs from policy`);
         }
       }

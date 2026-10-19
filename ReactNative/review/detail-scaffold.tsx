@@ -9,13 +9,14 @@ import {foundation} from '../src/foundation';
 import {Copy,Symbol} from './primitives';
 import {AdaptivePair, Info, InputRow, Panel} from './scaffold';
 
-// Counts retain their units. Equal-sized legend marks identify categories;
-// proportions are used only when both values measure the same thing.
-export function CountLegend({label,count,tone,detail,value,dimmed=false}:{label:string;count?:number;tone:'allowed'|'blocked'|'personal';detail?:string;value?:string;dimmed?:boolean}) {
+// Category marks default to the scaffold's neutral glyph tone. Charts and the
+// filter overview opt into semantic colors for blocked and allowed outcomes.
+// Counts retain their units; proportions require values with matching units.
+export function CountLegend({label,count,tone,detail,value,dimmed=false,semantic=false}:{label:string;count?:number;tone:'allowed'|'blocked'|'personal';detail?:string;value?:string;dimmed?:boolean;semantic?:boolean}) {
   const empty=count===0||count===undefined;
   const displayed=`${value??(count===undefined?'—':localizedNumber(count))}${detail?` · ${detail}`:''}`;
   return <View testID={`legend.${tone}`} accessible accessibilityLabel={`${localized(label)}, ${displayed}`} style={{flexDirection:'row',alignItems:'center',gap:foundation.space.sm,opacity:dimmed?0.35:1}}>
-    <View accessible={false} style={{opacity:empty?0.4:1}}><Symbol name={tone==='allowed'?foundation.outcome.allowed:foundation.outcome.blocked} size={20} tone={empty?'secondary':tone==='allowed'?'green':'accentOrange'}/></View>
+    <View accessible={false} style={{opacity:empty?0.4:1}}><Symbol name={tone==='allowed'?foundation.outcome.allowed:foundation.outcome.blocked} size={20} tone={empty?'secondary':!semantic?'primary':tone==='allowed'?'green':'accentOrange'}/></View>
     <View style={{flex:1}}><Copy role="supporting" color={colors.secondaryText}>{label}</Copy></View>
     <View style={{flex:1,alignItems:'flex-end'}}><Copy role="supporting" verbatim>{displayed}</Copy></View>
   </View>;

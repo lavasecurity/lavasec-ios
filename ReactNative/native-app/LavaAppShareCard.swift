@@ -1,6 +1,7 @@
 import Foundation
 import UIKit
 import LavaSecKit
+import LavaSecAppServices
 #if DEBUG && targetEnvironment(simulator)
 import CryptoKit
 #endif
@@ -123,6 +124,90 @@ final class LavaShareCardUITestEvidence {
 #endif
 
 extension LavaAppBridge {
+    /// Native owns the immutable aggregate snapshot; JavaScript supplies no counts or image URI.
+    struct ActivityShareGrant {
+        let token: String
+        let payload: String
+        let scope: PresentationCacheScope
+        let securityRevision: UInt64
+        let foregroundEpoch: UInt64
+        let moduleEpoch: UInt64
+        let clearGeneration: UInt64
+    }
+
+    private func admitsActivityShare(_ grant: ActivityShareGrant) -> Bool {
+        let scope = presentationScope("activity.query", [:])
+        return activityShareGrant?.token == grant.token
+            && canReadPresentation(.activityViewing) && canReadPresentation(.appUnlock)
+            && !security.isAuthenticationUnavailable && !security.isAppUnlockBlockingUI
+            && !security.isAppUnlockPrivacyMaskVisible && security.passcodeAuthenticationRequest == nil
+            && scope.owner == grant.scope.owner && scope.logPolicy == grant.scope.logPolicy
+            && security.viewAuthenticationRevision == grant.securityRevision
+            && shareCardForegroundEpoch == grant.foregroundEpoch && shareCardModuleEpoch == grant.moduleEpoch
+            && presentationDisplayClearGeneration == grant.clearGeneration
+    }
+
+    func activityShareQuery(_ input: [String: Any]) throws -> [String: Any] {
+        guard let startValue = input["start"] as? Double, startValue.isFinite,
+              let endValue = input["end"] as? Double, endValue.isFinite,
+              let chart = input["chart"] as? String, ["total", "counts", "rate"].contains(chart),
+              let period = input["period"] as? String, ["today", "week", "month", "custom"].contains(period) else {
+            throw CommandError("Choose a valid date range.")
+        }
+        let start = Date(timeIntervalSince1970: startValue / 1000), end = Date(timeIntervalSince1970: endValue / 1000)
+        guard end >= start, (Calendar.current.dateComponents([.day], from: start, to: end).day ?? Int.max) <= 731 else {
+            throw CommandError("Choose a shorter date range.")
+        }
+        let payload = "https://apps.apple.com/app/lava-security/id6778022110"
+        guard let matrix = LavaShareQrMatrix.encode(payload) else { throw CommandError("Please wait a moment and try again.") }
+        let summary = model.reports.diagnostics.rangeSummary(from: start, to: end)
+        let hourly = input["hourly"] as? Bool == true && Calendar.current.isDate(start, inSameDayAs: end)
+        let locale = Locale(identifier: Bundle.main.preferredLocalizations.first ?? "en")
+        let buckets = model.reports.diagnostics.activityBuckets(from: start, to: end, hourly: hourly).map { bucket -> [String: Any] in
+            ["start": bucket.start.timeIntervalSince1970 * 1000,
+             "label": hourly ? bucket.start.formatted(.dateTime.hour().minute().locale(locale)) : bucket.start.formatted(.dateTime.month(.abbreviated).day().locale(locale)),
+             "allowed": bucket.allowed, "blocked": bucket.blocked, "available": bucket.available, "partial": bucket.partial]
+        }
+        let startLabel = start.formatted(.dateTime.year().month(.wide).day().locale(locale))
+        let endLabel = end.formatted(.dateTime.year().month(.wide).day().locale(locale))
+        let grant = ActivityShareGrant(token: UUID().uuidString, payload: payload,
+            scope: presentationScope("activity.query", [:]), securityRevision: security.viewAuthenticationRevision,
+            foregroundEpoch: shareCardForegroundEpoch, moduleEpoch: shareCardModuleEpoch,
+            clearGeneration: presentationDisplayClearGeneration)
+        shareCardAuthority.retire()
+        activityShareGrant = grant
+        guard admitsActivityShare(grant) else { activityShareGrant = nil; throw CommandError("Read access changed.") }
+        LavaShareCardSurfaceRegistry.shared.reauthorize = { [weak self] token in
+            guard let self, let current = self.activityShareGrant, current.token == token,
+                  self.admitsActivityShare(current) else { return nil }
+            return current.payload
+        }
+        LavaShareCardSurfaceRegistry.shared.authorize(token: grant.token, payload: payload)
+        return ["token": grant.token, "payload": payload, "moduleCount": matrix.moduleCount,
+                "chart": chart, "period": period, "startLabel": startLabel, "endLabel": endLabel,
+                "dateLabel": startLabel == endLabel ? startLabel : startLabel + " – " + endLabel,
+                "allowed": summary.allowedCount, "blocked": summary.blockedCount,
+                "uptime": summary.compactLocalProtectionUptimeText, "buckets": buckets]
+    }
+
+    func shareActivityCard(_ input: [String: Any]) throws {
+        guard let grant = activityShareGrant, input["token"] as? String == grant.token,
+              admitsActivityShare(grant) else { throw CommandError("Read access changed.") }
+        let image: UIImage
+        do {
+            image = try LavaShareCardSurfaceRegistry.shared.capture(token: grant.token, payload: grant.payload,
+                isCurrent: { self.admitsActivityShare(grant) })
+        } catch { throw CommandError("Please wait a moment and try again.") }
+        guard admitsActivityShare(grant) else { throw CommandError("Read access changed.") }
+        #if DEBUG && targetEnvironment(simulator)
+        ShareSheetPresenter.present(image: image, title: "My activity".lavaLocalized,
+            onComplete: LavaShareCardUITestEvidence.shared.completion(for: image,
+                isCurrent: { self.admitsActivityShare(grant) }))
+        #else
+        ShareSheetPresenter.present(image: image, title: "My activity".lavaLocalized)
+        #endif
+    }
+
     func shareCardContentChanged(_ library: FilterLibrary) {
         guard let grant = shareCardAuthority.grant else { return }
         guard let filter = library.filter(id: grant.basis.filterID),
@@ -133,12 +218,17 @@ extension LavaAppBridge {
         }
     }
     func shareCardSecurityChanged(revision: UInt64) {
+        if let grant = activityShareGrant, grant.securityRevision != revision {
+            activityShareGrant = nil
+            LavaShareCardSurfaceRegistry.shared.retire()
+        }
         guard let grant = shareCardAuthority.grant, grant.basis.securityRevision != revision else { return }
         shareCardAuthority.retire()
         LavaShareCardSurfaceRegistry.shared.retire()
     }
     func shareCardPrivacyChanged(isBlocked: Bool) {
         guard isBlocked else { return }
+        activityShareGrant = nil
         shareCardAuthority.retire()
         LavaShareCardSurfaceRegistry.shared.retire()
     }
@@ -176,6 +266,7 @@ extension LavaAppBridge {
             .map { "data:image/png;base64," + $0.base64EncodedString() }
         var card: Any = NSNull()
         if let matrix = LavaShareQrMatrix.encode(basis.payload) {
+            activityShareGrant = nil
             let grant = shareCardAuthority.issue(basis)
             // A transient screen unmount withdraws the registry entry, but it must
             // not kill the grant: the JS can remount the same token, and the next
@@ -225,11 +316,13 @@ extension LavaAppBridge {
         #endif
     }
     @objc func retireShareCards() {
+        activityShareGrant = nil
         shareCardModuleEpoch &+= 1
         shareCardAuthority.retire()
         LavaShareCardSurfaceRegistry.shared.retire()
     }
     @objc func shareCardForegroundEnded() {
+        activityShareGrant = nil
         shareCardForegroundEpoch &+= 1
         shareCardAuthority.retire()
         LavaShareCardSurfaceRegistry.shared.retire()

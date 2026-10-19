@@ -9,6 +9,7 @@ compositions.add('guard-material.tsx');
 // Shared iOS/Android recipient-image composition. Its fixed export pixel geometry
 // is independent of interactive screen/control typography and sender text scale.
 compositions.add('FilterShareCard.tsx');
+compositions.add('ActivityShareCard.tsx');
 // One opaque lifecycle composition serves the root and separate UIKit routes.
 compositions.add('PresentationCover.tsx');
 // Shared native-hosted form fields, keyboard/action insets and confidential-input layout.

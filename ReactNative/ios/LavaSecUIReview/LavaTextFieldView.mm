@@ -133,7 +133,7 @@ static BOOL mayEditWireGuardName(const LavaTextFieldProps &props) {
   _field.accessibilityLabel = [NSString stringWithUTF8String:next.inputLabel.c_str()];
   _multiline.accessibilityLabel = _field.accessibilityLabel;
   _field.placeholder = [NSString stringWithUTF8String:next.placeholder.c_str()];
-  const BOOL ordinary = next.kind == "plain" || next.kind == "prose" || next.kind == "search" || next.kind == "wireGuardName";
+  const BOOL ordinary = next.kind == "plain" || next.kind == "prose" || next.kind == "search" || next.kind == "localLogSearch" || next.kind == "wireGuardName";
   const BOOL ordinaryReseed = ordinary && (!_ordinarySeeded || next.ownerID != previous.ownerID || next.resetRevision != previous.resetRevision);
   if (ordinaryReseed) {
     NSString *value = [NSString stringWithUTF8String:next.value.c_str()];
@@ -150,6 +150,7 @@ static BOOL mayEditWireGuardName(const LavaTextFieldProps &props) {
   if (!next.editable || !nameEditable) { [_field resignFirstResponder]; [_multiline resignFirstResponder]; }
   _field.keyboardType = next.keyboardType == "email-address" ? UIKeyboardTypeEmailAddress
     : next.keyboardType == "url" || (!ordinary && next.keyboardType.empty()) ? UIKeyboardTypeURL : UIKeyboardTypeDefault;
+  _field.returnKeyType = next.kind == "localLogSearch" ? UIReturnKeySearch : UIReturnKeyDone;
   _field.textContentType = next.textContentType == "URL" ? UITextContentTypeURL : nil;
   _multiline.textContentType = _field.textContentType;
   _field.autocapitalizationType = next.autoCapitalize == "words" ? UITextAutocapitalizationTypeWords
@@ -360,7 +361,7 @@ static BOOL mayEditWireGuardName(const LavaTextFieldProps &props) {
 }
 - (void)textFieldDidEndEditing:(UITextField *)field {
   const auto &props = *std::static_pointer_cast<const LavaTextFieldProps>(_props);
-  if (props.kind == "plain" || props.kind == "search" || props.kind == "wireGuardName") { [field unmarkText]; [self textChanged]; }
+  if (props.kind == "plain" || props.kind == "search" || props.kind == "localLogSearch" || props.kind == "wireGuardName") { [field unmarkText]; [self textChanged]; }
   [self reportFocus:NO];
 }
 - (void)textViewDidBeginEditing:(UITextView *)textView { [self reportFocus:YES]; }

@@ -155,7 +155,9 @@ function makeBoundaryFixture() {
         name,
         buildSettings: prefix === "LavaSecTunnel"
           ? { OTHER_LDFLAGS: "$(inherited) -lresolv" }
-          : {},
+          : prefix === "LavaSec" && name !== "Debug"
+            ? { ASSETCATALOG_COMPILER_OPTIMIZATION: "space" }
+            : {},
         ...(prefix === "PROJECT"
           ? {
             baseConfigurationReference: name === "QA"
@@ -500,6 +502,47 @@ test("rejects executable tool overrides in build configurations", () => {
   assert.throws(
     () => validateGeneratedProject(fixture.project, fixture.expected),
     /LavaSec Debug build settings contain unapproved keys: SWIFT_EXEC/,
+  );
+});
+
+test("allows app catalog space optimization only in QA and Release", () => {
+  const fixture = makeBoundaryFixture();
+  assert.doesNotThrow(() => validateGeneratedProject(fixture.project, fixture.expected));
+  for (const name of ["QA", "Release"]) {
+    for (const value of [undefined, "time", "$(inherited)", ["space"], null]) {
+      const changed = makeBoundaryFixture();
+      const settings = changed.project.objects[`CONFIG_LavaSec_${name}`].buildSettings;
+      if (value === undefined) delete settings.ASSETCATALOG_COMPILER_OPTIMIZATION;
+      else settings.ASSETCATALOG_COMPILER_OPTIMIZATION = value;
+      assert.throws(
+        () => validateGeneratedProject(changed.project, changed.expected),
+        new RegExp(`LavaSec ${name} build setting ASSETCATALOG_COMPILER_OPTIMIZATION differs from policy`),
+        `${name}: ${JSON.stringify(value)}`,
+      );
+    }
+  }
+  fixture.project.objects.CONFIG_LavaSec_Debug.buildSettings.ASSETCATALOG_COMPILER_OPTIMIZATION = "space";
+  assert.throws(
+    () => validateGeneratedProject(fixture.project, fixture.expected),
+    /LavaSec Debug build setting ASSETCATALOG_COMPILER_OPTIMIZATION differs from policy/,
+  );
+});
+
+test("rejects asset catalog optimization outside the approved app setting", () => {
+  for (const prefix of ["PROJECT", "LavaSecTunnel", "LavaSecWidget", "LavaSecIntents", "LavaSecUITests"]) {
+    const fixture = makeBoundaryFixture();
+    fixture.project.objects[`CONFIG_${prefix}_Release`].buildSettings.ASSETCATALOG_COMPILER_OPTIMIZATION = "space";
+    assert.throws(
+      () => validateGeneratedProject(fixture.project, fixture.expected),
+      /build settings contain unapproved keys: ASSETCATALOG_COMPILER_OPTIMIZATION/,
+      prefix,
+    );
+  }
+  const conditional = makeBoundaryFixture();
+  conditional.project.objects.CONFIG_LavaSec_Release.buildSettings["ASSETCATALOG_COMPILER_OPTIMIZATION[sdk=iphoneos*]"] = "time";
+  assert.throws(
+    () => validateGeneratedProject(conditional.project, conditional.expected),
+    /build settings contain unapproved keys: ASSETCATALOG_COMPILER_OPTIMIZATION\[sdk=iphoneos\*\]/,
   );
 });
 

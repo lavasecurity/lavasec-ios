@@ -19,18 +19,6 @@ final class AccessibilityReducedMotionSourceTests: XCTestCase {
         )
     }
 
-    func testOnboardingTechnicalChoicesUpdateWithoutLayoutAnimation() throws {
-        let source = try readSource(.onboardingFlowView)
-        let panel = try sourceBlock(in: source, startingAt: "private struct OnboardingProtectionLevelPanel", endingBefore: "private struct OnboardingFeatureRow")
-        XCTAssertTrue(panel.contains("OnboardingSelectionLabel("))
-        XCTAssertTrue(panel.contains("connectionChoice(\"Keep connections working\""))
-        XCTAssertFalse(panel.contains(".animation("))
-        XCTAssertFalse(panel.contains("withAnimation("))
-        XCTAssertFalse(panel.contains("providerRow"))
-        XCTAssertFalse(panel.contains("if useEncryptedFallback"), "Switching the toggle must not insert a provider table or move the page.")
-        XCTAssertTrue(source.contains("reduceMotion ? .easeInOut(duration: 0.2) : LavaFlowTransition.animation(reduceMotion: false)"))
-    }
-
     func testSharedButtonPressScaleIsGated() throws {
         let components = try readSource(.lavaComponents)
         let scaffold = try readSource(.lavaScaffold)

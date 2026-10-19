@@ -16,6 +16,10 @@ import LavaSecAppServices
 extension AppViewModel {
     // MARK: - Filter draft preparation & apply
 
+    func isCurrentPreparationReplacement(_ epoch: Int) -> Bool {
+        configurationReplacementGate.isCurrent(epoch)
+    }
+
     func prepareAndApplyFilterDraft(origin: FilterReviewOrigin = .filters) async {
         // Record which surface is applying so the matching cover (and only it) presents the
         // preparation / failure UI — set at the apply point, not at staging, so it can't go stale.
@@ -36,6 +40,10 @@ extension AppViewModel {
         guard filterDraftHasChanges else {
             return
         }
+
+        filterDrafts.beginPreparationPresentation()
+        filterDrafts.preparationReplacementEpoch = configurationReplacementGate.epoch
+        let preparationAttemptID = filterDrafts.preparationPresentation.id
 
         if let validationMessage = filterDraftValidationMessage {
             filterPreparationState = .failed(message: validationMessage)
@@ -83,12 +91,15 @@ extension AppViewModel {
         // a no-op apply can't needlessly bump the epoch and supersede a legitimate in-flight replacer.
         // A draft apply drives the preparation cover, like a switch.
         let draftToken = configurationReplacementGate.begin(ownsPreparationCover: true)
+        filterDrafts.preparationReplacementEpoch = draftToken
         isFilterPreparationScreenPresented = true
 
         do {
             let progressPresenter = FilterPreparationProgressPresenter()
             let prepared = try await prepareFilterSnapshot(for: nextConfiguration) { update in
                 await progressPresenter.present(update) { state in
+                    guard self.configurationReplacementGate.isCurrent(draftToken),
+                          self.filterDrafts.preparationPresentation.id == preparationAttemptID else { return }
                     self.filterPreparationState = state
                 }
             }
@@ -96,13 +107,16 @@ extension AppViewModel {
             await progressPresenter.present(
                 FilterPreparationProgressUpdate(progress: 0.86, phase: .saving)
             ) { state in
+                guard self.configurationReplacementGate.isCurrent(draftToken),
+                      self.filterDrafts.preparationPresentation.id == preparationAttemptID else { return }
                 self.filterPreparationState = state
             }
             await progressPresenter.holdCurrentPhaseIfNeeded()
 
             // A newer replacement took ownership while we prepared — bail without committing;
             // dismiss our cover if the new owner is a non-cover-driver that won't.
-            guard configurationReplacementGate.isCurrent(draftToken) else {
+            guard configurationReplacementGate.isCurrent(draftToken),
+                  filterDrafts.preparationPresentation.id == preparationAttemptID else {
                 dismissPreparationCoverIfStrandedBySupersession()
                 return
             }
@@ -112,7 +126,8 @@ extension AppViewModel {
             // Re-check after the persist's artifact-actor await before the derived-cache tail (see
             // switchToFilter): applyCatalogSyncResult is deferred past the persist + this gate so a
             // superseded apply never desyncs the rule caches against the newer owner's config.
-            guard configurationReplacementGate.isCurrent(draftToken) else {
+            guard configurationReplacementGate.isCurrent(draftToken),
+                  filterDrafts.preparationPresentation.id == preparationAttemptID else {
                 dismissPreparationCoverIfStrandedBySupersession()
                 return
             }
@@ -129,7 +144,8 @@ extension AppViewModel {
             // last ownership check, so recheck BEFORE writing the saving-top frame to the shared cover:
             // a superseded task must not paint a stale 3/4 "Saving" frame over the newer owner's cover
             // (nor keep a stale cover up through the following 500ms render yield). (Codex #284 P2)
-            guard configurationReplacementGate.isCurrent(draftToken) else {
+            guard configurationReplacementGate.isCurrent(draftToken),
+                  filterDrafts.preparationPresentation.id == preparationAttemptID else {
                 dismissPreparationCoverIfStrandedBySupersession()
                 return
             }
@@ -139,18 +155,18 @@ extension AppViewModel {
             await progressPresenter.present(
                 FilterPreparationProgressUpdate(progress: 1.0, phase: .saving)
             ) { state in
+                guard self.configurationReplacementGate.isCurrent(draftToken),
+                      self.filterDrafts.preparationPresentation.id == preparationAttemptID else { return }
                 self.filterPreparationState = state
             }
-            // Yield so SwiftUI actually RENDERS (and eases to) the 3/4 saving-top frame. The
-            // same-phase present() above returns without suspending, so without this sleep the
-            // Success write below lands in the same main-actor turn and SwiftUI coalesces the 3/4
-            // state away — the bar would sit at the previous saving value and sweep straight to 100%
-            // instead of the intended 3/4 → full final quarter. (Codex #284 P3)
+            // Preserve the saving-top render hold before the final quarter. RN also
+            // stages that frame when a delayed bridge/mount first observes Success.
             try? await Task.sleep(nanoseconds: 500_000_000)
             // The render yield is another suspension since the recheck above, so recheck again before
             // the Success confirmation — otherwise a stale task would write Success, fire the haptic,
             // and later dismiss the shared cover, clobbering the newer preparation's UI. (Codex #284 P2)
-            guard configurationReplacementGate.isCurrent(draftToken) else {
+            guard configurationReplacementGate.isCurrent(draftToken),
+                  filterDrafts.preparationPresentation.id == preparationAttemptID else {
                 dismissPreparationCoverIfStrandedBySupersession()
                 return
             }
@@ -166,10 +182,14 @@ extension AppViewModel {
             // Hold long enough for the bar to sweep to a full 100% (~0.55s) and then show the
             // checkmark for a beat. The cover view fills the bar, then cross-fades to the glyph.
             try? await Task.sleep(nanoseconds: 1_200_000_000)
+            await filterDrafts.waitForPreparationSuccessPresentation(id: preparationAttemptID) {
+                self.configurationReplacementGate.isCurrent(draftToken)
+            }
             // The success hold is another suspension (one this change lengthened to 1.2s): if a newer
             // switch/apply superseded us during it, do NOT clear the state — that would dismiss the
             // newer preparation's cover. Bail via the shared helper instead. (Codex #284 P2)
-            guard configurationReplacementGate.isCurrent(draftToken) else {
+            guard configurationReplacementGate.isCurrent(draftToken),
+                  filterDrafts.preparationPresentation.id == preparationAttemptID else {
                 dismissPreparationCoverIfStrandedBySupersession()
                 return
             }
@@ -180,7 +200,8 @@ extension AppViewModel {
             // so a superseded apply must NOT stomp it with a spurious failure modal + haptic. Mirror
             // switchToFilter's catch: bail if no longer current (dismissing our cover if the new
             // owner won't). The apply mutates no config/library before the throw, nothing to roll back.
-            guard configurationReplacementGate.isCurrent(draftToken) else {
+            guard configurationReplacementGate.isCurrent(draftToken),
+                  filterDrafts.preparationPresentation.id == preparationAttemptID else {
                 dismissPreparationCoverIfStrandedBySupersession()
                 return
             }

@@ -45,132 +45,111 @@ final class LavaSecurityPlusSourceTests: XCTestCase {
     }
 
     func testUpgradeScreenUsesRealPlusProductsAndRestoreActions() throws {
-        let settingsSource = try readSource(.upgradeSettingsView)
-        let viewModelSource = try readAppViewModelSource()
-        // The billing cluster lives in LavaSecurityPlusController since the Phase D2 peel;
-        // the view actions route through the `plus` environment object.
-        let controllerSource = try readSource(.lavaSecurityPlusController)
+        let presentation = try readSource(.upgradeSettingsView)
+        let screen = try sourceBlock(
+            in: readSource(.reactNativeSettingsScreens),
+            startingAt: "export function LavaPlusPage("
+        )
+        let bridge = try readSource(.reactNativeAppBridge)
+        let controller = try readSource(.lavaSecurityPlusController)
+        let buy = try sourceBlock(in: bridge, startingAt: "case \"purchase.buy\":", endingBefore: "case \"purchase.restore\":")
+        let restore = try sourceBlock(in: bridge, startingAt: "case \"purchase.restore\":", endingBefore: "case \"purchase.manage\":")
+        let manage = try sourceBlock(in: bridge, startingAt: "case \"purchase.manage\":", endingBefore: "case \"purchase.refresh\":")
 
-        XCTAssertFalse(settingsSource.contains("TODO_REPLACE_WITH_APP_STORE_PRODUCT_ID"))
-        XCTAssertTrue(settingsSource.contains("LavaSecurityPlusPolicy.fallbackOfferOrder"))
-        XCTAssertTrue(settingsSource.contains("plus.purchaseLavaSecurityPlus"))
-        XCTAssertTrue(settingsSource.contains("plus.restoreLavaSecurityPlusPurchases"))
-        XCTAssertTrue(settingsSource.contains(".navigationTitle(\"Lava Plus\".lavaLocalized)"))
-        XCTAssertTrue(settingsSource.contains(".navigationBarTitleDisplayMode(.large)"))
-        XCTAssertTrue(settingsSource.contains("Text(\"More room for your rules\")"))
-        // Retinted to lavaOrangeText for WCAG contrast (visual a11y Task 3) — still the orange role.
-        XCTAssertTrue(settingsSource.contains("Text(\"More room for your rules\")\n                    .foregroundStyle(LavaStyle.lavaOrangeText)"))
-        XCTAssertFalse(settingsSource.contains("title: \"More room for your rules\""))
-        XCTAssertFalse(settingsSource.contains("UpgradeLargeTitle()"))
-        XCTAssertFalse(settingsSource.contains("Text(\"Lava Security Plus\")\n                        .foregroundStyle(LavaStyle.lavaOrange)\n                    Text(\" unlocks\")"))
-        XCTAssertTrue(controllerSource.contains("func purchaseLavaSecurityPlus"))
-        XCTAssertTrue(controllerSource.contains("func restoreLavaSecurityPlusPurchases"))
-        XCTAssertTrue(viewModelSource.contains("configuration.hasLavaSecurityPlus ? \"Lava Security Plus\" : \"Free plan\""))
+        XCTAssertTrue(presentation.contains("enum LavaPlusPresentation"))
+        XCTAssertFalse(presentation.contains("import SwiftUI"))
+        XCTAssertFalse(presentation.contains(": View"))
+        XCTAssertFalse(presentation.contains("TODO_REPLACE_WITH_APP_STORE_PRODUCT_ID"))
+        XCTAssertTrue(presentation.contains("LavaSecurityPlusPolicy.fallbackOfferOrder"))
+        XCTAssertTrue(screen.contains("live?.plus.offers.map(offer=>"))
+        XCTAssertTrue(screen.contains("<SettingsPrice price={offer.price} commitment={offer.commitmentPrice}/>"))
+        XCTAssertTrue(screen.contains("run({type:\"purchase.buy\",id:offer.id})"))
+        XCTAssertTrue(screen.contains("run({type:'purchase.restore'})"))
+        XCTAssertTrue(screen.contains("useExclusiveAppAction('purchase',!!live?.plus.busy)"))
+        XCTAssertTrue(try readSource(.reactNativeReviewNavigation).contains("['Upgrade', Screens.UpgradeScreen, 'Lava Plus']"))
+
+        // RN sends only the offer identity. Native authorization and the current
+        // StoreKit-backed offer lookup still precede each billing mutation.
+        XCTAssertTrue(buy.contains("try await authorize(.appSettings, \"Upgrade to Lava Security Plus\")"))
+        XCTAssertTrue(buy.contains("LavaPlusPresentation.displayedOffers(for: model.plus).first(where: { $0.id == input[\"id\"] as? String })"))
+        XCTAssertTrue(buy.contains("This purchase is unavailable. Refresh the available plans."))
+        XCTAssertTrue(buy.contains("await model.plus.purchaseLavaSecurityPlus(offer)"))
+        XCTAssertLessThan(try XCTUnwrap(buy.range(of: "try await authorize(")?.lowerBound),
+                          try XCTUnwrap(buy.range(of: "await model.plus.purchaseLavaSecurityPlus(offer)")?.lowerBound))
+        XCTAssertTrue(restore.contains("try await authorize(.appSettings, \"Restore Lava Security Plus\")"))
+        XCTAssertTrue(restore.contains("await model.plus.restoreLavaSecurityPlusPurchases()"))
+        XCTAssertTrue(manage.contains("try await authorize(.appSettings, \"Manage Lava Security Plus\")"))
+        XCTAssertTrue(manage.contains("await LavaPlusPresentation.presentManageSubscriptions(plus: model.plus)"))
+        XCTAssertTrue(presentation.contains("try await AppStore.showManageSubscriptions(in: scene)"))
+        XCTAssertTrue(presentation.contains("await plus.refreshLavaSecurityPlusEntitlements()"))
+        XCTAssertTrue(presentation.contains("https://apps.apple.com/account/subscriptions"))
+        XCTAssertTrue(presentation.contains("_ = await UIApplication.shared.open(url)"))
+        XCTAssertTrue(controller.contains("func purchaseLavaSecurityPlus"))
+        XCTAssertTrue(controller.contains("func restoreLavaSecurityPlusPurchases"))
+        XCTAssertTrue(try readAppViewModelSource().contains("configuration.hasLavaSecurityPlus ? \"Lava Security Plus\" : \"Free plan\""))
     }
 
     func testUpgradeScreenMasksPurchaseControlsWhenPlusIsActive() throws {
-        let settingsSource = try readSource(.upgradeSettingsView)
-        // The entitlement-check state lives on LavaSecurityPlusController (Phase D2 peel);
-        // the paid display gate stays on the hub's persisted configuration.
-        let controllerSource = try readSource(.lavaSecurityPlusController)
-        let upgradeViewBlock = try sourceBlock(
-            in: settingsSource,
-            startingAt: "struct UpgradeSettingsView: View",
-            endingBefore: "struct LavaPlusUpgradeDestination"
-        )
+        let screen = try sourceBlock(in: readSource(.reactNativeSettingsScreens), startingAt: "export function LavaPlusPage(")
+        let bridge = try readSource(.reactNativeAppBridge)
+        let controller = try readSource(.lavaSecurityPlusController)
+        let active = try sourceBlock(in: screen, startingAt: "{live?.plus.enabled ?", endingBefore: ": live?.plus.checking ?")
+        let checking = try sourceBlock(in: screen, startingAt: ": live?.plus.checking ?", endingBefore: ": <SettingsStack>")
+        let refresh = try sourceBlock(in: bridge, startingAt: "case \"purchase.refresh\":", endingBefore: "case \"purchase.clearMessage\":")
 
-        XCTAssertTrue(upgradeViewBlock.contains("if viewModel.configuration.hasLavaSecurityPlus"))
-        XCTAssertTrue(upgradeViewBlock.contains("UpgradeThankYouView()"))
-        XCTAssertTrue(upgradeViewBlock.contains("} else if !plus.hasCheckedLavaSecurityPlusEntitlements"))
-        XCTAssertTrue(upgradeViewBlock.contains("|| plus.isRefreshingLavaSecurityPlusEntitlements {"))
-        XCTAssertTrue(upgradeViewBlock.contains("UpgradeEntitlementCheckingView()"))
-        XCTAssertTrue(upgradeViewBlock.contains("} else {\n                purchaseOptions"))
-        // Entitlements are checked once per session (guarded) to avoid the
-        // per-appear flicker/churn; products load only when not already loaded.
-        XCTAssertTrue(upgradeViewBlock.contains("if !plus.hasCheckedLavaSecurityPlusEntitlements {\n                await plus.refreshLavaSecurityPlusEntitlements()\n            }"))
-        XCTAssertTrue(upgradeViewBlock.contains("await plus.loadLavaSecurityPlusProducts()"))
-        XCTAssertFalse(upgradeViewBlock.contains("await plus.loadLavaSecurityPlusProducts()\n            await plus.refreshLavaSecurityPlusEntitlements()"))
-        XCTAssertTrue(controllerSource.contains("@Published private(set) var hasCheckedLavaSecurityPlusEntitlements = false"))
-        XCTAssertTrue(controllerSource.contains("@Published private(set) var isRefreshingLavaSecurityPlusEntitlements = false"))
-        XCTAssertTrue(controllerSource.contains("hasCheckedLavaSecurityPlusEntitlements = true"))
-        XCTAssertTrue(controllerSource.contains("defer {\n            isRefreshingLavaSecurityPlusEntitlements = false\n        }"))
+        XCTAssertTrue(bridge.contains("\"enabled\": m.configuration.hasLavaSecurityPlus"))
+        XCTAssertTrue(bridge.contains("\"checking\": !m.plus.hasCheckedLavaSecurityPlusEntitlements || m.plus.isRefreshingLavaSecurityPlusEntitlements"))
+        XCTAssertTrue(active.contains("<SettingsSubscriptionStatus look={live.look} expiration={live.plus.expiration}/>"))
+        XCTAssertTrue(active.contains("Manage Subscription"))
+        XCTAssertFalse(active.contains("purchase.buy"))
+        XCTAssertFalse(active.contains("Choose a plan"))
+        XCTAssertTrue(checking.contains("<SettingsLoading title=\"Checking Lava Security Plus\"/>"))
+        XCTAssertFalse(checking.contains("purchase.buy"))
+        XCTAssertFalse(checking.contains("Restore Purchase"))
+        XCTAssertTrue(screen.contains("app.command({type:'purchase.refresh'})"))
+        XCTAssertTrue(refresh.contains("if !model.plus.hasCheckedLavaSecurityPlusEntitlements { await model.plus.refreshLavaSecurityPlusEntitlements() }"))
+        XCTAssertTrue(refresh.contains("if !model.configuration.hasLavaSecurityPlus, model.plus.lavaSecurityPlusOffers.isEmpty { await model.plus.loadLavaSecurityPlusProducts() }"))
+        XCTAssertTrue(controller.contains("@Published private(set) var hasCheckedLavaSecurityPlusEntitlements = false"))
+        XCTAssertTrue(controller.contains("@Published private(set) var isRefreshingLavaSecurityPlusEntitlements = false"))
+        XCTAssertTrue(controller.contains("hasCheckedLavaSecurityPlusEntitlements = true"))
+        XCTAssertTrue(controller.contains("defer {\n            isRefreshingLavaSecurityPlusEntitlements = false\n        }"))
 
-        let activePlanBlock = try sourceBlock(
-            in: upgradeViewBlock,
-            startingAt: "if viewModel.configuration.hasLavaSecurityPlus",
-            endingBefore: "} else {"
-        )
-        XCTAssertFalse(activePlanBlock.contains("Choose a plan"))
-        XCTAssertFalse(activePlanBlock.contains("Restore Purchase"))
-
-        let thankYouBlock = try sourceBlock(
-            in: settingsSource,
-            startingAt: "private struct UpgradeThankYouView: View",
-            endingBefore: "struct LavaPlusUpgradeDestination"
-        )
-        let thankYouMascotBlock = try sourceBlock(
-            in: readSource(.softShieldGuardian),
-            startingAt: "struct GuardianThankYouAnimation: View",
-            endingBefore: "struct SoftShieldGuardian: View"
-        )
-        XCTAssertTrue(thankYouBlock.contains("GuardianThankYouAnimation(size: 96, shieldStyle: customization.lavaGuardLook)"))
-        XCTAssertFalse(thankYouBlock.contains("SoftShieldGuardian(size: 96, state: .grateful"))
-        XCTAssertTrue(thankYouMascotBlock.contains("@State private var state: GuardianMascotState = .awake"))
-        XCTAssertTrue(thankYouMascotBlock.contains("SoftShieldGuardian(size: size, state: state, shieldStyle: shieldStyle)"))
-        XCTAssertTrue(thankYouMascotBlock.contains("Task.sleep(nanoseconds: 650_000_000)"))
-        XCTAssertTrue(thankYouMascotBlock.contains("state = .grateful"))
-        XCTAssertTrue(thankYouMascotBlock.contains("Task.sleep(nanoseconds: 900_000_000)"))
-        XCTAssertTrue(thankYouMascotBlock.contains("guard !Task.isCancelled else { return }\n                state = .awake"))
-        XCTAssertTrue(thankYouBlock.contains("Thank you for your support"))
-        XCTAssertTrue(thankYouBlock.contains("Lava Security Plus is active"))
-
-        let checkingBlock = try sourceBlock(
-            in: settingsSource,
-            startingAt: "private struct UpgradeEntitlementCheckingView: View",
-            endingBefore: "struct LavaPlusUpgradeDestination"
-        )
-        XCTAssertTrue(checkingBlock.contains("ProgressView()"))
-        XCTAssertTrue(checkingBlock.contains("Checking Lava Security Plus"))
-        XCTAssertFalse(checkingBlock.contains("Choose a plan"))
-        XCTAssertFalse(checkingBlock.contains("Restore Purchase"))
+        // Pin the mascot actually rendered by the RN paid branch, including the
+        // selected look, accessible tap, gratitude cue and retirement cleanup.
+        let status = try sourceBlock(in: readSource(.reactNativeSettingsScaffold), startingAt: "export function SettingsSubscriptionStatus(", endingBefore: "export function SettingsLoading(")
+        let interaction = try readSource(.reactNativeMascotInteraction)
+        XCTAssertTrue(status.contains("useMascotTapInteraction()"))
+        XCTAssertTrue(status.contains("useMascotDownwardScroll(interaction.active,interaction.scrollDown)"))
+        XCTAssertTrue(status.contains("accessibilityLabel={localized('Thank you for your support')}"))
+        XCTAssertTrue(status.contains("onAccessibilityTap={interaction.tap}"))
+        XCTAssertTrue(status.contains("mood={interaction.grateful?'grateful':'awake'} look={look}"))
+        XCTAssertTrue(status.contains("gesturesEnabled={interaction.active}"))
+        XCTAssertTrue(status.contains("Thank you for your support"))
+        XCTAssertTrue(status.contains("Lava Security Plus is active"))
+        XCTAssertTrue(interaction.contains("animating.current=true;setGrateful(true)"))
+        XCTAssertTrue(interaction.contains("setTimeout(()=>setGrateful(false)"))
+        XCTAssertTrue(interaction.contains("if(state!=='active')cancel()"))
+        XCTAssertTrue(interaction.contains("timers.current.forEach(clearTimeout)"))
     }
 
-    func testPlanComparisonShowsUnlockedBenefitsInGreen() throws {
-        let settingsSource = try readSource(.upgradeSettingsView)
-        let comparisonBlock = try sourceBlock(
-            in: settingsSource,
-            startingAt: "private struct UpgradePlanComparisonView: View",
-            endingBefore: "private struct UpgradePlanOfferRow: View"
-        )
+    func testUpgradeStoryListsAllIncludedBenefitsWithoutFreePlanRestrictions() throws {
+        let story = try sourceBlock(in: readSource(.reactNativePlusScaffold), startingAt: "export function LavaPlusStory()", endingBefore: "const s=StyleSheet.create(")
+        XCTAssertTrue(story.contains("<PagedCards label=\"Lava Plus benefits\""))
+        XCTAssertTrue(story.contains("<DisclosureRow icon=\"gift\" title=\"Everything included\""))
+        for benefit in ["['Your own blocklists','Included']", "['Custom DNS','Included']", "['VPN chaining','Included']", "['All Lava Guards','Included']", "['Family Sharing','Included']"] {
+            XCTAssertTrue(story.contains(benefit))
+        }
+        XCTAssertTrue(story.contains("['Saved filters','Up to 50']"))
+        XCTAssertTrue(story.contains("['Filter rules','Up to 2 million']"))
+        XCTAssertTrue(story.contains("<ListRow key={title} title={title!} metadata={value}/>"))
+        XCTAssertFalse(story.contains("'Off'"))
+        XCTAssertFalse(story.contains("'Original'"))
 
-        XCTAssertTrue(comparisonBlock.contains("\"All Lava Guards\""))
-        XCTAssertTrue(comparisonBlock.contains("\"Family Sharing\""))
-        XCTAssertTrue(comparisonBlock.contains("\"Custom blocklists\""))
-        XCTAssertTrue(comparisonBlock.contains("\"Custom DNS\""))
-        XCTAssertTrue(comparisonBlock.contains("(\"All Lava Guards\", nil, .unlocked)"))
-        XCTAssertTrue(comparisonBlock.contains("(\"Family Sharing\", nil, .unlocked)"))
-        XCTAssertTrue(comparisonBlock.contains("(\"Custom blocklists\", nil, .unlocked)"))
-        XCTAssertTrue(comparisonBlock.contains("(\"Custom DNS\", nil, .unlocked)"))
-        XCTAssertTrue(comparisonBlock.contains("if let free"))
-        XCTAssertTrue(comparisonBlock.contains("Text(\"Unlocked\")"))
-        XCTAssertFalse(comparisonBlock.contains("Text(\"Included\")"))
-        XCTAssertTrue(comparisonBlock.contains(".foregroundStyle(LavaStyle.safeGreen)"))
-        XCTAssertTrue(comparisonBlock.contains("ViewThatFits(in: .horizontal)"))
-        XCTAssertTrue(comparisonBlock.contains(".fixedSize(horizontal: true, vertical: false)"))
-        XCTAssertFalse(comparisonBlock.contains("(\"All Lava Guards\", \"Original\", .included)"))
-        XCTAssertFalse(comparisonBlock.contains("(\"All Lava Guards\", \"Original\", .unlocked)"))
-        XCTAssertLessThan(
-            try XCTUnwrap(comparisonBlock.range(of: "\"All Lava Guards\"")?.lowerBound),
-            try XCTUnwrap(comparisonBlock.range(of: "\"Family Sharing\"")?.lowerBound)
-        )
-        XCTAssertLessThan(
-            try XCTUnwrap(comparisonBlock.range(of: "\"Family Sharing\"")?.lowerBound),
-            try XCTUnwrap(comparisonBlock.range(of: "\"Custom blocklists\"")?.lowerBound)
-        )
-        XCTAssertFalse(comparisonBlock.contains("(\"Custom blocklists\", \"Off\", \"On\")"))
-        XCTAssertFalse(comparisonBlock.contains("(\"Custom DNS\", \"Off\", \"On\")"))
-        XCTAssertFalse(comparisonBlock.contains("(\"Custom blocklists\", \"Off\", .included)"))
-        XCTAssertFalse(comparisonBlock.contains("(\"Custom DNS\", \"Off\", .included)"))
+        let scene = try sourceBlock(in: readSource(.reactNativePlusScaffold), startingAt: "function BenefitScene(", endingBefore: "function RoutineCard(")
+        XCTAssertTrue(scene.contains("accessibilityElementsHidden importantForAccessibility=\"no-hide-descendants\""))
+        XCTAssertTrue(scene.contains("<Copy role=\"body\" weight=\"700\">{title}</Copy>"))
+        XCTAssertTrue(scene.contains("<Copy role=\"body\" color={colors.secondaryText}>{description}</Copy>"))
+        XCTAssertTrue(try readSource(.reactNativeSettingsScaffold).contains("<Copy role=\"row\" color={colors.safeGreen}>{price}</Copy>"))
     }
 
     func testYearlyPaidMonthlyOfferUsesStoreKitBillingPlanPurchaseOption() throws {
@@ -190,13 +169,13 @@ final class LavaSecurityPlusSourceTests: XCTestCase {
         XCTAssertTrue(storeSource.contains("yearlyPaidMonthlyOffer(from: productsByID[plan.productID])"))
         XCTAssertTrue(storeSource.contains("LavaSecurityPlusPolicy.recommendedOfferOrder.compactMap"))
         // The store must NOT fabricate fallback offers — `offers` holds live StoreKit offers or is
-        // empty, and the hardcoded fallback list is supplied by `displayedOffers` in the view. The
+        // empty, and the display-only fallback list is supplied by the native presentation helper. The
         // store previously seeded `fallbackOfferOrder` in `init`/`loadProducts`, which kept the
         // paywall's `offers.isEmpty` load guard from ever retrying after a failed launch load.
         XCTAssertFalse(storeSource.contains("LavaSecurityPlusPolicy.fallbackOfferOrder"))
         // The controller must NOT pre-seed offers with the fallback list — doing so froze the
         // paywall's `offers.isEmpty` load guard so live StoreKit products never loaded. The fallback
-        // is supplied by `displayedOffers` in the view instead (asserted below + in
+        // is supplied by `displayedOffers` in the presentation helper instead (asserted below + in
         // LavaSecurityPlusOffersLoadSourceTests).
         XCTAssertFalse(controllerSource.contains("lavaSecurityPlusOffers: [LavaSecurityPlusOffer] = LavaSecurityPlusPolicy.fallbackOfferOrder.map"))
         XCTAssertTrue(settingsSource.contains("LavaSecurityPlusPolicy.fallbackOfferOrder.map"))
@@ -205,67 +184,52 @@ final class LavaSecurityPlusSourceTests: XCTestCase {
 
     func testYearlySavingsPitchIsComputedFromStoreKitPricesNotHardcoded() throws {
         let storeSource = try readSource(.lavaSecurityPlusStore)
-        let settingsSource = try readSource(.upgradeSettingsView)
-
-        // The saving is derived from the customer's own storefront prices
-        // (yearly vs 12× monthly), floored so it never overstates, and gated on a
-        // minimum before it is shown as a number.
+        let presentation = try readSource(.upgradeSettingsView)
+        let bridge = try readSource(.reactNativeAppBridge)
         XCTAssertTrue(storeSource.contains("let savingsPercent: Int?"))
         XCTAssertTrue(storeSource.contains("func yearlySavingsPercent(yearly: Product?, monthly: Product?)"))
         XCTAssertTrue(storeSource.contains("let annualizedMonthly = monthly.price * 12"))
-        // Floored in Decimal space via Int(truncating:) (truncates toward zero) so it never
-        // overstates — NOT through a Double round-trip, which drops a clean integer point (an exact
-        // Decimal 0.37 becomes 0.36999… → 36 instead of 37). (#44 Kilo finding)
         XCTAssertTrue(storeSource.contains("Int(truncating: NSDecimalNumber("))
         XCTAssertFalse(storeSource.contains(".doubleValue * 100"),
                        "The savings floor must stay in Decimal space, not round-trip the fraction through Double.")
         XCTAssertTrue(storeSource.contains("minimumDisplayableSavingsPercent"))
         XCTAssertTrue(storeSource.contains("savingsPercent: plan.kind == .yearly ? savingsPercent : nil"))
-
-        // The pitch quotes the computed figure via a localized placeholder, and
-        // falls back to number-free copy when there is no storefront saving.
-        // (The pitch strings embed literal quotes, so match the inner text rather
-        // than the backslash-escaped quotes as they appear in the raw source.)
-        XCTAssertTrue(settingsSource.contains("private func planPitch(for offer: LavaSecurityPlusOffer)"))
-        XCTAssertTrue(settingsSource.contains("planPitch(for: offer)"))
-        XCTAssertTrue(settingsSource.contains("We are saving %d%%! This has the best value."))
-        XCTAssertTrue(settingsSource.contains(".lavaLocalizedFormat(savingsPercent)"))
-        XCTAssertTrue(settingsSource.contains("Paying by the year beats paying by the month."))
-
-        // Guard against the hard-coded percentage ever coming back.
-        XCTAssertFalse(settingsSource.contains("We are saving 37%!"))
-        XCTAssertFalse(settingsSource.contains("planPitch(for: offer.plan.kind)"))
+        XCTAssertTrue(presentation.contains("static func planPitch(for offer: LavaSecurityPlusOffer)"))
+        XCTAssertTrue(presentation.contains("if let savingsPercent = offer.savingsPercent"))
+        XCTAssertTrue(presentation.contains("We are saving %d%%! This has the best value."))
+        XCTAssertTrue(presentation.contains(".lavaLocalizedFormat(savingsPercent)"))
+        XCTAssertTrue(presentation.contains("Paying by the year beats paying by the month."))
+        XCTAssertTrue(bridge.contains("\"subtitle\": LavaPlusPresentation.planPitch(for: offer)"))
+        XCTAssertTrue(try readSource(.reactNativeSettingsScreens).contains("subtitle={offer.subtitle}"))
+        XCTAssertFalse(presentation.contains("We are saving 37%!"))
+        XCTAssertFalse(presentation.contains("planPitch(for: offer.plan.kind)"))
     }
 
     func testUpgradeScreenShowsCommitmentPitchAndFamilySharingBenefit() throws {
-        let settingsSource = try readSource(.upgradeSettingsView)
-        let comparisonBlock = try sourceBlock(
-            in: settingsSource,
-            startingAt: "private struct UpgradePlanComparisonView: View",
-            endingBefore: "private struct UpgradePlanOfferRow: View"
-        )
-
-        XCTAssertTrue(settingsSource.contains("If we commit for 12 months, each month is cheaper."))
-        XCTAssertTrue(settingsSource.contains("billed monthly on a 12-month commitment"))
-        XCTAssertTrue(settingsSource.contains("cancelling affects the next renewal"))
-        XCTAssertTrue(settingsSource.contains("case .yearlyPaidMonthly"))
-        XCTAssertTrue(settingsSource.contains("Text(offer.displayPrice)"))
-        XCTAssertTrue(settingsSource.contains("Text(\"%@ total\".lavaLocalizedFormat(commitmentDisplayPrice))"))
-        XCTAssertTrue(comparisonBlock.contains("\"Family Sharing\""))
-        XCTAssertTrue(comparisonBlock.contains("(\"Family Sharing\", nil, .unlocked)"))
+        let presentation = try readSource(.upgradeSettingsView)
+        let screen = try readSource(.reactNativeSettingsScreens)
+        let bridge = try readSource(.reactNativeAppBridge)
+        XCTAssertTrue(presentation.contains("If we commit for 12 months, each month is cheaper."))
+        XCTAssertTrue(presentation.contains("case .yearlyPaidMonthly"))
+        XCTAssertTrue(screen.contains("billed monthly on a 12-month commitment"))
+        XCTAssertTrue(screen.contains("cancelling affects the next renewal"))
+        XCTAssertTrue(bridge.contains("let commitment = offer.plan.kind == .yearlyPaidMonthly ? offer.commitmentDisplayPrice : nil"))
+        XCTAssertTrue(bridge.contains("\"price\": offer.displayPrice"))
+        XCTAssertTrue(bridge.contains("\"commitmentPrice\": commitment.map { \"%@ total\".lavaLocalizedFormat($0) } ?? \"\""))
+        XCTAssertTrue(screen.contains("<SettingsPrice price={offer.price} commitment={offer.commitmentPrice}/>"))
+        XCTAssertTrue(try readSource(.reactNativePlusScaffold).contains("['Family Sharing','Included']"))
     }
 
     func testAutoRenewFooterDropsCommitmentSentenceWhenYearlyPaidMonthlyIsAbsent() throws {
-        let settingsSource = try readSource(.upgradeSettingsView)
-
-        // The footer is told whether the yearly-paid-monthly plan is actually offered, computed from
-        // the displayed offers (that plan needs its `.monthly` billing plan configured + iOS 26.4+).
-        XCTAssertTrue(settingsSource.contains("let showsYearlyPaidMonthly: Bool"))
-        XCTAssertTrue(settingsSource.contains("showsYearlyPaidMonthly: displayedOffers.contains { $0.plan.kind == .yearlyPaidMonthly }"))
-
-        // The shorter variant omits the 12-month commitment sentence — auto-renew flows straight into
-        // the Payment sentence — so we never disclose a plan the customer can't see.
-        XCTAssertTrue(settingsSource.contains("Monthly and yearly plans auto-renew. Payment is charged to your Apple Account at purchase"))
+        let screen = try sourceBlock(in: readSource(.reactNativeSettingsScreens), startingAt: "export function LavaPlusPage(")
+        let bridge = try readSource(.reactNativeAppBridge)
+        XCTAssertTrue(bridge.contains("\"showsYearlyPaidMonthly\": plusOffers.contains { $0.plan.kind == .yearlyPaidMonthly }"))
+        XCTAssertTrue(screen.contains("live?.plus.showsYearlyPaidMonthly ? 'Monthly and yearly plans auto-renew. Yearly paid monthly is billed monthly on a 12-month commitment;"))
+        XCTAssertTrue(screen.contains(": 'Monthly and yearly plans auto-renew. Payment is charged to your Apple Account at purchase"))
+        XCTAssertTrue(screen.contains("title=\"Terms of Use\""))
+        XCTAssertTrue(screen.contains("Linking.openURL('https://www.apple.com/legal/internet-services/itunes/dev/stdeula/')"))
+        XCTAssertTrue(screen.contains("title=\"Privacy Policy\""))
+        XCTAssertTrue(screen.contains("Linking.openURL('https://lavasecurity.app/privacy/')"))
     }
 
     func testStoreKitBoundaryMirrorsEntitlementsAfterLocalVerification() throws {

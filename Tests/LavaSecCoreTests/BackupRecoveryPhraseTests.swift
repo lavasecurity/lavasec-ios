@@ -3,6 +3,29 @@ import XCTest
 @testable import LavaSecKit
 
 final class BackupRecoveryPhraseTests: XCTestCase {
+    func testClearingAPastedWordCannotSubmitTheHiddenOriginalPhrase() {
+        var input = BackupRecoveryPhraseInput()
+        input.setPastedPhrase("river maple signal velvet orbit silver canyon quartz")
+        XCTAssertFalse(input.secret.isEmpty)
+        input.setWord("", at: 3)
+        XCTAssertEqual(input.words[3], "")
+        XCTAssertTrue(input.pastedPhrase.isEmpty)
+        XCTAssertTrue(input.secret.isEmpty)
+        input.setWord("newword", at: 3)
+        XCTAssertEqual(input.secret, "river maple signal newword orbit silver canyon quartz")
+    }
+    func testRepastingReplacesTheDraftAndInvalidWordCallbacksCannotEraseIt() {
+        var input = BackupRecoveryPhraseInput()
+        input.setPastedPhrase("  river maple  ")
+        input.setWord("ignored", at: -1)
+        input.setWord("ignored", at: BackupRecoveryPhrase.wordCount)
+        XCTAssertEqual(input.secret, "river maple")
+        input.setWord("edited", at: 0)
+        XCTAssertTrue(input.secret.isEmpty)
+        input.setPastedPhrase("one two three four five six seven eight")
+        XCTAssertEqual(input.words, ["one", "two", "three", "four", "five", "six", "seven", "eight"])
+        XCTAssertEqual(input.secret, "one two three four five six seven eight")
+    }
     func testGeneratesEightReadableTokens() throws {
         let phrase = try BackupRecoveryPhrase.generate()
         let words = BackupRecoveryPhrase.words(from: phrase)

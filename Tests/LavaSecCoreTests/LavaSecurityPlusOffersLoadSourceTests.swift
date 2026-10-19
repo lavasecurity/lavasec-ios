@@ -20,9 +20,16 @@ final class LavaSecurityPlusOffersLoadSourceTests: XCTestCase {
     }
 
     func testPaywallLoadsProductsWhileOffersAreEmpty() throws {
-        let compact = try readSource(.upgradeSettingsView).filter { !$0.isWhitespace }
-        XCTAssertTrue(compact.contains("plus.lavaSecurityPlusOffers.isEmpty{awaitplus.loadLavaSecurityPlusProducts()}"),
+        let refresh = try sourceBlock(
+            in: readSource(.reactNativeAppBridge),
+            startingAt: "case \"purchase.refresh\":",
+            endingBefore: "case \"purchase.clearMessage\":"
+        )
+        let compact = refresh.filter { !$0.isWhitespace }
+        XCTAssertTrue(compact.contains("if!model.configuration.hasLavaSecurityPlus,model.plus.lavaSecurityPlusOffers.isEmpty{awaitmodel.plus.loadLavaSecurityPlusProducts()}"),
                       "The paywall must load live StoreKit products while the offers array is empty.")
+        XCTAssertTrue(try readSource(.reactNativeSettingsScreens).contains("app.command({type:'purchase.refresh'})"),
+                      "The RN paywall must request the native entitlement/product refresh when focused.")
     }
 
     func testDisplayedOffersFallBackWhileEmpty() throws {
@@ -46,6 +53,6 @@ final class LavaSecurityPlusOffersLoadSourceTests: XCTestCase {
         XCTAssertFalse(source.contains("Self.fallbackOffers()"),
                        "The store must not fabricate fallback offers (in init or the loadProducts catch); offers holds live StoreKit offers or stays empty, and displayedOffers supplies the display fallback.")
         XCTAssertFalse(source.contains("func fallbackOffers()"),
-                       "The store's fallbackOffers() helper must be removed — the hardcoded fallback list lives only in the view's displayedOffers.")
+                       "The store's fallbackOffers() helper must be removed — the display fallback lives only in the native presentation helper's displayedOffers.")
     }
 }

@@ -1,5 +1,7 @@
+// QA's independent native navigator is qualified by device-qa-presentation-lifecycle.
+jest.mock('../review/QAFlowAdapter.ios',()=>({QAFlowAdapter:()=>null}));
 import {act,fireEvent,render,screen,waitFor} from '@testing-library/react-native';
-import {AppState,Keyboard,type AppStateStatus} from 'react-native';
+import {AppState,Keyboard,StyleSheet,type AppStateStatus} from 'react-native';
 import {DomainCheckScreen,type DomainCheckResult} from '../review/DomainCheckScreen';
 import {GuardScreen} from '../review/screens';
 import {ReviewContext,type ReviewState} from '../review/ReviewContext';
@@ -18,7 +20,7 @@ jest.mock('../specs/LavaChoiceNativeComponent',()=>require('./native-choice-mock
 jest.mock('../specs/NativeLavaReview',()=>({__esModule:true,default:{getGuardAccents:()=>JSON.stringify({original:{light:'#BF4000',dark:'#FF8855'}})}}));
 
 const checked:DomainCheckResult={status:'checked',domain:'sites.google.com',decision:'allow',reason:'defaultAllow',
-  filterID:'active',filterName:'Balanced',filterEmoji:'🌿',proof:'native-proof',ignoredURLParts:true,repairedScheme:false,alreadyAllowed:false,alreadyBlocked:false};
+  filterID:'active',filterName:'Balanced',filterEmoji:'🌿',proof:'native-proof',ignoredURLParts:true,repairedScheme:false,alreadyAllowed:false,alreadyBlocked:false,allowedExceptions:[]};
 function deferred<T>(){let resolve!:(value:T)=>void;let reject!:(value:Error)=>void;
   const promise=new Promise<T>((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};}
 function mount(command:jest.Mock<any,any>=jest.fn(async(request:any)=>checked),component=DomainCheckScreen){
@@ -34,6 +36,72 @@ function submit(input='sites.google.com'){
   fireEvent.press(screen.getByText('Check'));
 }
 beforeEach(()=>{mockFocused=true;mockNavigate.mockClear();mockUpgrade.mockClear();(AppState.addEventListener as jest.Mock).mockImplementation(()=>({remove:jest.fn()}));Object.defineProperty(AppState,'currentState',{configurable:true,value:'active'});});
+
+test('repeat checks retain the result and actions while renewing the proof',async()=>{
+  const pending=deferred<DomainCheckResult>();let queries=0;
+  const command=jest.fn((request:any)=>request.type==='domainCheck.query'?++queries===1?Promise.resolve(checked):pending.promise:Promise.resolve(null));
+  mount(command);submit();await screen.findByText('Allowed');
+  const result=screen.getByTestId('domain-check.result');
+  fireEvent.press(screen.getByRole('button',{name:'Check'}));
+  expect(screen.getByTestId('domain-check.result')).toBe(result);
+  expect(screen.getByRole('button',{name:'Check'}).props.accessibilityState).toMatchObject({busy:true,disabled:true});
+  expect(screen.getByRole('button',{name:'Allow this'})).toBeDisabled();
+  expect(screen.getByRole('button',{name:'Block this'})).toBeDisabled();
+  fireEvent.press(screen.getByText('Block this'));
+  expect(command).not.toHaveBeenCalledWith(expect.objectContaining({type:'domainCheck.stage'}));
+  await act(async()=>pending.resolve({...checked,proof:'renewed'}));
+  expect(screen.getByTestId('domain-check.result')).toBe(result);
+  expect(screen.getByRole('button',{name:'Block this'})).toBeEnabled();
+});
+
+test('an explicit check supersedes a pending automatic refresh and keeps its loading feedback',async()=>{
+  const background=deferred<DomainCheckResult>();const explicit=deferred<DomainCheckResult>();let queries=0;
+  const command=jest.fn((request:any)=>request.type==='domainCheck.query'?++queries===1?Promise.resolve(checked):queries===2?background.promise:explicit.promise:
+    Promise.resolve({id:'active',standaloneReview:'manual-review'}));
+  const view=mount(command);submit();await screen.findByText('Allowed');
+  view.live.security!.readRevision=2;
+  view.rerender(<ReviewContext.Provider value={{...view.context,live:{...view.live}}}><DomainCheckScreen/></ReviewContext.Provider>);
+  expect(queries).toBe(2);
+  fireEvent.press(screen.getByRole('button',{name:'Check'}));
+  expect(queries).toBe(3);
+  expect(screen.getByText('Allowed')).toBeOnTheScreen();
+  expect(screen.getByRole('button',{name:'Check'}).props.accessibilityState).toMatchObject({busy:true,disabled:true});
+  await act(async()=>background.resolve({...checked,proof:'old-background'}));
+  expect(screen.getByRole('button',{name:'Block this'})).toBeDisabled();
+  await act(async()=>explicit.resolve({...checked,proof:'explicit-proof'}));
+  fireEvent.press(screen.getByText('Block this'));
+  await waitFor(()=>expect(command).toHaveBeenCalledWith(expect.objectContaining({type:'domainCheck.stage',proof:'explicit-proof'})));
+});
+
+test.each([{rules:['sites.google.com']},{rules:['google.com','sites.google.com']}])('an exception exposes removal through the existing review ($rules)',async({rules:allowedExceptions})=>{
+  const command=jest.fn(async(request:any)=>request.type==='domainCheck.stage'?{id:'active',standaloneReview:'remove-review'}:
+    {...checked,reason:'localAllowlist',alreadyAllowed:allowedExceptions.includes('sites.google.com'),allowedExceptions});
+  mount(command);submit();await screen.findByText('Allowed exception');
+  expect(screen.queryByText('Already in your allowed domains.')).toBeNull();
+  const remove=screen.getByRole('button',{name:'Remove from allowed exception'});
+  expect(remove).toBeEnabled();fireEvent.press(remove);
+  await waitFor(()=>expect(command).toHaveBeenCalledWith(expect.objectContaining({type:'domainCheck.stage',decision:'removeAllowedException',proof:'native-proof'})));
+  expect(mockNavigate).toHaveBeenCalledWith('Review',{id:'active',standaloneReview:'remove-review'});
+});
+
+test.each([false,true])('an existing blocked domain offers reviewed removal (covering exception: %s)',async hasException=>{
+  const command=jest.fn(async(request:any)=>request.type==='domainCheck.stage'?{id:'active',standaloneReview:'block-review'}:
+    {...checked,decision:hasException?'allow':'block',reason:hasException?'localAllowlist':'localBlocklist',alreadyBlocked:true,allowedExceptions:hasException?['google.com']:[]});
+  mount(command);submit();await screen.findByText(hasException?'Allowed exception':'Blocked');
+  expect(screen.queryByText('Block this')).toBeNull();
+  expect(screen.queryByText('Already in your blocked domains.')).toBeNull();
+  const remove=screen.getByRole('button',{name:'Remove from blocked domains'});expect(remove).toBeEnabled();fireEvent.press(remove);
+  await waitFor(()=>expect(command).toHaveBeenCalledWith(expect.objectContaining({type:'domainCheck.stage',decision:'removeBlockedDomain',proof:'native-proof'})));
+  expect(mockNavigate).toHaveBeenCalledWith('Review',{id:'active',standaloneReview:'block-review'});
+});
+
+test('a threat verdict stays blocked while a saved exception remains removable',async()=>{
+  mount(jest.fn(async()=>({...checked,decision:'block',reason:'threatGuardrail',alreadyAllowed:true,allowedExceptions:['sites.google.com']})));
+  submit();await screen.findByText('Blocked');
+  expect(screen.queryByText('Allowed exception')).toBeNull();
+  expect(screen.getByRole('button',{name:'Remove from allowed exception'})).toBeEnabled();
+  expect(screen.queryByText('Allow this')).toBeNull();
+});
 
 test('Guard exposes one text label and the existing right-chevron accessory',async()=>{
   const view=mount(jest.fn(async()=>null),GuardScreen);
@@ -55,7 +123,7 @@ test('clearing the native URL field retires the checked verdict and its actions'
   await screen.findByText('Allowed');
   const field=screen.getByTestId('domain-check.input');
   expect(field.props.clearButtonMode).toBe('always');
-  for(const [title,symbol] of [['Allow this','arrow.right.circle.fill'],['Block this','xmark.circle.fill']]){
+  for(const [title,symbol] of [['Allow this','arrow.right.circle'],['Block this','xmark.circle']]){
     const row=screen.getByRole('button',{name:title});
     const glyphs=row.findAllByProps({symbol});
     expect(glyphs.length).toBeGreaterThan(0);
@@ -303,13 +371,20 @@ test('background and resume retain the verdict and refresh proof without rereadi
     request.type==='domainCheck.stage'?Promise.resolve({id:'active',standaloneReview:'resumed-review'}):Promise.resolve(null));
   try{
     mount(command);submit();await screen.findByText('Allowed');
+    const actionStyles=['Allow this','Block this'].map(title=>[title,StyleSheet.flatten(screen.getByText(title).props.style)] as const);
     await act(async()=>{Object.defineProperty(AppState,'currentState',{configurable:true,value:'background'});listeners.forEach(listener=>listener('background'));});
     expect(screen.getByText('Allowed',{includeHiddenElements:true})).toBeOnTheScreen();
+    for(const [title,style] of actionStyles)expect(screen.getByText(title,{includeHiddenElements:true})).toHaveStyle(style);
+    expect(screen.getByTestId('screen.scroll',{includeHiddenElements:true})).toHaveProp('pointerEvents','none');
     expect(command).toHaveBeenCalledWith(expect.objectContaining({type:'domainCheck.cancel'}));
     fireEvent.press(screen.getByText('Block this',{includeHiddenElements:true}));
     expect(command).not.toHaveBeenCalledWith(expect.objectContaining({type:'domainCheck.stage'}));
     await act(async()=>{Object.defineProperty(AppState,'currentState',{configurable:true,value:'active'});listeners.forEach(listener=>listener('active'));});
     expect(screen.getByText('Allowed')).toBeOnTheScreen();
+    for(const [title,style] of actionStyles){
+      expect(screen.getByText(title)).toHaveStyle(style);
+      expect(screen.getByRole('button',{name:title})).toBeDisabled();
+    }
     fireEvent.press(screen.getByText('Block this'));
     expect(command).not.toHaveBeenCalledWith(expect.objectContaining({type:'domainCheck.stage'}));
     await act(async()=>refresh.resolve({...checked,proof:'resumed-proof'}));

@@ -89,31 +89,3 @@ enum SettingsRoute: Hashable {
         }
     }
 }
-
-/// Native DNS pages pushed from a native VPN sheet retain their own auth turn.
-struct NativeDNSSettingsDestinationView: View {
-    @EnvironmentObject private var security: SecurityController
-    var body: some View {
-        DNSResolverSettingsView()
-            .onDisappear { security.resetViewAuthenticationTurn() }
-    }
-}
-
-#if DEBUG || LAVA_QA_TOOLS
-struct PhoneQASettingsView: View {
-    // The rage-shake/bug-report destination lives on the diagnostics scope (Phase D4 peel).
-    @EnvironmentObject private var reports: DiagnosticsController
-    @AppStorage("hasSeenLavaOnboarding") private var hasSeenLavaOnboarding = false
-
-    var body: some View {
-        PhoneQAView(
-            showWelcome: {
-                hasSeenLavaOnboarding = false
-            },
-            showUserBugReport: {
-                reports.rageShakeDestination = .bugReport
-            }
-        )
-    }
-}
-#endif

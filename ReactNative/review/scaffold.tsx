@@ -1,19 +1,21 @@
-import {WindowSizeContext,useWindowLayout,useScaffoldStyles,type WindowSize} from '../src/window-layout';
+export {toolbarButton,toolbarToggle,toolbarAction} from '../src/ui/platform/toolbar';
+export type {ToolbarSymbol} from '../src/ui/platform/toolbar';
+import {WindowMetricsContext,WindowSizeContext,useWindowLayout,useScaffoldStyles,type WindowSize} from '../src/window-layout';
 import {useHeldActionScrollLock} from '../src/interaction-lock';
 import NativeTextField from '../specs/LavaTextFieldNativeComponent';
 import {BufferedInput,type BufferedInputHandle} from './BufferedInput';
 import NativeDecoration from '../specs/LavaDecorationNativeComponent';
 import {useLavaColorScheme} from '../src/appearance';
 import {useTextScale} from '../app/text-metrics';
-import {localized, Text} from '../app/presentation';
-import {Children, createContext, isValidElement, useContext, useImperativeHandle, useLayoutEffect,useSyncExternalStore,useRef, useState, type ComponentRef,type PropsWithChildren, type Ref, type ReactNode} from 'react';
-import {KeyboardAvoidingView, Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, TextInput, View, useWindowDimensions, type ScrollViewInstance, type ColorValue} from 'react-native';
+import {localized,PresentationContext, Text} from '../app/presentation';
+import {Children, Fragment, createContext, isValidElement, useContext, useImperativeHandle, useLayoutEffect,useSyncExternalStore,useRef, useState, type ComponentRef,type PropsWithChildren, type Ref, type ReactNode} from 'react';
+import {DynamicColorIOS,KeyboardAvoidingView, Platform,PlatformColor, Pressable, SafeAreaView, ScrollView, StyleSheet, TextInput, View, useWindowDimensions, type ScrollViewInstance, type ColorValue} from 'react-native';
 import {useNavigation,type ParamListBase} from '@react-navigation/native';
 import {HeaderHeightContext} from '@react-navigation/elements';
 import {SafeAreaInsetsContext} from 'react-native-safe-area-context';
 import type {NativeStackNavigationOptions, NativeStackHeaderItem, NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {colors} from '../src/colors.ios';
-import {LavaActionButton, LavaCard, LavaControlContent, LavaIconButton, LavaRowLabel, LavaSelectionAccessory, LavaToggleRow, type LavaIconAction} from '../src';
+import {LavaActionButton, LavaCard, LavaControlContent, LavaIconButton, LavaRowLabel, LavaSelectionAccessory, LavaToggleRow} from '../src';
 import {foundation} from '../src/foundation';
 import {Copy, Symbol} from './primitives';
 import {lavaTokens} from '../src/generated/tokens';
@@ -24,6 +26,7 @@ import {usePresentationNativeLayout} from '../app/use-presentation-readiness';
 import type {AppStore} from '../app/store';
 import type {AppSnapshot} from '../app/contract';
 import {ordinaryPageHeader} from './navigation-scaffold';
+import {LavaSurface} from '../src/surface.ios';
 
 const ExplanationLinkContext=createContext(false);
 
@@ -59,13 +62,29 @@ export function Info({title, description, icon, warning = false, children}: Prop
     {children}
   </View></Panel>;
 }
+// Fragments group declarations, not visible rows. Retain their key namespaces
+// while flattening so optional rows do not replace surviving native controls,
+// even when separate fragments reuse the same local child keys.
+function groupRows(children:ReactNode,parentKeys:readonly string[]=[]):{node:ReactNode;key:string}[] {
+  return Children.toArray(children).flatMap((child,index)=>{
+    const keys=[...parentKeys,isValidElement(child)?String(child.key):String(index)];
+    return isValidElement<PropsWithChildren>(child)&&child.type===Fragment
+      ?groupRows(child.props.children,keys):[{node:child,key:JSON.stringify(keys)}];
+  });
+}
 export function Group({children, plain = false, separators = true, footer, dividerInset = 16, testID, tone='neutral'}: PropsWithChildren<{tone?:'neutral'|'green';plain?: boolean; separators?: boolean; footer?: ReactNode; dividerInset?: number; testID?: string}>) {
   const s=useScaffoldStyles(windowBase_s);
-  const rows = Children.toArray(children);
+  const nativeSeparators=useContext(WindowMetricsContext)==='nativeFlow'&&Platform.OS==='ios';
+  const colorScheme=useLavaColorScheme();
+  const rows = groupRows(children);
   // Preserve React's child identity when conditional settings insert/remove a
   // row. Position keys remounted surviving native controls and lost local state.
   // Transparent paint does not remove the separators between repeated rows.
-  return <View testID={testID} style={[s.group,tone==='green'&&{backgroundColor:colors.softGreen},plain&&{backgroundColor:'transparent'}]}>{rows.map((child, i) => <View key={isValidElement(child)?child.key:i}>{i > 0 && separators && <View style={[s.divider,{marginLeft:dividerInset}]} />}{child}</View>)}{footer}</View>;
+  return <View testID={testID} style={[s.group,tone==='green'&&{backgroundColor:colors.softGreen},plain&&{backgroundColor:'transparent'}]}>{rows.map(({node,key}, i) => <View key={key}>{i > 0 && separators && (nativeSeparators
+    // Native LavaCondensedDivider uses SwiftUI's semantic Divider paint. Its
+    // passive leaf preserves that paint without changing ordinary RN groups.
+    ?<NativeDecoration symbol="form.separator" colorScheme={colorScheme} guardianGestures={false} pointerEvents="none" accessible={false} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={[s.divider,{marginLeft:dividerInset,backgroundColor:'transparent'}]}/>
+    :<View style={[s.divider,{marginLeft:dividerInset}]} />)}{node}</View>)}{footer}</View>;
 }
 export function StatusPill({title,symbol,tone='green'}:{title:string;symbol:string;tone?:'green'|'orange'|'secondary'}) {
   const scale=useTextScale(foundation.type.caption.dynamicTypeRamp);
@@ -143,12 +162,14 @@ const filterOutcomeSymbol = {
   blocked: foundation.outcome.blockedOutline,
   allowed: foundation.outcome.allowedOutline,
 } as const;
-export function ListRow({title, subtitle, metadata, icon, leading, trailing, trailingRole='control', onPress, disabled = false, action = false, color, testID, selected, selectionLocked=false, metadataPrefix, verbatimTitle=false, pending=false, onLongPress, minHeight, verticalPadding, expanded, separateTrailing=false, accessibilityHint, outcome}: {
+export function ListRow({title, subtitle, metadata, icon, leading, trailing, trailingRole='control', onPress, disabled = false, interactionDisabled = false, action = false, color, testID, selected, selectionLocked=false, metadataPrefix, verbatimTitle=false, pending=false, onLongPress, minHeight, verticalPadding, expanded, separateTrailing=false, accessibilityHint, outcome}: {
   title: string; subtitle?: string; metadata?: string; icon?: string; leading?: ReactNode; trailing?: ReactNode; outcome?: keyof typeof filterOutcomeSymbol;
-  accessibilityHint?:string; trailingRole?:'control'|'disclosure'; separateTrailing?:boolean; expanded?:boolean; minHeight?: number; verticalPadding?: number; onPress?: () => void; onLongPress?:()=>void; pending?:boolean; disabled?: boolean; action?: boolean; color?: ColorValue; testID?: string; selected?: boolean; selectionLocked?:boolean; metadataPrefix?: string; verbatimTitle?:boolean;
+  accessibilityHint?:string; trailingRole?:'control'|'disclosure'; separateTrailing?:boolean; expanded?:boolean; minHeight?: number; verticalPadding?: number; onPress?: () => void; onLongPress?:()=>void; pending?:boolean; disabled?: boolean; interactionDisabled?: boolean; action?: boolean; color?: ColorValue; testID?: string; selected?: boolean; selectionLocked?:boolean; metadataPrefix?: string; verbatimTitle?:boolean;
 }) {
   const s=useScaffoldStyles(windowBase_s);
-  const hold=useHeldActionScrollLock(!!onLongPress&&!disabled);
+  // Read authority can revoke input while an already painted row retains its appearance.
+  const unavailable=disabled||interactionDisabled;
+  const hold=useHeldActionScrollLock(!!onLongPress&&!unavailable);
   // Visible content owns the inset; independent 44pt targets share that space.
   const content = <View style={[s.listRowContent,verticalPadding!==undefined&&{paddingVertical:verticalPadding}]}>
     {leading ?? (outcome ? <Symbol name={filterOutcomeSymbol[outcome]} tone="primary"/> : (icon && <View style={{width: foundation.control.glyphSlot, alignItems: 'center'}}><Symbol name={icon} size={foundation.control.glyphSlot} pointSize={foundation.control.glyph} tone={disabled ? 'secondary' : color === colors.errorText ? 'error' : 'primary'} /></View>))}
@@ -162,21 +183,21 @@ export function ListRow({title, subtitle, metadata, icon, leading, trailing, tra
   const style = [s.listRow, minHeight!==undefined&&{minHeight}];
   const accessibility={accessibilityRole:'button' as const,accessibilityLabel:[verbatimTitle?title:localized(title),subtitle&&localized(subtitle)].filter(Boolean).join(', '),
     accessibilityValue:metadata?{text:[metadataPrefix&&localized(metadataPrefix),localized(metadata)].filter(Boolean).join(', ')}:undefined,
-    accessibilityState:{disabled,selected,expanded}};
+    accessibilityState:{disabled:unavailable,selected,expanded}};
   // Independent row actions cannot be nested inside the navigation/rename
   // target: VoiceOver and responder hit testing must see two sibling controls.
   if(separateTrailing&&(onPress||onLongPress))return <View style={style}>
-    <Pressable accessibilityHint={accessibilityHint?localized(accessibilityHint):undefined} testID={testID} {...accessibility} disabled={disabled} onPress={onPress} onLongPress={onLongPress} {...hold}
+    <Pressable accessibilityHint={accessibilityHint?localized(accessibilityHint):undefined} testID={testID} {...accessibility} disabled={unavailable} onPress={onPress} onLongPress={onLongPress} {...hold}
       style={({pressed})=>[{flex:1,alignSelf:'stretch',minHeight:foundation.control.target,flexDirection:'row',alignItems:'center',gap:foundation.row.gap},pressed&&{opacity:foundation.interaction.pressedOpacity}]}>{content}{selection}</Pressable>{accessory}
   </View>;
-  return onPress||onLongPress ? <Pressable accessibilityHint={accessibilityHint?localized(accessibilityHint):undefined} testID={testID} {...accessibility} disabled={disabled} onPress={onPress} onLongPress={onLongPress} {...hold} style={({pressed}) => [...style, pressed && {opacity:foundation.interaction.pressedOpacity}]}>{content}{selection}{accessory}</Pressable>
+  return onPress||onLongPress ? <Pressable accessibilityHint={accessibilityHint?localized(accessibilityHint):undefined} testID={testID} {...accessibility} disabled={unavailable} onPress={onPress} onLongPress={onLongPress} {...hold} style={({pressed}) => [...style, pressed && {opacity:foundation.interaction.pressedOpacity}]}>{content}{selection}{accessory}</Pressable>
     : <View testID={testID} style={style}>{content}{selection}{accessory}</View>;
 }
-export function Toggle({title, summary, titleRole, value, onChange, disabled = false, pending = false, standalone = false, optimistic = true, accessibilityHint,testID}: {
-  title: string; summary?:string; titleRole?:'rowTitle'|'cardTitle'; accessibilityHint?:string; value: boolean; onChange: (next: boolean) => void | Promise<unknown>; disabled?: boolean; pending?: boolean; standalone?: boolean; optimistic?:boolean;testID?:string;
+export function Toggle({title, summary, titleRole, titleColor, value, onChange, disabled = false, pending = false, standalone = false, optimistic = true, accessibilityHint,testID}: {
+  title: string; summary?:string; titleRole?:'rowTitle'|'cardTitle'; titleColor?:ColorValue; accessibilityHint?:string; value: boolean; onChange: (next: boolean) => void | Promise<unknown>; disabled?: boolean; pending?: boolean; standalone?: boolean; optimistic?:boolean;testID?:string;
 }) {
   const s=useScaffoldStyles(windowBase_s);
-  return <View style={standalone?s.group:undefined}><LavaToggleRow testID={testID} title={title} summary={summary} titleRole={titleRole} accessibilityHint={accessibilityHint?localized(accessibilityHint):undefined} value={value} onValueChange={onChange} disabled={disabled} pending={pending} optimistic={optimistic}/></View>;
+  return <View style={standalone?s.group:undefined}><LavaToggleRow testID={testID} title={title} summary={summary} titleRole={titleRole} titleColor={titleColor} accessibilityHint={accessibilityHint?localized(accessibilityHint):undefined} value={value} onValueChange={onChange} disabled={disabled} pending={pending} optimistic={optimistic}/></View>;
 }
 // Catalog controls own their native capsule material. The shared sticky strip
 // stays clear while rows passing beneath each control are diffused by UIKit.
@@ -184,14 +205,38 @@ export function CatalogControlMaterial() {
   const scheme=useLavaColorScheme();
   return <NativeDecoration symbol="catalog.control.material" colorScheme={scheme} pointerEvents="none" accessible={false} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={StyleSheet.absoluteFill}/>;
 }
-export function Search({ref,value, onChange, label = 'Search domains',resetRevision=0,surface='card'}: {ref?:Ref<BufferedInputHandle>;value: string; onChange: (value: string) => void; label?: string;resetRevision?:number;surface?:'card'|'catalog'}) {
+const localLogSearchStroke=DynamicColorIOS(Object.fromEntries(['light','dark'].map(scheme=>[scheme,
+  `rgba(${lavaTokens.colors.panelStroke[scheme as 'light'|'dark'].map(channel=>Math.round(channel*255)).join(',')},0.65)`])) as {light:string;dark:string});
+export function Search({ref,value, onChange, label = 'Search domains',resetRevision=0,surface='card'}: {ref?:Ref<BufferedInputHandle>;value: string; onChange: (value: string) => void; label?: string;resetRevision?:number;surface?:'card'|'catalog'|'localLog'}) {
   const s=useScaffoldStyles(windowBase_s);
   const scale=useTextScale();
+  const subheadlineScale=useTextScale('subheadline');
+  const clearMetric=useContext(PresentationContext).nativeSymbolMetrics?.searchClear;
+  const measuredClear=clearMetric&&Number.isFinite(clearMetric.fontSize)&&Math.abs(clearMetric.fontSize-17*scale)<.001
+    &&Number.isFinite(clearMetric.width)&&clearMetric.width>0&&Number.isFinite(clearMetric.height)&&clearMetric.height>0?clearMetric:undefined;
   const catalog=surface==='catalog';
+  const localLog=surface==='localLog';
   const target=catalog?foundation.control.target:48;
+  const [clearRevision,setClearRevision]=useState(0);
+  const [externalResetEpoch,setExternalResetEpoch]=useState(0);
+  const externalReset=useRef(resetRevision);
+  useLayoutEffect(()=>{
+    if(localLog&&externalReset.current!==resetRevision){externalReset.current=resetRevision;setExternalResetEpoch(previous=>previous+1);}
+  },[localLog,resetRevision]);
+  const inputReset=localLog?externalResetEpoch+clearRevision:resetRevision;
   // Filtering can be slower than typing. Keep the native edit buffer as the
   // typing owner; only an explicit external reset writes text back into it.
-  return <View style={[s.search,catalog&&s.catalogControl]}>{catalog&&<CatalogControlMaterial/>}<Symbol name="magnifyingglass" size={18} tone={catalog?'primary':'secondary'} /><BufferedInput ref={ref} allowFontScaling={false} accessibilityLabel={localized(label)} placeholder={localized(label)} value={value} resetRevision={resetRevision} onChangeText={onChange} autoCapitalize="none" autoCorrect={false} clearButtonMode="while-editing" selectionColor={colors.safeGreen} style={[s.searchInput,{fontSize:17*scale,minHeight:Math.max(target,26*scale+16)}]} placeholderTextColor={colors.secondaryText} /></View>;
+  const content=<>{catalog&&<CatalogControlMaterial/>}<Symbol name="magnifyingglass" size={18} tone={catalog?'primary':'secondary'} pointSize={localLog?15*subheadlineScale:undefined} weight={localLog?'semibold':undefined}/><BufferedInput ref={ref} allowFontScaling={false} accessibilityLabel={localized(label)} placeholder={localized(label)} value={value} resetRevision={inputReset} onChangeText={onChange} autoCapitalize="none" autoCorrect={false} clearButtonMode={localLog?'never':'while-editing'} selectionColor={colors.safeGreen} nativeKind={localLog?'localLogSearch':undefined} keyboardType={localLog?'url':undefined} style={[s.searchInput,{fontSize:17*scale,minHeight:localLog?48:Math.max(target,26*scale+16)}]} placeholderTextColor={localLog?PlatformColor('placeholderText'):colors.secondaryText}/>
+    {localLog&&!!value&&<Pressable accessibilityRole="button" accessibilityLabel={localized('Clear search')} onPress={()=>{
+      // The ordinary native edit buffer ignores value acknowledgements. Clearing
+      // is an explicit reset, independent of external reset-revision values.
+      setClearRevision(previous=>previous+1);onChange('');
+    }}><Symbol name="xmark.circle.fill" size={measuredClear?.width??20*scale} height={measuredClear?.height??20*scale} pointSize={17*scale} weight="semibold" tone="secondary" responsive={false}/></Pressable>}
+  </>;
+  // Only migrated diagnostics opt into LocalLogSearchField's original compact
+  // panel, native placeholder and authored10pt gap. Other searches keep theirs.
+  return localLog?<LavaSurface role="panel" borderColor={localLogSearchStroke} cornerRadius={foundation.radius.compact}
+    contentStyle={[s.search,{height:48,gap:10,borderRadius:foundation.radius.compact,backgroundColor:colors.panelBackground}]}>{content}</LavaSurface>:<View style={[s.search,catalog&&s.catalogControl]}>{content}</View>;
 }
 // The isolated review host uses the same centered credential composition. The
 // full app continues to present its native authenticated credential flow.
@@ -299,21 +344,27 @@ function SheetBody({children, footer, header, scrollRef,headerMaterial=true,scro
     navigation.setOptions({unstable_sheetFooter: footer ? () => owner.current.mounted?<WindowSizeContext.Provider value={viewport}><NativeSheetFooter app={review?.app} live={review?.live} owner={owner.current}>{footer}</NativeSheetFooter></WindowSizeContext.Provider>:null : undefined});
   }, [navigation, footer, review?.app,review?.live, interactive,viewport]);
   // Native-stack makes its first scroll descendant use automatic safe-area
-  // insets on iOS. Start the list viewport below the bar, so its content starts
-  // at zero with no duplicated inset. Fixed controls are siblings,
+  // insets on iOS. Let results extend beneath the native bar with that single
+  // adjusted inset. LavaScrollView clamps commands to adjusted insets, including
+  // the negative top offset used by catalog search and category jumps.
+  // Fixed controls are siblings,
   // so neither a pan nor keyboard adjustment can move them. Only their measured
   // height is reserved in the natural-sized results; rows still pass underneath
-  // the individual glass capsules. Keep the scroll view first for sheet sizing.
-  if(scrollMode==='list')return <View onLayout={event=>{nativeLayout(event);onViewport(event.nativeEvent.layout);}} pointerEvents={interactive?'auto':'none'} accessibilityElementsHidden={!interactive} importantForAccessibility={interactive?'auto':'no-hide-descendants'} style={{flex:1,backgroundColor:colors.groupedBackground,...(concealed?{opacity:0}:{})}}>
-    <ScrollView testID="sheet.results" ref={nativeScroll} showsVerticalScrollIndicator={showsVerticalScrollIndicator} showsHorizontalScrollIndicator={false} style={{flex:1,marginTop:nativeHeaderInset}} bounces={false} alwaysBounceVertical={false} automaticallyAdjustKeyboardInsets contentInsetAdjustmentBehavior="automatic" keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive" scrollIndicatorInsets={{top:controlsHeight}} contentContainerStyle={s.sheetPinnedContent}>
+  // the native scroll edge and glass capsules. Keep the scroll view a direct
+  // native child, first before the header. An extra flex container falls into
+  // native-stack's legacy frame correction and can move results below the sheet.
+  // Short or empty searches still need the bar's safe inset: automatic may
+  // drop it when results stop scrolling and clamp the search reset to zero.
+  if(scrollMode==='list')return <>
+    <ScrollView testID="sheet.results" ref={nativeScroll} onLayout={event=>{nativeLayout(event);onViewport(event.nativeEvent.layout);}} pointerEvents={interactive?'auto':'none'} accessibilityElementsHidden={!interactive} importantForAccessibility={interactive?'auto':'no-hide-descendants'} showsVerticalScrollIndicator={showsVerticalScrollIndicator} showsHorizontalScrollIndicator={false} style={{flex:1,backgroundColor:colors.groupedBackground,...(concealed?{opacity:0}:{})}} bounces={false} alwaysBounceVertical={false} automaticallyAdjustKeyboardInsets contentInsetAdjustmentBehavior="always" keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive" scrollIndicatorInsets={{top:controlsHeight}} contentContainerStyle={s.sheetPinnedContent}>
       <View style={{height:controlsHeight}}/>
       <View style={[s.sheetPinnedBody,horizontalReadingInsets]}>{children}</View>
     </ScrollView>
-    {header&&<View collapsable={false} testID="sheet.pinned-header" pointerEvents="box-none" onLayout={event=>setControlsHeight(event.nativeEvent.layout.height)} style={{position:'absolute',top:nativeHeaderInset,left:0,right:0}}>
-      {headerMaterial&&<NativeDecoration symbol="sheet.header.material" colorScheme={scheme} pointerEvents="none" style={StyleSheet.absoluteFill}/>}
+    {header&&<View collapsable={false} testID="sheet.pinned-header" pointerEvents={interactive?'box-none':'none'} accessibilityElementsHidden={!interactive} importantForAccessibility={interactive?'auto':'no-hide-descendants'} onLayout={event=>setControlsHeight(event.nativeEvent.layout.height)} style={{position:'absolute',top:nativeHeaderInset,left:0,right:0,...(concealed?{opacity:0}:{})}}>
+      {headerMaterial&&Platform.OS==='ios'&&<NativeDecoration symbol="sheet.list-header.material" colorScheme={scheme} pointerEvents="none" style={StyleSheet.absoluteFill}/>}
       <View style={[s.sheetHeader,horizontalPadding]}>{header}</View>
     </View>}
-  </View>;
+  </>;
   // Keep the direct ScrollView required by native form sheets. A sticky child
   // lets content pass behind the picker controls instead of reserving an opaque
   // strip above the scroll surface. The native footer still owns bottom actions.
@@ -335,21 +386,6 @@ function SheetBody({children, footer, header, scrollRef,headerMaterial=true,scro
     </View>}
     {header?<View style={[s.sheetPinnedBody,horizontalReadingInsets]}>{children}</View>:children}
   </ScrollView>;
-}
-const toolbarSymbols={'chevron.left':'back',xmark:'close',checkmark:'confirm',trash:'delete','square.and.pencil':'edit',moon:'automatic','arrow.clockwise':'refresh','arrow.triangle.2.circlepath':'refresh','arrow.counterclockwise':'reset',plus:'add','square.and.arrow.up':'share','square.and.arrow.down':'import',calendar:'calendar',pencil:'notes',eye:'assist','eye.slash':'hide','arrow.uturn.backward':'undo'} as const satisfies Readonly<Record<string,LavaIconAction>>;
-export type ToolbarSymbol = keyof typeof toolbarSymbols;
-// All actions use the navigation bar's own item pipeline, including Import.
-// Stable semantic identifiers let UIKit match like actions across transitions.
-export const toolbarButton = (label: string, symbol: keyof typeof toolbarSymbols, onPress: () => void, disabled = false, testID?:string): NativeStackHeaderItem & {label:string;onPress:()=>void;disabled:boolean} => {
-  const action=toolbarSymbols[symbol];
-  if(!action)throw new Error(`Unregistered toolbar glyph: ${symbol}`);
-  const tintColor=action==='confirm'?colors.safeControlGreen:action==='delete'?colors.errorText:colors.navigationForeground;
-  return {type:'button',label:localized(label),accessibilityLabel:localized(label),identifier:action==='import'?'lava.toolbar.labeled.import':testID??`lava.toolbar.${action}`,
-    icon:{type:'sfSymbol',name:symbol},tintColor,variant:action==='confirm'?'prominent':'plain',onPress,disabled,sharesBackground:action!=='confirm'};
-};
-export function toolbarToggle(label:string,symbol:keyof typeof toolbarSymbols,selected:boolean,onPress:()=>void,disabled=false,testID?:string) {
-  return {...toolbarButton(label,symbol,onPress,disabled,testID),selected,sharesBackground:false,
-    variant:selected?'prominent' as const:'plain' as const,tintColor:selected?colors.safeControlGreen:colors.navigationForeground};
 }
 // Search in a pushed list belongs to UISearchController. Its native navigation
 // and keyboard lifecycle avoids competing with an in-content RN input's scroll.

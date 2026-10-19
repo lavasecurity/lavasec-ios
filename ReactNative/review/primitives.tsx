@@ -1,4 +1,4 @@
-import {useWindowLayout,useScaffoldStyles,pageContentWidth,pageHeaderInset,pageTopPadding} from '../src/window-layout';
+import {useWindowLayout,useScaffoldStyles,pageContentWidth,pageHeaderInset,pageTopPadding,WindowMetricsContext} from '../src/window-layout';
 import {mayInteractWithPresentation} from '../app/read-cache';
 import {usePresentationNativeLayout} from '../app/use-presentation-readiness';
 import {useOptionalReview,useRouteBodyConcealed} from './ReviewContext';
@@ -7,13 +7,14 @@ import {GuardianDrawing} from '../src/GuardianDrawing';
 import {Alert, localized} from '../app/presentation';
 import {Text} from '../app/presentation';
 import {createContext,useCallback,useContext,useEffect,useLayoutEffect,useRef, useState,useSyncExternalStore, type PropsWithChildren, type ReactNode} from 'react';
-import {AppState, Dimensions, Pressable, RefreshControl, ScrollView, StyleSheet, View, type ScrollViewInstance, type ColorValue, type TextProps, type TextStyle} from 'react-native';
+import {AppState, Dimensions, Pressable, RefreshControl, ScrollView, StyleSheet, View, type ScrollViewInstance, type ColorValue, type TextProps, type TextStyle, type StyleProp, type ViewStyle} from 'react-native';
 import {useIsFocused,useNavigation,type ParamListBase} from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {SafeAreaInsetsContext} from 'react-native-safe-area-context';
 import Decoration from '../specs/LavaDecorationNativeComponent';
 import {colors} from '../src/colors.ios';
 import {lavaTokens} from '../src/generated/tokens';
+import {useAccessibilityTextScale} from '../app/text-metrics';
 import {LavaChoice,LavaRowLabel} from '../src';
 import {foundation, type CopyRole} from '../src/foundation';
 import {ScrollInteractionContext,useScrollInteractionController,useScrollInteractionLock} from '../src/interaction-lock';
@@ -26,9 +27,17 @@ export function Copy({children, role='supporting', size, weight, color = colors.
   return <Text verbatim={verbatim} testID={testID} accessibilityRole={accessibilityRole} numberOfLines={numberOfLines} allowFontScaling dynamicTypeRamp={size===undefined?token.dynamicTypeRamp:fontSize===13?'footnote':fontSize===15?'subheadline':'body'} style={{textDecorationLine:strike?'line-through':undefined,fontSize, fontWeight: weight??token.fontWeight, color, lineHeight:lineHeight===undefined?undefined:Math.max(lineHeight,fontSize*1.25), fontFamily: mono ? "Menlo" : undefined, textAlign: center ? 'center' : 'left'}}>{children}</Text>;
 }
 
-export function Symbol({name, size = foundation.control.glyph, tone = 'green', pointSize = 0, weight = 'regular',responsive=true}: {name: string; size?: number; tone?: string; pointSize?: number; weight?: 'regular' | 'semibold' | 'bold';responsive?:boolean}) {
+export function Symbol({name, size = foundation.control.glyph, height, tone = 'green', pointSize = 0, weight = 'regular',responsive=true,dynamicTypeRamp,nativeLayout}: {name: string; size?: number; height?:number; tone?: string; pointSize?: number; weight?: 'regular' | 'semibold' | 'bold';responsive?:boolean;dynamicTypeRamp?:TextProps['dynamicTypeRamp'];nativeLayout?:'swiftui'}) {
   const layout=useWindowLayout();const scale=responsive?layout.scale:1;
-  return <Decoration symbol={name} tone={tone} fontPointSize={pointSize*scale} fontWeight={weight} style={{width: size*scale, height: size*scale}} accessible={false} accessibilityElementsHidden />;
+  const nativeFlow=useContext(WindowMetricsContext)==='nativeFlow';
+  const accessibilityScale=useAccessibilityTextScale(dynamicTypeRamp??'body');
+  const fontPointSize=pointSize*scale*(dynamicTypeRamp?accessibilityScale:1);
+  // Only a migrated native glyph port can request the original system Image
+  // layout. The authored slot/font/tone stay React Native presentation values.
+  const symbol=nativeFlow&&nativeLayout==='swiftui'&&Number.isFinite(fontPointSize)&&fontPointSize>0?`swiftui.sf:${name}`:name;
+  // Semantic native glyphs scale their font, retaining the authored layout slot.
+  // Ordinary RN artwork and fixed-point symbols keep their existing treatment.
+  return <Decoration symbol={symbol} tone={tone} fontPointSize={fontPointSize} fontWeight={weight} style={{width: size*scale, height: (height??size)*scale}} accessible={false} accessibilityElementsHidden />;
 }
 
 export type GuardianGesture = 'start' | 'end' | 'tap' | 'reveal';
@@ -69,7 +78,7 @@ export function usePageScrollObservation(observe:(sample?:PageScrollSample)=>voi
 // Only pages with their own text inputs participate in keyboard avoidance. RN
 // listens to window-wide keyboard frames, including keyboards in native sheets;
 // a read-only page must never retain extra scroll space from those notifications.
-export function Screen({children, onEndReached,onRefresh, keyboard = false, wide=false,showsVerticalScrollIndicator=false}: PropsWithChildren<{wide?:boolean|'compact';keyboard?: boolean;showsVerticalScrollIndicator?:boolean;onEndReached?:()=>void;onRefresh?:()=>Promise<unknown>}>) {
+export function Screen({children, onEndReached,onRefresh, keyboard = false, wide=false,showsVerticalScrollIndicator=false,contentContainerStyle}: PropsWithChildren<{wide?:boolean|'compact';keyboard?: boolean;showsVerticalScrollIndicator?:boolean;onEndReached?:()=>void;onRefresh?:()=>Promise<unknown>;contentContainerStyle?:StyleProp<ViewStyle>}>) {
   const styles=useScaffoldStyles(windowBase_styles);
   const layout=useWindowLayout();
   const contentWidth=pageContentWidth(layout,wide);
@@ -131,7 +140,7 @@ export function Screen({children, onEndReached,onRefresh, keyboard = false, wide
         if(observationActive.current&&observingScrollGesture.current)observers.current.forEach(observer=>observer({offset:contentOffset.y,windowHeight:Dimensions.get('window').height}));
         if(canInteract()&&onEndReached&&contentOffset.y+layoutMeasurement.height>=contentSize.height-140)onEndReached();}}
       contentInsetAdjustmentBehavior="automatic" showsVerticalScrollIndicator={showsVerticalScrollIndicator} showsHorizontalScrollIndicator={false}
-      automaticallyAdjustKeyboardInsets={keyboard && focused} keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled" contentContainerStyle={[styles.content,{maxWidth:contentWidth,paddingHorizontal:layout.gutter,paddingTop:pageTopPadding(layout),paddingBottom:foundation.space.screenBottom*layout.scale},horizontalContentInsets]}>
+      automaticallyAdjustKeyboardInsets={keyboard && focused} keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled" contentContainerStyle={[styles.content,{maxWidth:contentWidth,paddingHorizontal:layout.gutter,paddingTop:pageTopPadding(layout),paddingBottom:foundation.space.screenBottom*layout.scale},contentContainerStyle,horizontalContentInsets]}>
     <PageScrollObservationContext.Provider value={registerObserver}><ScrollInteractionContext.Provider value={lockPage}><PageInspectionResetContext.Provider value={registerReset}>{children}</PageInspectionResetContext.Provider></ScrollInteractionContext.Provider></PageScrollObservationContext.Provider>
   </ScrollView>;
 }
@@ -160,10 +169,10 @@ export function RowAccessory({intent,testID,children,expanded=false,attention=fa
   const styles=useScaffoldStyles(windowBase_styles);
   const symbol=intent==='external'?'arrow.up.right':intent==='disclosure'&&expanded?'chevron.down':'chevron.right';
   const windowScale=useWindowLayout().scale;
-  const accessoryWidth=attention?foundation.discovery.dotSize+foundation.space.xs+foundation.control.accessoryGlyph:foundation.row.disclosureWidth;
-  return <View testID={testID} style={[styles.accessory,{width:accessoryWidth*windowScale}]}>
-    {attention&&<LavaDiscoveryDot testID={attentionTestID}/>}
-    {children===undefined?intent !== 'task' && <Symbol name={symbol} size={foundation.control.accessoryGlyph} tone="secondary" />:children}
+  // Discovery occupies the navigation slot itself. Keeping its width and center
+  // fixed avoids moving the title or accessory as the destination becomes seen.
+  return <View testID={testID} style={[styles.accessory,{width:foundation.row.disclosureWidth*windowScale}]}>
+    {attention?<LavaDiscoveryDot testID={attentionTestID}/>:children===undefined?intent !== 'task' && <Symbol name={symbol} size={foundation.control.accessoryGlyph} tone="secondary" />:children}
   </View>;
 }
 export function RowContent({title,summary,icon,intent,testID,verbatimSummary=false,leading,trailing,expanded,attention}:RowContentProps) {

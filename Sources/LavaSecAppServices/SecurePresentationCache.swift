@@ -80,6 +80,8 @@ public struct PresentationLibraryRevision: Sendable {
 public enum PresentationReadPolicy: String, CaseIterable, Sendable {
     /// Activity summaries may be reused only as authenticated in-memory ciphertext.
     case activity = "activity.query"
+    /// Immutable Activity share-card grants are authenticated, transient exports.
+    case activityShare = "activity.card.query"
     /// Catalog results include private custom-source selections; do not retain them.
     case catalog = "catalog.query"
     /// Domain history/search results are transient authorized presentation values.

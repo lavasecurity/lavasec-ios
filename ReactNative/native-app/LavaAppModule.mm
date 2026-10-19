@@ -1,5 +1,6 @@
 #import "LavaAppModule.h"
 #import <React/RCTAssert.h>
+#import <React/RCTInitializing.h>
 #import <React/RCTComponentViewFactory.h>
 #import <ReactCodegen/RCTThirdPartyComponentsProvider.h>
 #import "../ios/LavaSecUIReview/BridgingHeader.h"
@@ -11,6 +12,9 @@
 #endif
 #import "LavaSecUIReview-Swift.h"
 #endif
+
+@interface LavaAppModule () <RCTInitializing>
+@end
 
 @interface LavaAppComponentProvider : NSObject <RCTComponentViewFactoryComponentProvider>
 @end
@@ -33,11 +37,20 @@ void LavaInstallAppComponentProvider(void) {
 }
 
 @implementation LavaAppModule {
+  NSString *_runtimeToken;
   NSString *_observerToken;
   BOOL _invalidated;
 }
 + (NSString *)moduleName { return @"NativeLavaApp"; }
 + (BOOL)requiresMainQueueSetup { return YES; }
+- (void)initialize {
+#ifdef LAVA_REACT_NATIVE
+  // RN completes this hook before invalidation; codegen's discovery-only
+  // allocation never receives it. Native initial properties can already own credentials.
+  // pinned: native-page-source.test.js module runtime admission boundary
+  _runtimeToken = [[LavaAppBridge shared] registerRuntime];
+#endif
+}
 - (dispatch_queue_t)methodQueue { return dispatch_get_main_queue(); }
 - (void)getSnapshot:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject {
 #ifdef LAVA_REACT_NATIVE
@@ -55,7 +68,7 @@ void LavaInstallAppComponentProvider(void) {
   dispatch_async(dispatch_get_main_queue(), ^{
     if (self->_invalidated) { reject(@"E_DETACHED", @"App runtime detached.", nil); return; }
     [self ensureObserver];
-    [[LavaAppBridge shared] command:request completion:^(NSString *value, NSString *error) {
+    [[LavaAppBridge shared] command:request runtimeID:self->_runtimeToken completion:^(NSString *value, NSString *error) {
       if (self->_invalidated) { reject(@"E_DETACHED", @"App runtime detached.", nil); return; }
       if (error) reject(@"E_APP_COMMAND", error, nil); else resolve(value);
     }];
@@ -68,6 +81,9 @@ void LavaInstallAppComponentProvider(void) {
 - (void)ensureObserver {
   RCTAssertMainQueue();
   if (_observerToken || _invalidated) return;
+  // The first JS method runs after codegen installs its event callback. Native
+  // initialization precedes that JS-thread write and may admit ownership only.
+  // pinned: native-page-source.test.js module runtime admission boundary
   __weak LavaAppModule *weakSelf = self;
   _observerToken = [[LavaAppBridge shared] observe:^(NSString *snapshot) {
     LavaAppModule *owner = weakSelf;
@@ -80,10 +96,13 @@ void LavaInstallAppComponentProvider(void) {
   _invalidated = YES;
 #ifdef LAVA_REACT_NATIVE
   if (_observerToken) [[LavaAppBridge shared] removeObserver:_observerToken];
+  if (_runtimeToken) [[LavaAppBridge shared] retireRuntime:_runtimeToken];
   [[LavaAppBridge shared] retireShareCards];
   [[LavaAppBridge shared] retireDomainCheck];
+  [[LavaAppBridge shared] retireFlowAlert];
 #endif
   _observerToken = nil;
+  _runtimeToken = nil;
   _eventEmitterCallback = nullptr;
 }
 - (std::shared_ptr<facebook::react::TurboModule>)getTurboModule:(const facebook::react::ObjCTurboModule::InitParams &)params {

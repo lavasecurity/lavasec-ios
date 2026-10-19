@@ -1,7 +1,5 @@
-import SwiftUI
 import LavaSecKit
 import LavaSecPresentation
-import LavaSecAppServices
 import UIKit
 @preconcurrency import NetworkExtension
 
@@ -114,42 +112,4 @@ enum VersionDiagnostics {
         ChainedConnectivityPresentation.summary(health, handshake: handshake, isConnected: isConnected).lavaLocalized
     }
 
-}
-
-/// Renders the generated third-party notice inventory shipped with the app.
-///
-/// Deliberately verbatim and unstyled. These are license texts: the obligation is to
-/// reproduce them, so anything that reflows, truncates, or "summarises" would defeat the
-/// point. Monospaced because several are hand-wrapped ASCII whose layout carries meaning.
-struct BundledLibraryNoticesView: View {
-    var body: some View {
-        ScrollView {
-            Text(Self.noticeText)
-                .font(.system(.footnote, design: .monospaced))
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding()
-        }
-        .navigationTitle("Full License Texts")
-        .navigationBarTitleDisplayMode(.inline)
-    }
-
-    /// Loaded from the bundle rather than compiled in, so the generator stays the single
-    /// source of truth. A missing resource is a packaging failure, not a user-facing one —
-    /// `BundledLibraryAttributionSourceTests` is what keeps it present.
-    private static let noticeText: String = {
-        guard let url = Bundle.main.url(forResource: "THIRD-PARTY-NOTICES", withExtension: "txt"),
-              let text = try? String(contentsOf: url, encoding: .utf8) else {
-            return "Notice file unavailable in this build.".lavaLocalized
-        }
-        #if LAVA_REACT_NATIVE
-        guard let reactURL = Bundle.main.url(forResource: "ReactNativeNotices", withExtension: "txt"),
-              let reactText = try? String(contentsOf: reactURL, encoding: .utf8) else {
-            return text + "\n\n" + "Notice file unavailable in this build.".lavaLocalized
-        }
-        return text + "\n\n" + reactText
-        #else
-        return text
-        #endif
-    }()
 }

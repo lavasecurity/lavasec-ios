@@ -2,7 +2,7 @@
 """Compile and execute the current native import stage machine with model doubles.
 
 The harness extracts production navigation and commit methods from
-ShareableFiltersUI.swift. It checks consent, stale-target recovery, completion,
+ReactNative/native-app/LavaAppImport.swift. It checks consent, stale-target recovery, completion,
 and the single-commit boundary without requiring SwiftUI or a simulator.
 Run: python3 Tests/NativeImportFlowTests.py
 """
@@ -12,7 +12,7 @@ import os
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = ROOT / 'LavaSecApp/ShareableFiltersUI.swift'
+SOURCE = ROOT / 'ReactNative/native-app/LavaAppImport.swift'
 
 
 def block(source, marker):
@@ -31,20 +31,19 @@ def block(source, marker):
 
 def generate():
     source = SOURCE.read_text()
-    assert 'NavigationStack {\n            ZStack {' in source
-    assert '@State private var stage: Stage' in source
-    assert 'NavigationStack(path: $path)' not in source
+    assert 'final class LavaAppImportSession' in source
+    assert 'struct ImportFiltersFlow' not in (ROOT / 'LavaSecApp/ShareableFiltersUI.swift').read_text()
     stage = block(source, '    enum Stage: Equatable')
-    pending = block(source, 'private struct PendingActiveReplacement:').replace('private struct ', 'struct ', 1)
+    pending = block(source, '    struct PendingActiveReplacement:') if '    struct PendingActiveReplacement:' in source else block(source, '    struct PendingActiveReplacement {')
     methods = '\n'.join(block(source, marker).replace('private func ', 'func ', 1) for marker in [
-        'private func finishImport()', 'private func go(to ', 'private func goBackFromMethod()',
-        'private func addNew(', 'private func replace('])
+        'func finishImport()', 'func go(to ', 'func back()', 'func concealAcceptedPresentation()',
+        'func confirmActiveReplacement(', 'private func addNew(', 'private func replace('])
     return PREFIX + pending + WRAPPER + stage + '\n' + methods + '\n}\n' + TESTS
 
 
 PREFIX = r'''
 import Foundation
-struct ShareableFilterConfiguration: Equatable { var value: Int }
+struct ShareableFilterConfiguration: Equatable { var value: Int; var isEmpty: Bool { value == 0 } }
 struct Filter: Equatable {
     var id: String
     var name: String
@@ -100,7 +99,22 @@ WRAPPER = r'''
     let completion = Completion()
     var startMode: ImportFiltersStartMode = .chooseMethod
     var stage = Stage.chooseMethod
-    var navDirection: LavaFlowDirection = .forward
+    var presentationRetired = false
+    var photoPicker: Picker?
+    final class Picker { func retire() {} }
+    var navDirection = "forward"
+    var stageID = UUID()
+    var enteredCode = ""
+    var errorMessage = ""
+    var cameraDenied = false
+    var checkingCatalog = false
+    var catalogCheckFailed = false
+    var alertID = UUID()
+    var catalogTask: Task<Void, Never>?
+    var ownsFlow: () -> Bool = { true }
+    var canDismiss: Bool { stage.transitionID != "applying" && stage.transitionID != "completed" }
+    func checkCatalog(_ configuration: ShareableFilterConfiguration) {}
+    func publish() {}
     var reduceMotion = false
     var applyError: String?
     var pendingActiveReplacement: PendingActiveReplacement?
@@ -142,21 +156,20 @@ TESTS = r'''
         do {
             let flow = Flow()
             flow.go(to: .enterCode)
-            expect(flow.stage == .enterCode && flow.navDirection == .forward, "Enter did not advance")
+            expect(flow.stage == .enterCode && flow.navDirection == "forward", "Enter did not advance")
             flow.go(to: .confirm(config))
             flow.go(to: .enterCode)
-            expect(flow.navDirection == .backward, "Back did not reverse the stage transition")
-            flow.goBackFromMethod()
+            expect(flow.navDirection == "backward", "Back did not reverse the stage transition")
+            flow.back()
             expect(flow.stage == .chooseMethod, "Method Back did not return to chooser")
             scenarios += 1
         }
         do {
             let flow = Flow()
             flow.startMode = .enterCode
-            var backs = 0
-            flow.onRootBack = { backs += 1 }
-            flow.goBackFromMethod()
-            expect(backs == 1 && flow.dismissCount == 0, "Onboarding Back lost its owner")
+            flow.stage = .enterCode
+            flow.back()
+            expect(flow.dismissCount == 1, "Direct code-entry Back did not dismiss")
             scenarios += 1
         }
         do {
@@ -212,8 +225,9 @@ TESTS = r'''
             let pending = flow.pendingActiveReplacement!
             expect(pending.target == target && pending.configuration == config, "Consent lost the selected target")
             flow.authorizeImport = { true }
-            flow.replace(pending.configuration, originalConfiguration: pending.originalConfiguration,
-                         into: pending.target, confirmedActiveReplacement: true)
+            flow.confirmActiveReplacement("stale-consent")
+            expect(flow.viewModel.replacements == 0, "Stale consent token committed")
+            flow.confirmActiveReplacement(pending.id.uuidString)
             await settled(flow)
             expect(flow.viewModel.replacements == 1 && flow.stage == .completed(filterName: target.name), "Explicit active consent did not commit")
             expect(flow.completion.unavailableListCount == 2, "Replace lost skipped-list notice")
@@ -237,6 +251,23 @@ TESTS = r'''
             flow.viewModel.failReplace = true
             flow.replace(config, originalConfiguration: config, into: target); await settled(flow)
             expect(flow.stage == .chooseReplace(config) && flow.applyError == "Write failed", "Failed Replace showed success")
+            scenarios += 1
+        }
+        do {
+            let flow = Flow(); let auth = Auth()
+            flow.stage = .confirm(config); flow.authorizeImport = { await auth.call() }
+            flow.addNew(config); await auth.ready()
+            flow.ownsFlow = { false }; auth.reply(true)
+            for _ in 0..<100 { await Task.yield() }
+            expect(flow.viewModel.additions == 0 && flow.completion.filterName == nil, "Retired owner committed after auth")
+            scenarios += 1
+        }
+        do {
+            let flow = Flow(); let auth = Auth()
+            flow.stage = .confirm(config); flow.authorizeImport = { await auth.call() }
+            flow.addNew(config); await auth.ready()
+            flow.concealAcceptedPresentation(); auth.reply(false); await settled(flow)
+            expect(flow.stage == .chooseMethod && flow.completion.filterName == nil, "Privacy teardown replayed an uncommitted decoded import")
             scenarios += 1
         }
         print("PASS \(scenarios) production import-flow scenarios; \(checks) assertions")

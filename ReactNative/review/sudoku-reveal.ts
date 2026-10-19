@@ -6,14 +6,10 @@ import {Easing} from 'react-native';
 // policy (emoji list, geometry, trail interpolation, timings) so the screen and
 // its tests share one definition and the gameplay board stays untouched.
 
-// Frozen list: Unicode ≤ 12.0 emoji (the deployment target is iOS 18, so every
-// one renders; the two newest here are the orange heart at 10.0 and Saturn at
-// 12.0). Single grapheme each, so Apple restyles cannot change the set out from
-// under a build, and strong silhouettes read at board scale. Fruit, animals,
-// plants, the full coloured-heart family except black/white/brown, and a few
-// objects. The heart family is deliberately a minority so runs of similar
-// glyphs stay rare.
-export const REVEAL_EMOJI = [
+// Version 1 stays frozen in both membership and order: saved puzzles without
+// revealVersion used this 44-glyph pool. Extending its modulus would change
+// their pictures after an app update, even though the puzzle itself is unchanged.
+const LEGACY_REVEAL_EMOJI = [
   // Fruit
   '🍎', '🍋', '🍇', '🍉', '🍓', '🍒', '🍑', '🍍', '🍌', '🍊', '🍐', '🥝',
   // Animals
@@ -24,6 +20,26 @@ export const REVEAL_EMOJI = [
   '❤️', '🧡', '💛', '💚', '💙', '💜',
   // Others
   '🗿', '🌈', '⭐️', '🪐',
+] as const;
+
+// Curated Unicode ≤ 12.0, single-grapheme emoji; all render on the iOS 18 floor.
+// Version 2 adds 40 animals, treats, plants, sky scenes and playful objects.
+// Keep this pool frozen too; future expansions need a new persisted version.
+export const REVEAL_EMOJI = [
+  ...LEGACY_REVEAL_EMOJI,
+  // Animals
+  '🐶', '🐱', '🐰', '🐹', '🐻', '🐨', '🦦', '🦔',
+  '🦝', '🦥', '🦉', '🐣', '🐷', '🐮', '🐯', '🐵',
+  // Sweets
+  '🍦', '🍩', '🍪', '🧁', '🍭', '🍮',
+  // Snacks
+  '🍙', '🥐', '🥨', '🥞',
+  // Nature
+  '🌺', '🌼', '🍁', '🌿',
+  // Sky and space
+  '🌞', '🌙', '🌍', '🚀',
+  // Toys and gifts
+  '🧸', '🎈', '🎁', '🎀', '🪁', '🧩',
 ] as const;
 
 export const REVEAL_SIDE_FRACTION = 0.8;
@@ -49,7 +65,7 @@ export type RevealPoint = {x: number; y: number};
 /// glyph — re-opening the solved board, resetting it, or relaunching on it must
 /// not change the picture — while a new puzzle draws a different one. FNV-1a
 /// over the givens, then a final mix so the low bits spread across the list.
-export function revealEmojiFor(givens: readonly number[]): string {
+export function revealEmojiFor(givens: readonly number[], revealVersion: 1 | 2 = 1): string {
   let hash = 0x811c9dc5;
   for (const value of givens) {
     hash = Math.imul(hash ^ value, 0x01000193);
@@ -59,7 +75,8 @@ export function revealEmojiFor(givens: readonly number[]): string {
   hash ^= hash >>> 15;
   hash = Math.imul(hash, 0x735a2d97);
   hash ^= hash >>> 15;
-  return REVEAL_EMOJI[(hash >>> 0) % REVEAL_EMOJI.length]!;
+  const pool = revealVersion === 2 ? REVEAL_EMOJI : LEGACY_REVEAL_EMOJI;
+  return pool[(hash >>> 0) % pool.length]!;
 }
 
 export function revealFontSize(side: number): number {

@@ -73,10 +73,55 @@
           "path": "LavaSecUIReview/LavaDecorationContent.swift"
         },
         {
+          "path": "LavaSecUIReview/LavaSheetScrollEdge.swift"
+        },
+        {
           "path": "LavaSecUIReview/LavaShareCardSurfaceView.h"
         },
         {
           "path": "LavaSecUIReview/LavaShareCardSurfaceView.mm"
+        },
+        {
+          "path": "LavaSecUIReview/LavaInlineSymbolTextView.h"
+        },
+        {
+          "path": "LavaSecUIReview/LavaInlineSymbolTextView.mm"
+        },
+        {
+          "path": "LavaSecUIReview/LavaInlineSymbolTextContent.swift"
+        },
+        {
+          "path": "LavaSecUIReview/LavaSystemButtonView.h"
+        },
+        {
+          "path": "LavaSecUIReview/LavaSystemButtonView.mm"
+        },
+        {
+          "path": "LavaSecUIReview/LavaSystemButtonContent.swift"
+        },
+        {
+          "path": "LavaSecUIReview/LavaQAConfigurationView.h"
+        },
+        {
+          "path": "LavaSecUIReview/LavaQAConfigurationView.mm"
+        },
+        {
+          "path": "LavaSecUIReview/LavaPasscodeInputView.h"
+        },
+        {
+          "path": "LavaSecUIReview/LavaPasscodeInputView.mm"
+        },
+        {
+          "path": "LavaSecUIReview/LavaImportScannerView.h"
+        },
+        {
+          "path": "LavaSecUIReview/LavaImportScannerView.mm"
+        },
+        {
+          "path": "LavaSecUIReview/LavaBackupCredentialsView.h"
+        },
+        {
+          "path": "LavaSecUIReview/LavaBackupCredentialsView.mm"
         },
         {
           "path": "LavaSecUIReview/LavaShareQrView.h"
@@ -158,12 +203,6 @@
         },
         {
           "path": "LavaSecUIReview/LavaContextMenuView.mm"
-        },
-        {
-          "path": "LavaSecUIReview/LavaNativePageView.h"
-        },
-        {
-          "path": "LavaSecUIReview/LavaNativePageView.mm"
         },
         {
           "path": "LavaSecUIReview/LavaSwitchView.h"

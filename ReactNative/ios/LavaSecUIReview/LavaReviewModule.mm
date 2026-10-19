@@ -26,6 +26,9 @@
 - (void)chooseFilterAction:(NSString *)name canSwitch:(BOOL)canSwitch canShare:(BOOL)canShare resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject {
   dispatch_async(dispatch_get_main_queue(), ^{ [LavaFilterChoiceBridge chooseWithName:name canSwitch:canSwitch canShare:canShare completion:^(NSString *value) { resolve(value ?: (id)kCFNull); }]; });
 }
+- (void)chooseActivityExport:(BOOL)canShareChart resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject {
+  dispatch_async(dispatch_get_main_queue(), ^{ [LavaFilterChoiceBridge chooseActivityExportWithCanShareChart:canShareChart completion:^(NSString *value) { resolve(value ?: (id)kCFNull); }]; });
+}
 - (NSString *)getLegalNotices { return [LavaReviewReferenceContent legalNotices]; }
 - (NSString *)getGuardAccents { return [LavaReviewReferenceContent guardAccents]; }
 - (NSString *)getBlocklistCatalog { return [LavaReviewReferenceContent blocklistCatalog]; }

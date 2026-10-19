@@ -14,7 +14,7 @@ import NativeReview from '../specs/NativeLavaReview';
 import {LavaActionButton, LavaCard} from '../src';
 import {colors} from '../src/colors.ios';
 import {Choice, Copy, DisclosureRow, Screen, Section, Symbol} from './primitives';
-import {Control, Group, Info, ListRow, Quiet, QuietFooter, Search, StatusPill, toolbarButton, useToolbar, nativeSearchOptions} from './scaffold';
+import {Control, Group, Info, ListRow, Quiet, QuietFooter, Search, StatusPill, toolbarAction, useToolbar, nativeSearchOptions} from './scaffold';
 import {DetailNotice, DetailValues, detailStyles as base_s} from './detail-scaffold';
 import {useReview} from './ReviewContext';
 import {previewDomains} from './preview-model';
@@ -50,7 +50,7 @@ export function DomainListScreen({history=false}: {history?: boolean}) {
     const contract=live?.confirmations?.['Clear domain history']??{title:'Clear domain history?',message:'This removes saved domain rows from this device. Filtering counts and network activity are unchanged.',action:'Clear History'};
     Alert.alert(contract.title,contract.message,[{text:'Cancel',style:'cancel'},{text:contract.action,style:'destructive',onPress:()=>run({type:'logs.clear',kind:'Clear domain history',surface:'activityViewing'})}]);
   };
-  const domainActions=[{id:'copy',title:'Copy',symbol:'doc.on.doc'},{id:'blocked',title:'Block',symbol:foundation.outcome.blocked},{id:'allowed',title:'Allow',symbol:foundation.outcome.allowed}];
+  const domainActions=[{id:'copy',title:'Copy',symbol:'doc.on.doc'},{id:'blocked',title:'Block',symbol:foundation.outcome.blockedOutline},{id:'allowed',title:'Allow',symbol:foundation.outcome.allowedOutline}];
   const domainAction=(domain:string,action:string)=>{
     if(action==='copy'){run({type:'domains.copy',domain});return;}
     if(action!=='blocked'&&action!=='allowed')return;
@@ -66,7 +66,7 @@ export function DomainListScreen({history=false}: {history?: boolean}) {
     }).catch(error=>{if(canOpenReview.current&&error.message!=='Authentication cancelled.')Alert.alert('Lava',error.message);});
   };
   const canClear=enabled&&(app?live?.hasDomainHistory===true:activityExample);
-  useToolbar({headerSearchBarOptions:nativeSearchOptions('Search domains',setSearch),unstable_headerRightItems:()=>[toolbarButton('Clear Domain Logs','trash',clear,!canClear)]},[canClear]);
+  useToolbar({headerSearchBarOptions:nativeSearchOptions('Search domains',setSearch),unstable_headerRightItems:()=>[toolbarAction('Clear Domain Logs','delete',clear,!canClear)]},[canClear]);
   // The search field belongs to the navigation item, so it no longer rides the
   // page's content insets; with it gone the page has no text input to avoid.
   return <Screen showsVerticalScrollIndicator onRefresh={app?()=>query.refresh():undefined} onEndReached={()=>{if(app&&history&&!query.refreshing&&query.value&&query.value.length>limit&&!loadingMore.current){loadingMore.current=true;setLimit(limit+30);}}}>
@@ -104,7 +104,7 @@ export function NetworkScreen() {
   // Arrival/expiry and a pending read preserve the user's expanded page. An
   // accepted empty log starts the next populated log at the first page.
   useEffect(()=>{if(query.value?.length===0)setLimit(30);},[query.value?.length]);
-  useToolbar({unstable_headerRightItems:()=>[toolbarButton('Clear network activity','trash',()=>Alert.alert('Clear local network activity?','This removes saved network activity entries from this phone. Filtering counts and domain history are unchanged.',[{text:'Cancel',style:'cancel'},{text:'Clear Activity',style:'destructive',onPress:()=>run({type:'logs.clear',kind:'Clear network activity',surface:'activityViewing'})}]),!query.value?.length)]},[query.value?.length??0]);
+  useToolbar({unstable_headerRightItems:()=>[toolbarAction('Clear network activity','delete',()=>Alert.alert('Clear local network activity?','This removes saved network activity entries from this phone. Filtering counts and domain history are unchanged.',[{text:'Cancel',style:'cancel'},{text:'Clear Activity',style:'destructive',onPress:()=>run({type:'logs.clear',kind:'Clear network activity',surface:'activityViewing'})}]),!query.value?.length)]},[query.value?.length??0]);
   return <Screen showsVerticalScrollIndicator onRefresh={app?()=>query.refresh():undefined} onEndReached={()=>{if(count>limit)setLimit(Math.min(limit+30,count));}}><SettingsIntro summary="Connection and protection events stay on this device for 7 days. Share them only when you choose to attach a bug report."/>
     <View testID={query.value?"network.loaded":"network.pending"}><Group>{query.value?.length?query.value.slice(0,limit).map(row=><NetworkRow key={row.id} row={row}/>):<ListRow title={query.error??(app&&!query.value?'Loading network activity…':session.logs['Network activity']?'No network activity yet':'Network activity is off')} />}</Group></View>
   </Screen>;

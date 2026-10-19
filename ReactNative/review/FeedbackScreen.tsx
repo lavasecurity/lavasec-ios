@@ -5,7 +5,7 @@ import {View} from 'react-native';
 import {LavaActionButton, LavaCard} from '../src';
 import {colors} from '../src/colors.ios';
 import {Copy, Section} from './primitives';
-import {Group, Info, ListRow, QuietFooter, Sheet, Toggle, toolbarButton, useToolbar} from './scaffold';
+import {Group, Info, ListRow, QuietFooter, Sheet, Toggle, toolbarAction, useToolbar} from './scaffold';
 import {DetailField, DetailReviewValue, DetailSteps, detailStyles as base_s} from './detail-scaffold';
 import {previewNotice, useReviewNavigation} from './navigation';
 
@@ -15,7 +15,7 @@ export function FeedbackScreen() {
   const nav=useReviewNavigation();const [step,setStep]=useState(0);const [furthest,setFurthest]=useState(0);const [topic,setTopic]=useState('');const [details,setDetails]=useState('');const [email,setEmail]=useState('');const [site,setSite]=useState('');const [diagnostics,setDiagnostics]=useState(false);
   const next=()=>{const value=Math.min(step+1,2);setStep(value);setFurthest(Math.max(value,furthest));};
   const close=()=>{if(topic||details||email||site||diagnostics)Alert.alert('Discard feedback?','Your feedback draft will be removed.',[{text:'Cancel',style:'cancel'},{text:'Discard',style:'destructive',onPress:()=>nav.goBack()}]);else nav.goBack();};
-  useToolbar({unstable_headerLeftItems:()=>[toolbarButton('Cancel','xmark',close)],unstable_headerRightItems:()=>[]},[topic,details,email,site,diagnostics]);
+  useToolbar({unstable_headerLeftItems:()=>[toolbarAction('Cancel','close',close)],unstable_headerRightItems:()=>[]},[topic,details,email,site,diagnostics]);
   const field=(label:string,value:string,onChange:(s:string)=>void,multiline=false)=><View style={s.tightStack}><DetailField title={label} placeholder={label==='Details'?'What were you trying to do? What did Lava do instead?':label} value={value} onChangeText={onChange} multiline={multiline} maxLength={multiline?5000:320} autoCapitalize={multiline?'sentences':'none'} keyboardType={label==='Email for follow-up (optional)'?'email-address':label==='Site or domain'?'url':'default'}/>{multiline&&<View style={s.right}><Copy role="caption" color={colors.secondaryText}>{details.length}/5,000</Copy></View>}</View>;
   return <Sheet header={<DetailSteps titles={['Topic','Details','Review']} current={step} furthest={furthest} onSelect={setStep}/>}
     footer={<View style={s.actions}>{step>0&&<View style={s.flex}><LavaActionButton title="Back" role="secondary" onPress={()=>setStep(step-1)} /></View>}<View style={s.flex}><LavaActionButton title={step===0?'Continue':step===1?'Review':'Submit'} disabled={step===0?!topic:step===1?!details.trim():false} onPress={step===2?previewNotice:next} /></View></View>}>

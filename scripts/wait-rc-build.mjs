@@ -15,7 +15,8 @@ export async function waitForBuild(url, {
   read = id => JSON.parse(execFileSync('gh', ['api', `repos/lavasecurity/lavasec-runner/actions/runs/${id}`], { encoding: 'utf8', timeout: 30000 })),
   sleep = ms => new Promise(resolve => setTimeout(resolve, ms)),
   now = Date.now,
-  timeoutMs = 145 * 60 * 1000,
+  // Leave five minutes for final reporting before the 300-minute result job limit.
+  timeoutMs = 295 * 60 * 1000,
   report = console.log,
 } = {}) {
   const id = runId(url);

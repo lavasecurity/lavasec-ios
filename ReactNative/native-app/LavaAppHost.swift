@@ -28,6 +28,20 @@ struct LavaAppPlusContent: UIViewRepresentable {
     static func dismantleUIView(_ view: UIView, coordinator: ()) { (view as? LavaAppReactSurface)?.retire() }
 }
 
+/// UIKit/SwiftUI owns only the existing sheet navigation around the RN sales page.
+/// A missing runtime cannot reopen the retired native Upgrade screen.
+struct LavaPlusUpgradeSheet: View {
+    let context: String
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            LavaAppPlusContent(context: context)
+                .lavaFullSheetHeader("Lava Plus", close: dismiss.callAsFunction)
+        }
+    }
+}
+
 /// Bounded RN body in the same runtime and UIKit modal owner as native flows.
 /// Its independent command port can complete a parent command awaiting dismissal.
 struct LavaAppForegroundContent: UIViewRepresentable {
@@ -36,6 +50,21 @@ struct LavaAppForegroundContent: UIViewRepresentable {
     func makeUIView(context: Context) -> UIView { Self.makeRoot?(id) ?? UIView() }
     func updateUIView(_ view: UIView, context: Context) {}
     static func dismantleUIView(_ view: UIView, coordinator: ()) { (view as? LavaAppReactSurface)?.retire() }
+}
+
+/// Native containment only; preparation and passcode content are described by RN.
+struct LavaAppPreparationContent: UIViewRepresentable {
+    @MainActor static var makeRoot: ((String) -> UIView?)?
+    let id: String
+    func makeUIView(context: Context) -> UIView { Self.makeRoot?(id) ?? UIView() }
+    func updateUIView(_ view: UIView, context: Context) {}
+    static func dismantleUIView(_ view: UIView, coordinator: ()) { (view as? LavaAppReactSurface)?.retire() }
+}
+struct LavaAppSecurityContent: UIViewRepresentable {
+    @MainActor static var makeRoot: ((String) -> UIView?)?
+    let id: String
+    func makeUIView(context: Context) -> UIView { Self.makeRoot?(id) ?? UIView() }
+    func updateUIView(_ view: UIView, context: Context) {}
 }
 
 @MainActor
@@ -50,9 +79,10 @@ private final class LavaAppViewController: UIViewController {
         if onboardingPreview, let onboardingID { LavaAppBridge.shared.endOnboarding(onboardingID) }
     }
     private var reactSurface: LavaAppReactSurface?
+    private var reactRootReady = false
     private var exportDirectory: URL?
     private var exportSubscription: AnyCancellable?
-    private let preparationFlow = LavaAppNativeFlow(name: "preparation")
+    private var preparationFlow: LavaAppNativeFlow?
     private var preparationSubscription: AnyCancellable?
     private var customizationSubscription: AnyCancellable?
     private var flowSubscription: AnyCancellable?
@@ -60,6 +90,7 @@ private final class LavaAppViewController: UIViewController {
     private var stagingSubscription: AnyCancellable?
     private var feedbackDraftSubscription: AnyCancellable?
     private var foregroundDraftSubscription: AnyCancellable?
+    private var bridgeStateSubscription: AnyCancellable?
     private var bootstrapSubscriptions = Set<AnyCancellable>()
     private var onboardingChromeObserver: String?
     private weak var onboardingChromeController: UIViewController?
@@ -71,6 +102,7 @@ private final class LavaAppViewController: UIViewController {
         super.viewDidAppear(animated)
         if !onboardingPreview, let scene = view.window?.windowScene { securityWindow.attach(to: scene) }
         updateOnboardingChrome()
+        updateNativeFlow()
     }
     private var factory: RCTReactNativeFactory?
     private var factoryDelegate: LavaAppReactDelegate?
@@ -103,6 +135,9 @@ private final class LavaAppViewController: UIViewController {
             Task { @MainActor [weak self] in self?.updateFlowModalState() }
         }
         foregroundDraftSubscription = LavaAppBridge.shared.$foregroundDraftIsDirty.sink { [weak self] _ in
+            Task { @MainActor [weak self] in self?.updateFlowModalState() }
+        }
+        bridgeStateSubscription = LavaAppBridge.shared.objectWillChange.sink { [weak self] _ in
             Task { @MainActor [weak self] in self?.updateFlowModalState() }
         }
         view.backgroundColor = UIColor(LavaStyle.groupedBackground)
@@ -172,6 +207,20 @@ private final class LavaAppViewController: UIViewController {
                 guard let factory else { return nil }
                 return LavaAppReactSurface(factory: factory, properties: ["fullApp": true, "plusContext": context])
             }
+            LavaAppPreparationContent.makeRoot = { [weak factory] id in
+                guard let factory else { return nil }
+                return LavaAppReactSurface(factory: factory, properties: ["fullApp": true, "preparationContext": id])
+            }
+            LavaAppSecurityContent.makeRoot = { [weak factory] id in
+                guard let factory else { return nil }
+                let bridge = LavaAppBridge.shared
+                // Authentication is the prerequisite for private RN presentation, so
+                // this public credential shell cannot participate in its reveal ACK.
+                let root = factory.rootViewFactory.view(withModuleName: "LavaUIReview", initialProperties: [
+                    "securityContext": id, "initialSnapshot": bridge.snapshot(), "initialPresentation": bridge.presentationSnapshot()])
+                root.backgroundColor = UIColor(LavaStyle.groupedBackground)
+                return root
+            }
             LavaAppForegroundContent.makeRoot = { [weak factory] id in
                 guard let factory else { return nil }
                 return LavaAppReactSurface(factory: factory, properties: ["fullApp": true, "foregroundContext": id])
@@ -187,12 +236,18 @@ private final class LavaAppViewController: UIViewController {
             root.leadingAnchor.constraint(equalTo: view.leadingAnchor), root.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             root.topAnchor.constraint(equalTo: view.topAnchor), root.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
+        reactRootReady = true
+        updateNativeFlow()
     }
     private func updateNativeFlow() {
         guard !onboardingPreview, !isChangingFlow else { return }
         let bridge = LavaAppBridge.shared
         if bridge.exporting { presentExportIfNeeded(); return }
-        let pendingFlow = bridge.model.isFilterPreparationScreenPresented ? preparationFlow : bridge.flow
+        bridge.reconcilePreparationPresentation()
+        if preparationFlow?.id != bridge.currentPreparationAttemptID {
+            preparationFlow = bridge.currentPreparationAttemptID.map { LavaAppNativeFlow(id: $0, name: "preparation") }
+        }
+        let pendingFlow = preparationFlow ?? bridge.flow
         let withholdImport = pendingFlow?.isImport == true && (bridge.security.isAppUnlockBlockingUI || bridge.security.isAppUnlockPrivacyMaskVisible)
         let desiredFlow = withholdImport ? nil : pendingFlow
         if presentedFlowID == desiredFlow?.id { return }
@@ -200,7 +255,10 @@ private final class LavaAppViewController: UIViewController {
             isChangingFlow = true
             // Withholding is not cancellation. Retain the staged request so it
             // can create a fresh importer once App Unlock/privacy clears.
-            if withholdImport && presentedFlowID == pendingFlow?.id { controller.onDismiss = nil }
+            if withholdImport && presentedFlowID == pendingFlow?.id {
+                controller.onDismiss = nil
+                bridge.retireImportPresentation()
+            }
             controller.dismiss(animated: !withholdImport) { [weak self] in
                 self?.presentedFlow = nil
                 self?.presentedFlowID = nil
@@ -209,7 +267,9 @@ private final class LavaAppViewController: UIViewController {
             }
             return
         }
-        guard let flow = desiredFlow, let root = view.window?.rootViewController else { return }
+        // Native launch requests can precede the factory-backed root closures.
+        // Mounting their representable then would retain an empty fallback view.
+        guard reactRootReady, let flow = desiredFlow, let root = view.window?.rootViewController else { return }
         var top = root
         while let presented = top.presentedViewController { top = presented }
         let m = bridge.model
@@ -225,6 +285,8 @@ private final class LavaAppViewController: UIViewController {
             controller.fitUtilitySheet()
         }
         controller.onDismiss = { [weak self] in
+            bridge.retireQASession(id: flow.id.uuidString)
+            if flow.isImport, bridge.importSession?.id == flow.id { bridge.importSession?.retire(); bridge.importSession = nil }
             if bridge.flow?.id == flow.id { bridge.flow = nil }
             if flow.name == "feedback" { bridge.retireFeedback(flow.id) }
             if flow.name == "vpnConfiguration", bridge.wireGuardEditorVisit?.id == flow.id {
@@ -248,7 +310,7 @@ private final class LavaAppViewController: UIViewController {
             sheet.detents = [.medium()]
             sheet.selectedDetentIdentifier = .medium
         }
-        if flow.name == "deleteFilters", let sheet = controller.sheetPresentationController {
+        if ["deleteFilters", "backupSetup", "backupRestore"].contains(flow.name), let sheet = controller.sheetPresentationController {
             sheet.detents = [.large()]
         }
         controller.isModalInPresentation = flow.name == "preparation"
@@ -265,9 +327,15 @@ private final class LavaAppViewController: UIViewController {
     private func updateFlowModalState() {
         let bridge = LavaAppBridge.shared
         guard let presentedFlow, bridge.flow?.id == presentedFlowID else { return }
+        presentedFlow.updateUtilityMode(large: bridge.flow?.isImport == true && bridge.importSession?.stage.transitionID == "completed")
+        if let id = bridge.flow?.id, let height = bridge.foregroundNaturalHeights[id] { presentedFlow.updateNaturalHeight(height) }
         var blocksInteractiveDismiss = bridge.flow?.name == "feedback" && bridge.feedbackDraftIsDirty
         blocksInteractiveDismiss = blocksInteractiveDismiss || bridge.flow?.usesReactPresentation == true && bridge.foregroundDraftIsDirty
         blocksInteractiveDismiss = blocksInteractiveDismiss || bridge.model.isStagingChainedUpstreamForQA
+        if let flow = bridge.flow {
+            blocksInteractiveDismiss = blocksInteractiveDismiss || bridge.accountBackupBlocksDismissal(flow.id)
+            blocksInteractiveDismiss = blocksInteractiveDismiss || flow.isImport && bridge.importSession?.canDismiss == false
+        }
         presentedFlow.isModalInPresentation = blocksInteractiveDismiss
     }
     private func presentExportIfNeeded() {
@@ -320,6 +388,7 @@ private final class LavaAppFlowController: UIHostingController<AnyView>, UIAdapt
     var onDismissAttempt: (() -> Void)?
     private(set) var fitsUtilitySheet = false
     private var naturalSheetHeight: CGFloat = 0
+    private var largeUtilitySheet = false
     private var fittedSize: CGSize = .zero
     private var fittedSheetActive = false
     private var utilitySizeUpdatePending = false
@@ -334,6 +403,18 @@ private final class LavaAppFlowController: UIHostingController<AnyView>, UIAdapt
             self.naturalSheetHeight = size.height
             self.scheduleUtilitySheetSize()
         })
+        scheduleUtilitySheetSize()
+    }
+
+    func updateUtilityMode(large: Bool) {
+        guard fitsUtilitySheet, large != largeUtilitySheet else { return }
+        largeUtilitySheet = large
+        scheduleUtilitySheetSize()
+    }
+
+    func updateNaturalHeight(_ height: CGFloat) {
+        guard fitsUtilitySheet, height.isFinite, height > 0, abs(height - naturalSheetHeight) > 0.5 else { return }
+        naturalSheetHeight = height
         scheduleUtilitySheetSize()
     }
 
@@ -368,7 +449,7 @@ private final class LavaAppFlowController: UIHostingController<AnyView>, UIAdapt
             if let bar = view as? UINavigationBar { return bar.isHidden ? 0 : bar.bounds.height }
             return view.subviews.map(navigationHeight).max() ?? 0
         }
-        let height = max(320, naturalSheetHeight + navigationHeight(view)).rounded(.up)
+        let height = largeUtilitySheet ? container.height * 0.85 : max(320, naturalSheetHeight + navigationHeight(view)).rounded(.up)
         let size = CGSize(width: min(640, container.width * 0.85),
                           height: min(height, container.height * 0.85))
         guard !fittedSheetActive || size != fittedSize else { return }
@@ -495,7 +576,11 @@ private struct LavaAppSecuritySurface: View {
     var body: some View {
         Group {
             if let request = security.passcodeAuthenticationRequest {
-                SecurityPasscodeAuthenticationView(request: request).id(request.id)
+                if let session = bridge.currentPasscodeSession(), session.id == request.id {
+                    LavaAppPasscodeNavigation(session: session) {
+                        LavaAppSecurityContent(id: request.id.uuidString)
+                    }.id(request.id)
+                }
             } else if security.isAppUnlockPrivacyMaskVisible || !security.isAppUnlockBlockingUI && bridge.isPresentationRevealPending {
                 SecurityPrivacyMaskOverlay()
             } else {

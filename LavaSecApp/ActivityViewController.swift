@@ -28,8 +28,8 @@ enum ShareSheetPresenter {
     /// would push the payload into clipboards and link previews the sender never
     /// asked for.
     @MainActor
-    static func present(image: UIImage, onComplete: ((Outcome) -> Void)? = nil) {
-        present(activityItems: [ShareCardActivityItemSource(image: image)], onComplete: onComplete)
+    static func present(image: UIImage, title: String? = nil, onComplete: ((Outcome) -> Void)? = nil) {
+        present(activityItems: [ShareCardActivityItemSource(image: image, title: title)], onComplete: onComplete)
     }
 
     /// Presents arbitrary activity items — an exported file URL plus the disclosure copy that
@@ -86,12 +86,16 @@ enum ShareSheetPresenter {
 /// item source protocol is nonisolated; presenting its controller stays on MainActor.
 final class ShareCardActivityItemSource: NSObject, UIActivityItemSource {
     let image: UIImage
-    init(image: UIImage) { self.image = image }
+    let title: String
+    init(image: UIImage, title: String? = nil) {
+        self.image = image
+        self.title = title ?? "Scan to import my Lava filter".lavaLocalized
+    }
     func activityViewControllerPlaceholderItem(_ activityViewController: UIActivityViewController) -> Any { image }
     func activityViewController(_ activityViewController: UIActivityViewController, itemForActivityType activityType: UIActivity.ActivityType?) -> Any? { image }
     func activityViewControllerLinkMetadata(_ activityViewController: UIActivityViewController) -> LPLinkMetadata? {
         let metadata = LPLinkMetadata()
-        metadata.title = "Scan to import my Lava filter".lavaLocalized
+        metadata.title = title
         // Leave image providers unset so the share header can keep the app icon.
         return metadata
     }

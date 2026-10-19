@@ -60,27 +60,22 @@ final class TypographyScaleSourceTests: XCTestCase {
 
     // MARK: SettingsView call sites
 
-    /// Settings routes its standard navigation/link/system rows through `lavaCardTitleText()` and
-    /// its resolver / bug-report rows through `lavaRowTitleText()`, including the Custom DNS row
-    /// weight OUTLIER (`.subheadline.weight(.medium)` → the row role).
+    /// Settings' remaining native labels and RN DNS rows share their platform's
+    /// token-backed title owners; custom providers do not select a local font.
     func testSettingsViewTitlesRouteThroughTokens() throws {
-        let raw = try readSettingsSourceAggregate()
-        let settings = compact(raw)
-
         XCTAssertTrue(try readSource(.lavaComponents).contains(".lavaCardTitleText()"))
-        XCTAssertTrue(raw.contains(".lavaRowTitleText()"))
+        let dns = try readSource(.reactNativeDNSScreen)
+        XCTAssertTrue(dns.contains("<ListRow key={choice.id} verbatimTitle title={choice.name}"))
+        XCTAssertFalse(dns.contains("fontSize:"))
+        XCTAssertFalse(dns.contains("fontWeight:"))
 
-        // Custom DNS row: the weight outlier is now the row role.
-        XCTAssertTrue(
-            settings.contains(".lavaRowTitleText().lavaInactiveText(!isEnabled)"),
-            "CustomDNSResolverRow title should use lavaRowTitleText()"
-        )
-        // `.subheadline.weight(.medium)` still appears at non-title body-copy sites (the upgrade
-        // pitch lines), so scope the absence to the DNS-row adjacency rather than the whole file.
-        XCTAssertFalse(
-            settings.contains(".font(.subheadline.weight(.medium)).lavaInactiveText"),
-            "Custom DNS row weight outlier must be migrated to the row role"
-        )
+        let row = try sourceBlock(in: readSource(.reactNativeScaffold),
+            startingAt: "export function ListRow(", endingBefore: "export function Toggle(")
+        XCTAssertTrue(row.contains("<LavaRowLabel title={title} summary={subtitle}"))
+        let label = try readSource(.reactNativeRowContent)
+        XCTAssertTrue(label.contains("titleRole='rowTitle'"))
+        XCTAssertTrue(label.contains("titleRole==='cardTitle'?foundation.type.section:foundation.type.row"))
+        XCTAssertTrue(try readSource(.reactNativeFoundation).contains("row: lavaTokens.typography.rowTitle"))
     }
 
     // MARK: Shared components
@@ -100,7 +95,7 @@ final class TypographyScaleSourceTests: XCTestCase {
         XCTAssertTrue(summary.contains("case .standardLocalized(let value):"))
         XCTAssertTrue(summary.contains(".lavaRowSubtitleText()"))
         // Import entries consume this same label, including its metadata owner.
-        XCTAssertTrue(try readSource(.shareableFiltersUI).contains("LavaNavigationCardLabel("))
+        XCTAssertTrue(try readSource(.reactNativeImportFlow).contains("<ListRow"))
     }
 
     /// The condensed-list item's default title font is the single row-title source, not an

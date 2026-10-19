@@ -1,3 +1,4 @@
+import {actionSymbols} from './ui/platform/ios/icons';
 import {useWindowLayout,useWindowStyles} from './window-layout';
 import {useHeldActionScrollLock} from './interaction-lock';
 import {localized} from '../app/presentation';
@@ -21,7 +22,7 @@ export function LavaSelectionAccessory({state,disabled=false}:LavaSelectionAcces
   const {scale}=useWindowLayout();
   return <View accessible={false} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" pointerEvents="none"
     style={{width:foundation.control.accessory*scale,height:foundation.control.glyphSlot*scale,flexShrink:0,alignItems:'center',justifyContent:'center'}}>
-    {state!=='unselected'&&<Decoration symbol={state==='locked'?'lock.fill':'checkmark.circle.fill'}
+    {state!=='unselected'&&<Decoration symbol={state==='locked'?'lock.fill':'checkmark'}
       tone={state==='locked'||disabled?'secondary':'green'} fontPointSize={foundation.control.glyph*scale} fontWeight="regular"
       accessible={false} accessibilityElementsHidden style={{width:foundation.control.glyphSlot*scale,height:foundation.control.glyphSlot*scale}}/>}
   </View>;
@@ -49,7 +50,7 @@ export function LavaText({children, role = 'rowTitle', tone, testID}: LavaTextPr
   >{children}</Text>;
 }
 
-export function LavaCard({children, background, role = 'card', testID, borderColor}: LavaCardProps & {borderColor?:ColorValue}) {
+export function LavaCard({children, background, role = 'card', testID, borderColor}: LavaCardProps & {borderColor?:ColorValue|null}) {
   const {insetScale}=useWindowLayout();
   return <LavaSurface testID={testID} role={role} borderColor={borderColor} style={{alignSelf:'stretch'}}
     contentStyle={role==='panel'?{paddingHorizontal:lavaTokens.spacing.infoPanelHorizontalInset*insetScale,paddingVertical:lavaTokens.spacing.infoPanelVerticalInset*insetScale}:{padding:lavaTokens.spacing.lg*insetScale}}>
@@ -58,11 +59,13 @@ export function LavaCard({children, background, role = 'card', testID, borderCol
   </LavaSurface>;
 }
 
-export function LavaActionButton({title, role = 'primary', tone='affirmative', onPress, disabled = false, accessibilityHint, subtitle, icon, busy=false, onLongPress, accessibilityActions, onAccessibilityAction, testID,stablePill=false,whiteOutline=false,outlineTransitionDuration=0,labelRole='actionLabel'}: LavaActionButtonProps) {
+export function LavaActionButton({title, role = 'primary', tone='affirmative', onPress, disabled = false, accessibilityHint, subtitle, icon, busy, onLongPress, accessibilityActions, onAccessibilityAction, testID,stablePill=false,whiteOutline=false,outlineTransitionDuration=0,labelRole='actionLabel'}: LavaActionButtonProps) {
   const styles=useWindowStyles(windowBase_styles);
   const windowScale=useWindowLayout().scale;
   const outlineRadius=stablePill?foundation.radius.circle:foundation.radius.control*windowScale;
-  const hold=useHeldActionScrollLock(!!onLongPress&&!disabled);
+  // Pending work blocks input while preserving the action's accepted paint.
+  const inert=disabled||!!busy;const dimmed=disabled&&!busy;
+  const hold=useHeldActionScrollLock(!!onLongPress&&!inert);
   const fill=useRef(new Animated.Value(whiteOutline?0:1)).current;
   const [outlineAnimating,setOutlineAnimating]=useState(false);
   useLayoutEffect(()=>{
@@ -80,42 +83,46 @@ export function LavaActionButton({title, role = 'primary', tone='affirmative', o
     return()=>{current=false;animation.stop();};
   },[whiteOutline,outlineTransitionDuration,fill]);
   const scale=useTextScale('headline');
-  const foreground: ColorValue = disabled ? colors.secondaryText : whiteOutline?'white':role === 'primary' ? colors.actionForeground
+  const inheritsHeadlineIcon=icon==='passkey'||icon==='restoreBackup';
+  const accessoryStyle=inheritsHeadlineIcon
+    ?[styles.actionAccessory,{width:foundation.control.glyphSlot*scale,height:foundation.control.glyphSlot*scale},labelRole==='rowTitle'&&{width:16*windowScale,height:16*windowScale}]
+    :[styles.actionAccessory,labelRole==='rowTitle'&&{width:16*windowScale,height:16*windowScale}];
+  const foreground: ColorValue = dimmed ? colors.secondaryText : whiteOutline?'white':role === 'primary' ? colors.actionForeground
     : role === 'panel' ? colors.panelActionGreen : colors.primaryText;
   return <Pressable
     testID={testID}
     accessibilityRole="button"
     accessibilityLabel={localized(title)}
     accessibilityHint={accessibilityHint?localized(accessibilityHint):undefined}
-    accessibilityState={{disabled, busy}}
+    accessibilityState={{disabled:inert, busy:!!busy}}
     accessibilityActions={accessibilityActions}
     onAccessibilityAction={onAccessibilityAction}
-    disabled={disabled}
+    disabled={inert}
     onPress={onPress}
     onLongPress={onLongPress}
     {...hold}
     style={({pressed}) => [styles.button, stablePill&&{minHeight:Math.ceil(44*scale)+foundation.row.verticalInset*2,borderRadius:foundation.radius.circle,overflow:'hidden'}, {
-      backgroundColor: disabled ? colors.disabledSurface : outlineAnimating||whiteOutline?'transparent':role === 'primary' ? (tone==='quiet'?colors.quietControl:tone==='recovery'?colors.lavaOrangeSelectedFill:colors.safeControlGreen)
+      backgroundColor: dimmed ? colors.disabledSurface : outlineAnimating||whiteOutline?'transparent':role === 'primary' ? (tone==='quiet'?colors.quietControl:tone==='recovery'?colors.lavaOrangeSelectedFill:colors.safeControlGreen)
         : role === 'panel' ? (pressed ? colors.panelActionPressedFill : colors.panelActionFill)
           : pressed ? colors.pressedSurface : colors.cardBackground,
     }]}
   >{({pressed}) => <>
-    {outlineAnimating&&!disabled&&<Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill,{borderRadius:outlineRadius,borderCurve:'continuous',backgroundColor:colors.safeControlGreen,opacity:fill}]}/>}
-    {outlineAnimating&&!disabled&&<Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill,{borderRadius:outlineRadius,borderCurve:'continuous',overflow:'hidden',borderColor:'white',borderWidth:1.5,opacity:fill.interpolate({inputRange:[0,1],outputRange:[1,0]})}]}/>}
-    {!outlineAnimating&&whiteOutline&&!disabled&&<View pointerEvents="none" style={[StyleSheet.absoluteFill,{borderRadius:outlineRadius,borderCurve:'continuous',overflow:'hidden',borderColor:'white',borderWidth:1.5}]}/>}
+    {outlineAnimating&&!dimmed&&<Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill,{borderRadius:outlineRadius,borderCurve:'continuous',backgroundColor:colors.safeControlGreen,opacity:fill}]}/>}
+    {outlineAnimating&&!dimmed&&<Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill,{borderRadius:outlineRadius,borderCurve:'continuous',overflow:'hidden',borderColor:'white',borderWidth:1.5,opacity:fill.interpolate({inputRange:[0,1],outputRange:[1,0]})}]}/>}
+    {!outlineAnimating&&whiteOutline&&!dimmed&&<View pointerEvents="none" style={[StyleSheet.absoluteFill,{borderRadius:outlineRadius,borderCurve:'continuous',overflow:'hidden',borderColor:'white',borderWidth:1.5}]}/>}
     {pressed && <View pointerEvents="none" style={[styles.pressOverlay, {
       backgroundColor: colors.pressedSurface, opacity: 0.15,
     }]} />}
     <View style={[styles.actionContent,labelRole==='rowTitle'&&{gap:7*windowScale}]}>
-      {(busy||icon)&&<View style={[styles.actionAccessory,labelRole==='rowTitle'&&{width:16*windowScale,height:16*windowScale}]}>{busy?<ActivityIndicator color={foreground} accessible={false}/>:icon?<Decoration symbol={actionSymbols[icon]} tone={disabled?'secondary':role==='primary'?'white':'green'} fontPointSize={(labelRole==='rowTitle'?13:foundation.control.glyph)*windowScale} fontWeight={labelRole==='rowTitle'?'semibold':'regular'} accessible={false} style={[styles.actionAccessory,labelRole==='rowTitle'&&{width:16*windowScale,height:16*windowScale}]}/>:null}</View>}
+      {(icon||busy!==undefined)&&<View style={accessoryStyle}>{busy?<ActivityIndicator color={foreground} accessible={false}/>:icon?<Decoration symbol={actionSymbols[icon]} tone={dimmed?'secondary':role==='primary'?'white':'green'} fontPointSize={labelRole==='rowTitle'?13*windowScale:inheritsHeadlineIcon?lavaTokens.typography.actionLabel.fontSize*scale:foundation.control.glyph*windowScale} fontWeight={labelRole==='rowTitle'||inheritsHeadlineIcon?'semibold':'regular'} accessible={false} style={accessoryStyle}/>:null}</View>}
       <Text accessible={false} allowFontScaling dynamicTypeRamp={lavaTokens.typography[labelRole].dynamicTypeRamp}
         style={[styles.actionLabel,{fontSize:lavaTokens.typography[labelRole].fontSize,fontWeight:lavaTokens.typography[labelRole].fontWeight,color: foreground, textAlign: 'center'}]}>{title}</Text>
+      {!icon&&busy!==undefined&&<View accessible={false} style={[styles.actionAccessory,labelRole==='rowTitle'&&{width:16*windowScale,height:16*windowScale}]}/>}
     </View>
     {subtitle&&<Text accessible={false} allowFontScaling dynamicTypeRamp="footnote" style={{fontSize:foundation.type.caption.fontSize,color:foreground,textAlign:'center'}}>{subtitle}</Text>}
   </>}</Pressable>;
 }
 
-const actionSymbols: Record<LavaIconAction, string> = {remove:'minus',delete:'trash',undo:'arrow.uturn.backward',reset:'arrow.counterclockwise',back:'chevron.left',close:'xmark',notes:'pencil',assist:'eye',hide:'eye.slash',refresh:'arrow.triangle.2.circlepath',erase:'eraser',confirm:'checkmark',edit:'square.and.pencil',add:'plus',share:'square.and.arrow.up',import:'square.and.arrow.down',automatic:'moon',play:'play.fill',pause:'pause.fill',previous:'backward.end.fill',next:'forward.end.fill',calendar:'calendar',swap:'arrow.up.arrow.down',twoPeople:'person.2'};
 /** Related icon actions share one surface; plain children retain individual native-glyph targets. */
 export function LavaIconButtonGroup({children}:PropsWithChildren){
   return <View style={{flexDirection:'row',alignItems:'center',backgroundColor:colors.cardBackground,borderRadius:foundation.radius.control,borderCurve:'continuous'}}>{children}</View>;

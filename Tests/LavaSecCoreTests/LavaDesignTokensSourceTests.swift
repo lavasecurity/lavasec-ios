@@ -54,8 +54,8 @@ final class LavaDesignTokensSourceTests: XCTestCase {
         XCTAssertTrue(tokens.contains("static let dangerRed = adaptiveColor("))
         XCTAssertTrue(tokens.contains("static let errorText = dangerRed"))
 
-        let onboarding = try readSource(.onboardingFlowView)
-        XCTAssertTrue(onboarding.contains(".foregroundStyle(LavaStyle.errorText)"))
+        let imports = try readSource(.reactNativeImportFlow)
+        XCTAssertTrue(imports.contains("color:colors.errorText"))
     }
 
     func testLavaTierVocabularyExists() throws {
@@ -71,20 +71,19 @@ final class LavaDesignTokensSourceTests: XCTestCase {
         XCTAssertTrue(tokens.contains("func lavaTierMetadata() -> some View"))
     }
 
-    func testLavaTierIsWiredIntoRepresentativeSurfaces() throws {
-        let settings = try readSettingsSourceAggregate()
-        // Workshop depth: Nerd Stats + DNS Resolver + the "Information Sent" diagnostics preview —
-        // declared via the SettingsSubpageContent tier: argument (the scaffold applies .lavaTier(tier)
-        // internally), not a route-site modifier.
-        XCTAssertEqual(settings.components(separatedBy: "tier: .technical").count - 1, 2)
-        // Window depth: the Lava Guard skin picker keeps its nested .lavaTier(.celebratory) override.
-        // Read-through demonstrated on a technical metric block.
+    func testRoutedSettingsPagesUseTheirSharedScreenCompositions() throws {
+        let source = try readSource(.reactNativeDNSScreen)
+        XCTAssertTrue(source.contains("return <Screen><SettingsIntro"))
+        XCTAssertTrue(try readSource(.reactNativeVPNChainingScreen).contains("return <Screen><SettingsIntro"))
+        let plus = try sourceBlock(
+            in: readSource(.reactNativeSettingsScreens),
+            startingAt: "export function LavaPlusPage("
+        )
+        XCTAssertTrue(plus.contains("return <Screen>"))
+        XCTAssertTrue(plus.contains("<LavaPlusStory/>"))
+        XCTAssertTrue(try readSource(.reactNativePlusScaffold).contains("<PagedCards label=\"Lava Plus benefits\""))
     }
 
-    // MARK: - Glyph-size scale (LavaIconSize) + typography
-
-    /// The shared SF Symbol size scale exists and has reconciled the near-duplicate
-    /// hand-tuned sizes to one value per role.
     func testIconSizeScaleExistsAndReconcilesDuplicates() {
         // Hero security shield: the headline deviation — one symbol, six call sites,
         // four sizes (42/44/46/48) — collapses to a single value.
@@ -114,7 +113,7 @@ final class LavaDesignTokensSourceTests: XCTestCase {
     /// The hero shield call sites consume the token and no longer carry their old
     /// disagreeing literals.
     func testHeroShieldCallSitesConsumeTheToken() throws {
-        for sourceFile in [SourceFile.securityController, .privacySecuritySettingsView, .bugReportSettingsView] {
+        for sourceFile in [SourceFile.securityController, .lavaSheetLockMask] {
             let source = try readSource(sourceFile)
             XCTAssertTrue(source.contains(".font(.system(size: LavaIconSize.hero, weight: .semibold))"),
                           "\(sourceFile.rawValue) should render the hero shield via LavaIconSize.hero")
@@ -141,34 +140,24 @@ final class LavaDesignTokensSourceTests: XCTestCase {
     }
 
     func testNativeTaskSuccessUsesOneAccessibleScrollableComposition() throws {
-        let scaffold = try readSource(.lavaScaffold)
-        let success = try sourceBlock(in: scaffold,
-            startingAt: "struct LavaSuccessScreen<Detail: View>",
-            endingBefore: "struct LavaPrimaryTabScreenContent")
-        XCTAssertTrue(success.contains("checkmark.circle.fill"))
-        XCTAssertTrue(success.contains("LavaIconSize.heroResult"))
-        XCTAssertTrue(success.contains("ScrollView"))
-        XCTAssertTrue(success.contains(".frame(minHeight: geometry.size.height)"))
-        XCTAssertTrue(success.contains(".safeAreaInset(edge: .bottom, spacing: 0)"))
-        XCTAssertTrue(success.contains("Button(\"Done\".lavaLocalized, action: done)"))
-        for file in [SourceFile.backupSetupView, .backupRestoreView, .bugReportSettingsView, .shareableFiltersUI] {
-            XCTAssertTrue(try readSource(file).contains("LavaSuccessScreen("), file.rawValue)
-        }
+        let source = try readSource(.reactNativeAccountBackupFlow)
+        XCTAssertTrue(source.contains("if(s.success)return <FlowSheet centered footer="))
+        XCTAssertTrue(source.contains("checkmark.circle.fill"))
+        XCTAssertTrue(source.contains("role=\"heading\" center accessibilityRole=\"header\""))
+        XCTAssertTrue(source.contains("'Done'"))
+        XCTAssertTrue(try readSource(.reactNativeImportFlow).contains("import.stage.completed"))
     }
 
     func testBackupSuccessOnlyFollowsConfirmedUploadAndClearsPhrase() throws {
-        let setup = try readSource(.backupSetupView)
-        let operation = try sourceBlock(in: setup, startingAt: "private func advance()", endingBefore: "private func ensureRecoveryPhrase()")
+        let source = try readSource(.backupSetupView)
+        let operation = try sourceBlock(in: source, startingAt: "func advance()", endingBefore: "private func ensureRecoveryPhrase()")
         let confirmed = try XCTUnwrap(operation.range(of: "try await backup.turnOnEncryptedBackup(recoveryPhrase: recoveryPhrase)"))
-        let upload = try XCTUnwrap(operation.range(of: "go(to: .upload)"))
+        let upload = try XCTUnwrap(operation.range(of: "step = .upload"))
         XCTAssertLessThan(confirmed.lowerBound, upload.lowerBound)
         XCTAssertTrue(operation.contains("recoveryPhrase = \"\""))
-        XCTAssertFalse(operation.contains("dismiss()"))
-        let completion = try sourceBlock(in: setup, startingAt: "private func updateUploadProgress()", endingBefore: "// Every step's actions")
-        XCTAssertTrue(completion.contains("backup.isSetupUploadConfirmed(attemptID: setupAttemptID)"))
-        XCTAssertTrue(completion.contains("setupComplete = true"))
-        // The success screen appears only after the online upload is confirmed.
-        XCTAssertTrue(setup.contains("Your encrypted backup is set up on this device."))
+        XCTAssertTrue(source.contains("backup.isSetupUploadConfirmed(attemptID: setupAttemptID)"))
+        XCTAssertTrue(source.contains("setupComplete = true"))
+        XCTAssertTrue(try readSource(.reactNativeAccountBackupFlow).contains("Your encrypted backup is set up on this device."))
     }
 
     // MARK: - Helpers

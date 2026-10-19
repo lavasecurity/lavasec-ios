@@ -3,53 +3,36 @@ import XCTest
 final class BackupRestoreReviewSourceTests: XCTestCase {
     func testUnlockOnlyPresentsReviewAndConfirmationIsASeparateAction() throws {
         let source = try readSource(.backupRestoreView)
-        let prepare = try sourceBlock(in: source, startingAt: "private func prepareRestore()",
-                                      endingBefore: "private func confirmRestore(")
+        let prepare = try sourceBlock(in: source, startingAt: "func prepareRestore()", endingBefore: "func confirmRestore()")
         XCTAssertTrue(prepare.contains("backup.prepareEncryptedBackupRestore("))
         XCTAssertTrue(prepare.contains("review = prepared"))
-        XCTAssertTrue(prepare.contains("restoreStatus = .reviewing"))
         XCTAssertFalse(prepare.contains("confirmPreparedBackupRestore("))
-        XCTAssertFalse(prepare.contains("restoreStatus = .success"))
-        let confirm = try sourceBlock(in: source, startingAt: "private func confirmRestore(",
-                                      endingBefore: "private func reportRestoreFailure(")
-        XCTAssertTrue(confirm.contains("backup.confirmPreparedBackupRestore(id: review.id, resolverChangeConfirmed: resolverChangeConfirmed)"))
-        XCTAssertTrue(confirm.contains("guard !isRestoring else { return }"))
-        XCTAssertTrue(source.contains("review == nil ? \"Review Backup\" : \"Restore Backup\""))
+        XCTAssertTrue(source.contains("backup.confirmPreparedBackupRestore(id: review.id, resolverChangeConfirmed: resolverChangeConfirmed)"))
     }
 
     func testReviewRendersBothSidesOfRecordingAndDNSChanges() throws {
         let source = try readSource(.backupRestoreView)
-        let review = try sourceBlock(in: source, startingAt: "private func restoreReview(",
-                                     endingBefore: "private func reviewRow(")
-        XCTAssertTrue(review.contains("reviewRow(\"Protection on this device\""))
+        XCTAssertTrue(source.contains("let a = plan.previousConfiguration, b = plan.configuration"))
         for field in ["keepFilteringCounts", "keepDomainDiagnostics", "keepNetworkActivity", "keepLavaGuardProgress"] {
-            XCTAssertTrue(review.contains("plan.previousConfiguration.\(field)"), field)
-            XCTAssertTrue(review.contains("plan.configuration.\(field)"), field)
+            XCTAssertTrue(source.contains("a.\(field)")); XCTAssertTrue(source.contains("b.\(field)"))
         }
-        XCTAssertTrue(review.contains("savedCustomDNS(plan.previousConfiguration)"))
-        XCTAssertTrue(review.contains("savedCustomDNS(plan.configuration)"))
-        let savedDNS = try sourceBlock(in: source, startingAt: "private func savedCustomDNS(",
-                                        endingBefore: "private func state(")
-        XCTAssertTrue(savedDNS.contains("configuration.customResolverName"))
-        XCTAssertTrue(savedDNS.contains("configuration.fallbackCustomResolverName"))
-        XCTAssertTrue(review.contains("if plan.requiresResolverConfirmation"))
-        XCTAssertTrue(review.contains("isOn: $resolverChangeConfirmed"))
-        XCTAssertTrue(source.contains("$0.plan.requiresResolverConfirmation && !resolverChangeConfirmed"))
+        XCTAssertTrue(source.contains("savedCustomDNS(a), savedCustomDNS(b)"))
+        XCTAssertTrue(source.contains("c.customResolverName"))
+        XCTAssertTrue(source.contains("c.fallbackCustomResolverName"))
+        XCTAssertTrue(source.contains("!$0.plan.requiresResolverConfirmation || resolverChangeConfirmed"))
     }
 
     func testLibraryReviewShowsOrderEvenWhenPerFilterContentsAreUnchanged() throws {
         let source = try readSource(.backupRestoreView)
         XCTAssertTrue(source.contains("orderedFilters(plan.previousLibrary)"))
         XCTAssertTrue(source.contains("orderedFilters(plan.library)"))
-        let order = try sourceBlock(in: source, startingAt: "private func orderedFilters(", endingBefore: "private func reviewRow(")
-        XCTAssertTrue(order.contains("library.filters.enumerated()"))
-        XCTAssertFalse(order.contains("sorted"))
+        let order = try sourceBlock(in: source, startingAt: "private func orderedFilters(", endingBefore: "private func blocklistName(")
+        XCTAssertTrue(order.contains("library.filters.enumerated()")); XCTAssertFalse(order.contains("sorted"))
     }
 
     func testReviewShowsUnlocksSeparatelyFromTheRecordingPreference() throws {
         let source = try readSource(.backupRestoreView)
-        XCTAssertTrue(source.contains("unlocks(plan.previousConfiguration.lavaGuardUnlocks)"))
-        XCTAssertTrue(source.contains("unlocks(plan.configuration.lavaGuardUnlocks)"))
+        XCTAssertTrue(source.contains("unlocks(a.lavaGuardUnlocks), unlocks(b.lavaGuardUnlocks)"))
     }
 
     func testReviewUsesTheReviewedCustomNamesAndDisclosesContentVersionChanges() throws {
@@ -66,25 +49,16 @@ final class BackupRestoreReviewSourceTests: XCTestCase {
 
     func testCustomSourceReviewExposesTheParsingFormatOnBothSides() throws {
         let source = try readSource(.backupRestoreView)
-        let formatter = try sourceBlock(in: source, startingAt: "private func customSources(",
-                                         endingBefore: "private func savedCustomDNS(")
-        XCTAssertTrue(formatter.contains("$0.parseFormat.rawValue"))
-        let review = try sourceBlock(in: source, startingAt: "private func filterReview(",
-                                     endingBefore: "private func domains(")
-        XCTAssertTrue(review.contains("customSources(change.before?.customBlocklists ?? [])"))
-        XCTAssertTrue(review.contains("customSources(change.after?.customBlocklists ?? [])"))
+        XCTAssertTrue(source.contains("$0.parseFormat.rawValue"))
+        XCTAssertTrue(source.contains("customSources(change.before?.customBlocklists ?? [])"))
+        XCTAssertTrue(source.contains("customSources(change.after?.customBlocklists ?? [])"))
     }
 
     func testReviewSeparatesDomainAdditionsAndRemovalsFromUnchangedEntries() throws {
         let source = try readSource(.backupRestoreView)
-        for field in ["addedAllowedDomains", "removedAllowedDomains", "addedBlockedDomains", "removedBlockedDomains"] {
-            XCTAssertTrue(source.contains("change.selectionDiff.\(field)"), field)
-        }
-        let review = try sourceBlock(in: source, startingAt: "private func domainReview(", endingBefore: "private func blocklistName(")
-        XCTAssertTrue(review.contains("if !added.isEmpty"))
-        XCTAssertTrue(review.contains("if !removed.isEmpty"))
-        XCTAssertTrue(review.contains("domains(Set(added))"))
-        XCTAssertTrue(review.contains("domains(Set(removed))"))
+        for field in ["addedAllowedDomains", "removedAllowedDomains", "addedBlockedDomains", "removedBlockedDomains"] { XCTAssertTrue(source.contains("change.selectionDiff.\(field)")) }
+        XCTAssertTrue(source.contains("if !added.isEmpty")); XCTAssertTrue(source.contains("if !removed.isEmpty"))
+        XCTAssertTrue(source.contains("domains(Set(added))")); XCTAssertTrue(source.contains("domains(Set(removed))"))
     }
 
     func testRestorePersistsUnlockStateOnlyAfterApplyAndOwnershipChecks() throws {
@@ -147,16 +121,12 @@ final class BackupRestoreReviewSourceTests: XCTestCase {
 
     func testDismissalAndCancelledUnlockDiscardOnlyTheirOwnReview() throws {
         let source = try readSource(.backupRestoreView)
-        XCTAssertTrue(source.contains(".onDisappear {"))
         XCTAssertTrue(source.contains("restoreTask?.cancel()"))
         XCTAssertTrue(source.contains("if let review { backup.discardPreparedBackupRestore(id: review.id) }"))
-        let prepare = try sourceBlock(in: source, startingAt: "private func prepareRestore()",
-                                      endingBefore: "private func confirmRestore(")
-        XCTAssertTrue(prepare.contains("guard !Task.isCancelled else {"))
-        XCTAssertTrue(prepare.contains("backup.discardPreparedBackupRestore(id: prepared.id)"))
-        let discard = try sourceBlock(in: try readSource(.backupController), startingAt: "func discardPreparedBackupRestore(",
-                                      endingBefore: "func confirmPreparedBackupRestore(")
-        XCTAssertTrue(discard.contains("if pendingRestore?.review.id == id"))
-        XCTAssertTrue(discard.contains("pendingRestore = nil"))
+        XCTAssertTrue(source.contains("guard !Task.isCancelled, !retired, isCurrent()"))
+        XCTAssertTrue(source.contains("backup.discardPreparedBackupRestore(id: prepared.id)"))
+        let discard = try sourceBlock(in: try readSource(.backupController), startingAt: "func discardPreparedBackupRestore(", endingBefore: "func confirmPreparedBackupRestore(")
+        XCTAssertTrue(discard.contains("if pendingRestore?.review.id == id")); XCTAssertTrue(discard.contains("pendingRestore = nil"))
     }
+
 }

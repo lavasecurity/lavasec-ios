@@ -1,3 +1,7 @@
+import {QAFlowAdapter} from './QAFlowAdapter.ios';
+import {AccountBackupFlowAdapter} from './AccountBackupFlowAdapter.ios';
+import {ImportFlowAdapter} from './ImportFlowAdapter.ios';
+import {PasscodeFlowAdapter} from './PasscodeFlowAdapter.ios';
 import {useCallback,useEffect,useRef,useState,useSyncExternalStore} from 'react';
 import {useRoute,type RouteProp} from '@react-navigation/native';
 import {AppState,Keyboard,StyleSheet,View} from 'react-native';
@@ -11,7 +15,7 @@ import {usePresentationAuthority,usePresentationReadiness} from '../app/use-pres
 import {useReview} from './ReviewContext';
 import type {ReviewRoutes} from './navigation';
 import {Copy,Section,Symbol} from './primitives';
-import {Group,ListRow,nativeInlineHeader,toolbarButton,useToolbar} from './scaffold';
+import {Group,ListRow,nativeInlineHeader,toolbarAction,useToolbar} from './scaffold';
 import {FlowSheet,FormDivider,FormField,FormPanel,LicenseReader} from './form-scaffold';
 import {AutoSwitchContent} from './HelpScreens';
 import {FeedbackFlow} from './FeedbackFlow';
@@ -21,7 +25,7 @@ import {InputRow} from './scaffold';
 import {useTextScale} from '../app/text-metrics';
 import {PresentationCover} from './PresentationCover';
 
-const titles={createFilter:'New filter',renameFilter:'Rename filter',deleteFilters:'Review',automation:'Auto-switch filters',licenses:'Full License Texts',feedback:'Feedback',vpnConfiguration:'WireGuard Configuration'};
+const titles={phoneQA:'Device QA',phoneQASheet:'Device QA',account:'Account',backupSetup:'Backup',backupRestore:'Restore Backup',passcode:'Passcode',import:'Import a filter',importCode:'Enter a code',importScan:'Scan a QR code',deepLinkImport:'Import a filter',createFilter:'New filter',renameFilter:'Rename filter',deleteFilters:'Review',automation:'Auto-switch filters',licenses:'Full License Texts',feedback:'Feedback',vpnConfiguration:'WireGuard Configuration'};
 export function ForegroundFlowScreen(){
   const {app,live}=useReview();const route=useRoute<RouteProp<ReviewRoutes,'Foreground'>>();
   const projection=live?.foregroundFlow?.id===route.params.id?live.foregroundFlow:undefined;
@@ -49,7 +53,7 @@ export function ForegroundFlowScreen(){
   // The native library grant may expire before the first React projection.
   // Read-only sheets have no child reentry. Their retained shell cannot prove
   // current authorization; editable children still own their scoped admission.
-  const readOnly=flow?.kind==='automation'||flow?.kind==='licenses';
+  const readOnly=!!flow&&['automation','licenses','account','backupSetup','backupRestore','passcode','import','importCode','importScan','deepLinkImport'].includes(flow.kind);
   const needsMissingEntry=!projection&&!closing&&(!flow||readOnly);
   const enterMissingFlow=()=>{if(!app||!needsMissingEntry||!presentationAuthority||AppState.currentState!=='active'||enteringMissingFlow.current)return;
     const pause=entryPause.current;enteringMissingFlow.current=true;
@@ -61,15 +65,16 @@ export function ForegroundFlowScreen(){
     });};
   useEffect(()=>{if(!failed)enterMissingFlow();},[app,route.params.id,needsMissingEntry,presentationAuthority,live?.security?.readRevision,entrySettlement]);
   const vpnConcealed=flow?.kind==='vpnConfiguration'&&!projection?.vpnEditor&&!closing;
-  const foregroundConcealed=!!flow&&!projection&&!closing&&['createFilter','renameFilter','deleteFilters','automation','licenses'].includes(flow.kind);
+  const foregroundConcealed=!!flow&&!projection&&!closing&&['createFilter','renameFilter','deleteFilters','automation','licenses','account','backupSetup','backupRestore','passcode','import','importCode','importScan','deepLinkImport'].includes(flow.kind);
   useEffect(()=>{if(vpnConcealed||foregroundConcealed)Keyboard.dismiss();},[vpnConcealed,foregroundConcealed]);
   if(!flow)return <PresentationCover testID="foreground-flow-privacy-cover">{failed&&entryFailure.message!=='Authentication cancelled.'&&<Copy role="supporting" center>{entryFailure.message}</Copy>}<LavaActionButton title="Unlock Lava" role="secondary" onPress={()=>{setEntryFailure(undefined);enterMissingFlow();}}/></PresentationCover>;
+  const ownsPrivacyCover=flow.kind==='phoneQA'||flow.kind==='phoneQASheet';
   // Keep transient input under the native/root privacy covers. Revoked library
   // projections have no paint/input authority; UIKit dismissal may retain only
   // the already-delivered outgoing frame identified by the native owner.
-  return <View style={{flex:1}}><View style={{flex:1,opacity:!vpnConcealed&&(projection||closing)?1:0}} pointerEvents={projection&&!vpnConcealed?'auto':'none'}
-    accessibilityElementsHidden={!projection||vpnConcealed} importantForAccessibility={!projection||vpnConcealed?'no-hide-descendants':'auto'}>
-    {flow.kind==='feedback'&&flow.feedback?<FeedbackFlow id={flow.id} state={flow.feedback} dismissAttempt={flow.dismissAttempt}/>
+  return <View style={{flex:1}}><View style={{flex:1,opacity:ownsPrivacyCover||!vpnConcealed&&(projection||closing)?1:0}} pointerEvents={ownsPrivacyCover||projection&&!vpnConcealed?'auto':'none'}
+    accessibilityElementsHidden={!ownsPrivacyCover&&(!projection||vpnConcealed)} importantForAccessibility={!ownsPrivacyCover&&(!projection||vpnConcealed)?'no-hide-descendants':'auto'}>
+    {flow.kind==='phoneQA'||flow.kind==='phoneQASheet'?<QAFlowAdapter id={flow.id} sheet/>:flow.import?<ImportFlowAdapter id={flow.id} state={flow.import}/>:flow.accountBackup?<AccountBackupFlowAdapter id={flow.id} state={flow.accountBackup}/>:flow.kind==='passcode'&&live?.passcode?<PasscodeFlowAdapter state={live.passcode}/>:flow.kind==='feedback'&&flow.feedback?<FeedbackFlow id={flow.id} state={flow.feedback} dismissAttempt={flow.dismissAttempt}/>
       :flow.kind==='vpnConfiguration'?<VPNEditorFlow id={flow.id} state={projection?.vpnEditor??{...retainedVPN.current,name:retainedVPN.current?.name??'',nameResetRevision:retainedVPN.current?.nameResetRevision??0,dirty:retainedVPN.current?.dirty??false,hasContent:retainedVPN.current?.hasContent??false,concealed:true,reading:false,canEdit:false,canSave:false,error:''}} dismissAttempt={flow.dismissAttempt} onEntryFailed={entryFailed}/>
       :<LibraryForegroundFlow flow={flow} onEntryFailed={entryFailed}/>}
   </View>{(vpnConcealed||foregroundConcealed)&&<View style={StyleSheet.absoluteFill}><PresentationCover testID={vpnConcealed?'vpn-editor-privacy-cover':'foreground-flow-privacy-cover'}>{failed&&entryFailure.message!=='Authentication cancelled.'&&<Copy role="supporting" center>{entryFailure.message}</Copy>}<LavaActionButton title="Unlock Lava" role="secondary" onPress={()=>{setEntryFailure(undefined);if(readOnly){enterMissingFlow();return;}void app?.command({type:vpnConcealed?'vpnEditor.enter':'foreground.enter',id:flow.id}).catch(entryFailed);}}/></PresentationCover></View>}</View>;
@@ -130,8 +135,8 @@ function LibraryForegroundFlow({flow,onEntryFailed}:{flow:ForegroundFlow;onEntry
     finally{pending.current=false;if(mounted.current)setBusy(false);}
   };
   useToolbar({...nativeInlineHeader,title:kind?titles[kind]:'',headerBackVisible:false,
-    unstable_headerLeftItems:()=>[toolbarButton(kind==='renameFilter'||kind==='deleteFilters'?'Cancel':'Close','xmark',close,busy)],
-    unstable_headerRightItems:()=>kind==='renameFilter'?[toolbarButton('Save','checkmark',()=>void submit(),busy||!identity.valid)]:[]},[kind,busy,identity.valid,dirty,name,emoji,template]);
+    unstable_headerLeftItems:()=>[toolbarAction(kind==='renameFilter'||kind==='deleteFilters'?'Cancel':'Close','close',close,busy)],
+    unstable_headerRightItems:()=>kind==='renameFilter'?[toolbarAction('Save','confirm',()=>void submit(),busy||!identity.valid)]:[]},[kind,busy,identity.valid,dirty,name,emoji,template]);
   if(kind==='licenses')return <LicenseReader text={flow.notices??''}/>;
   return <FlowSheet footer={kind==='createFilter'?<LavaActionButton title="Create" disabled={busy||!flow.canCreate} onPress={()=>void submit()}/>
     :kind==='deleteFilters'?<LavaActionButton title="Confirm changes" disabled={busy||!!message} onPress={()=>void submit()}/>:undefined}>

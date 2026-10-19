@@ -2,12 +2,14 @@ import {useState} from 'react';
 import {StyleSheet,View} from 'react-native';
 import {fireEvent,render,screen} from '@testing-library/react-native';
 import {ListRow} from '../review/scaffold';
+import {OnboardingChoice} from '../review/onboarding-scaffold';
 import {LavaIconButton,LavaRowLabel,LavaSelectionAccessory} from '../src';
 import {colors} from '../src/colors.ios';
 
 jest.mock('@react-navigation/native',()=>({useNavigation:()=>({})}));
 jest.mock('../specs/LavaTextFieldNativeComponent',()=>({__esModule:true,default:require('react-native').View}));
 jest.mock('../specs/LavaDecorationNativeComponent',()=>({__esModule:true,default:require('react-native').View}));
+jest.mock('../src/OnboardingDrawing',()=>({OnboardingLavaDrawing:require('react-native').View}));
 
 test('single selection changes only through the row owner and has no second accessible control',()=>{
   const changed=jest.fn();
@@ -57,9 +59,38 @@ test('disabled selection retains its check while a locked option remains a separ
   expect(screen.getByRole('button',{name:'Locked'})).toHaveProp('accessibilityState',expect.objectContaining({selected:false,disabled:true}));
   const symbols=screen.UNSAFE_getAllByType(View).filter(view=>view.props.symbol);
   expect(symbols.map(symbol=>[symbol.props.symbol,symbol.props.tone])).toEqual([
-    ['checkmark.circle.fill','secondary'],['lock.fill','secondary'],
+    ['checkmark','secondary'],['lock.fill','secondary'],
   ]);
   expect(screen.getAllByRole('button')).toHaveLength(2);
+});
+
+test('onboarding choices use the neutral shared row and retain full-row selection and disabled semantics',()=>{
+  const changed=jest.fn();
+  function Choices({disabled=false}:{disabled?:boolean}){
+    const [selected,setSelected]=useState('Core');
+    return <>{['Core','Balanced'].map(title=><OnboardingChoice key={title} title={title} selected={title===selected}
+      disabled={disabled} onPress={()=>{changed(title);setSelected(title);}}/>)}</>;
+  }
+  render(<Choices/>);
+  expect(screen.UNSAFE_getAllByType(ListRow)).toHaveLength(2);
+  expect(screen.getAllByRole('button')).toHaveLength(2);
+  expect(screen.getByRole('button',{name:'Core',selected:true})).toBeOnTheScreen();
+  expect(screen.getByRole('button',{name:'Balanced',selected:false})).toBeOnTheScreen();
+  expect(screen.UNSAFE_getAllByType(LavaSelectionAccessory).map(mark=>mark.props.state)).toEqual(['selected','unselected']);
+  const backgrounds=screen.UNSAFE_getAllByType(View).map(view=>StyleSheet.flatten(view.props.style)?.backgroundColor);
+  expect(backgrounds).toContain(colors.cardBackground);
+  expect(backgrounds).not.toContain(colors.safeControlGreen);
+  expect(screen.getByText('Core')).toHaveStyle({color:colors.primaryText});
+  fireEvent.press(screen.getByRole('button',{name:'Balanced'}));
+  expect(changed).toHaveBeenCalledTimes(1);
+  expect(changed).toHaveBeenCalledWith('Balanced');
+  expect(screen.getByRole('button',{name:'Balanced',selected:true})).toBeOnTheScreen();
+  expect(screen.UNSAFE_getAllByType(LavaSelectionAccessory).map(mark=>mark.props.state)).toEqual(['unselected','selected']);
+  screen.rerender(<Choices disabled/>);
+  expect(screen.getByRole('button',{name:'Balanced',selected:true})).toBeDisabled();
+  fireEvent.press(screen.getByRole('button',{name:'Core'}));
+  expect(changed).toHaveBeenCalledTimes(1);
+  expect(screen.getByRole('button',{name:'Balanced',selected:true})).toBeOnTheScreen();
 });
 
 test('selection and ordinary rows share label anatomy without losing verbatim identity, metadata or error semantics',()=>{

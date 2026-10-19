@@ -19,7 +19,7 @@ test('changing source metrics updates every target dimension and cannot silently
   assert.ok(result.includes('CGSizeMake(28, 28)'));
   assert.ok(result.includes('CGRectMake(0, 0, 48, 48)'));
   assert.ok(result.includes('modeInset = (48 - 28) / 2.0'));
-  assert.equal(result.match(/constraintEqualToConstant:48/g)?.length, 2);
+  assert.equal(result.match(/constraintEqualToConstant:48/g)?.length, 4);
   assert.throws(() => renderToolbarAdapter(source, {...metrics, buttonSize:NaN}), /Invalid toolbar metric/);
   assert.throws(() => renderToolbarAdapter(source.replaceAll('__LAVA_MODE_GLYPH__', '17'), metrics), /Missing toolbar metric slot/);
 });

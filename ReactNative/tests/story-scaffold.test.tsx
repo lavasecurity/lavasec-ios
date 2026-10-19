@@ -12,6 +12,7 @@ import {foundation} from '../src/foundation';
 import {LavaAppearanceContext} from '../src/appearance';
 import {LavaActionButton} from '../src';
 import {Group,StableVariants} from '../review/scaffold';
+import {CountLegend} from '../review/detail-scaffold';
 import {configurePresentation,localized} from '../app/presentation';
 
 let mockWindow={width:390,height:844,scale:3,fontScale:1};
@@ -41,10 +42,26 @@ test('expanded connection summaries keep projected provider identities and metad
   } finally {configurePresentation();}
 });
 
-test('a discovery dot expands the accessory while preserving the trailing chevron axis',()=>{
-  render(<><RowAccessory testID="plain.accessory" intent="page"/><RowAccessory testID="new.accessory" intent="page" attention/></>);
-  expect(screen.getByTestId('plain.accessory')).toHaveStyle({width:foundation.row.disclosureWidth});
-  expect(screen.getByTestId('new.accessory')).toHaveStyle({width:foundation.discovery.dotSize+foundation.space.xs+foundation.control.accessoryGlyph});
+test.each([390,1024])('a discovery dot replaces the chevron in its unchanged centered slot at width %i',width=>{
+  mockWindow={...mockWindow,width};
+  const content=(attention:boolean)=><><RowAccessory testID="plain.accessory" intent="page"/><RowAccessory testID="new.accessory" attentionTestID="new.dot" intent="page" attention={attention}/></>;
+  render(content(true));
+  const accessory=screen.getByTestId('new.accessory');
+  expect(accessory.props.style).toEqual(screen.getByTestId('plain.accessory').props.style);
+  expect(accessory).toHaveStyle({alignItems:'center',justifyContent:'center'});
+  expect(accessory.findAllByProps({symbol:'chevron.right'})).toHaveLength(0);
+  expect(screen.getByTestId('new.dot',{includeHiddenElements:true})).toHaveProp('accessible',false);
+  screen.rerender(content(false));
+  expect(screen.getByTestId('new.accessory')).toBe(accessory);
+  expect(accessory.findAllByProps({symbol:'chevron.right'}).length).toBeGreaterThan(0);
+  expect(screen.queryByTestId('new.dot',{includeHiddenElements:true})).toBeNull();
+});
+
+test('story headings delegate discovery replacement to the shared accessory',()=>{
+  render(<StoryNavigationLine testID="story.accessory" attention>Heading</StoryNavigationLine>);
+  expect(screen.UNSAFE_getByType(RowAccessory).props.attention).toBe(true);
+  expect(screen.getByTestId('story.accessory.new',{includeHiddenElements:true})).toBeTruthy();
+  expect(screen.getByTestId('story.accessory').findAllByProps({symbol:'chevron.right'})).toHaveLength(0);
 });
 
 test('Explore keeps its playable path horizontal in the left lane and stacks it at large text',()=>{
@@ -181,15 +198,21 @@ test('Explore uses a neutral compass glyph and keeps its whole row actionable',(
   fireEvent.press(invitation);expect(onPress).toHaveBeenCalledTimes(1);
 });
 
-test('Explore shares the settings row scaffold and preserves its discovery indicator',()=>{
-  render(<ExploreInvitation attention onPress={()=>{}}/>);
+test('Guard Explore replaces its chevron with discovery and keeps one persistent action',()=>{
+  const open=jest.fn();render(<ExploreInvitation attention onPress={open}/>);
   const invitation=screen.getByTestId('guard.explore');
   expect(invitation.findByType(RowAccessory).props.intent).toBe('page');
   expect(invitation.props.accessibilityHint).toBe('New');
   expect(screen.getByTestId('guard.explore.new',{includeHiddenElements:true})).toBeTruthy();
-  expect(invitation.findAllByProps({symbol:'chevron.right'}).length).toBeGreaterThan(0);
+  expect(invitation.findAllByProps({symbol:'chevron.right'})).toHaveLength(0);
   expect(invitation.findAllByProps({symbol:'iphone'})).toHaveLength(0);
   expect(screen.getAllByRole('button')).toHaveLength(1);
+  fireEvent.press(invitation);expect(open).toHaveBeenCalledTimes(1);
+  screen.rerender(<ExploreInvitation onPress={open}/>);
+  expect(screen.getByTestId('guard.explore')).toBe(invitation);
+  expect(invitation.props.accessibilityHint).toBeUndefined();
+  expect(screen.queryByTestId('guard.explore.new',{includeHiddenElements:true})).toBeNull();
+  expect(invitation.findAllByProps({symbol:'chevron.right'}).length).toBeGreaterThan(0);
 });
 
 test('Settings connection uses the same destination rows in compact and expanded layouts',()=>{
@@ -298,18 +321,30 @@ test('transport places a single story counter beside grouped glyph actions with 
   expect(screen.getByRole('button',{name:'Resume demo'})).toBeOnTheScreen();
 });
 
-test('filter overview is one navigation target with a heading chevron and three count legends',()=>{
+test.each([0,1])('filter overview is one navigation target with semantic count legends (%i allowed exceptions)',allowed=>{
   const open=jest.fn();
-  const overview=(name:string)=><FilterOverview name={name} rules="4,321 rules" counts={[{label:'Blocklists',value:3},{label:'Blocked Domains',value:7},{label:'Allowed Exceptions',value:0}]} onOpen={open}/>;
+  const overview=(name:string)=><FilterOverview name={name} rules="4,321 rules" counts={[{label:'Blocklists',value:3},{label:'Blocked Domains',value:7},{label:'Allowed Exceptions',value:allowed}]} onOpen={open}/>;
   render(overview('Saved filter'));
   const target=screen.getByTestId('row.Now filtering');
   expect(screen.queryByRole('button',{name:'Share your filter'})).toBeNull();
   expect(screen.getByText('Allowed exceptions')).toBeTruthy();
-  expect(screen.getByText('0')).toBeTruthy();
+  expect(screen.getByText(String(allowed))).toBeTruthy();
+  const countGlyphs=screen.UNSAFE_getAllByType(primitives.Symbol).filter(node=>[foundation.outcome.blocked,foundation.outcome.allowed].includes(node.props.name));
+  expect(countGlyphs.map(node=>node.props.tone)).toEqual(['accentOrange','accentOrange',allowed===0?'secondary':'green']);
   mockWindow={...mockWindow,fontScale:2};screen.rerender(overview('The filter I use with my whole family'));
   expect(screen.getByTestId('row.Now filtering')).toBe(target);
   expect(screen.getByText('🌿 The filter I use with my whole family').props.numberOfLines).toBeUndefined();
   fireEvent.press(target);expect(open).toHaveBeenCalledTimes(1);
+});
+
+test('activity count legends retain semantic colors for their chart mapping',()=>{
+  render(<><CountLegend semantic label="Blocked" count={3} tone="blocked"/><CountLegend semantic label="Allowed" count={7} tone="allowed"/></>);
+  expect(screen.UNSAFE_getAllByType(primitives.Symbol).map(node=>node.props.tone)).toEqual(['accentOrange','green']);
+});
+
+test('the count scaffold defaults every category to neutral, including nonempty allowed counts',()=>{
+  render(<>{(['blocked','personal','allowed'] as const).map(tone=><CountLegend key={tone} label={tone==='blocked'?'Blocklists':tone==='personal'?'Blocked Domains':'Allowed Exceptions'} count={3} tone={tone}/>)}</>);
+  expect(screen.UNSAFE_getAllByType(primitives.Symbol).map(node=>node.props.tone)).toEqual(['primary','primary','primary']);
 });
 
 

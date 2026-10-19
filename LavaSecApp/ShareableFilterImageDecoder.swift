@@ -32,7 +32,7 @@ enum ShareableFilterImageDecodeError: LocalizedError, Equatable {
 /// Reads a shared filter out of an image the recipient already has on this device
 /// — typically a card saved from Messages.
 ///
-/// Deliberately paired with `PhotosPicker` rather than `PHPhotoLibrary`: the picker
+/// Deliberately paired with `PHPickerViewController` rather than `PHPhotoLibrary`: the picker
 /// runs out of process and hands back only the single item the user chose, so Lava
 /// never requests, and never holds, access to the whole photo library. That is also
 /// why the app ships no `NSPhotoLibraryUsageDescription` — there is no library

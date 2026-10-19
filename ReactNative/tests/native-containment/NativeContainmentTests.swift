@@ -149,6 +149,77 @@ final class NativeContainmentTests: UIResponder, UIApplicationDelegate {
         expect(page.parent == nil, "Recycling still releases the hosted controller")
         window.rootViewController = parent
 
+        // Model Fabric's leaf/component/header hierarchy and the sibling results
+        // branch. The production edge owner must never follow the horizontal
+        // category scroller or keep an association after the sheet is retired.
+        let sheet = UIView(frame: parent.view.bounds)
+        let resultsBranch = UIView(frame: sheet.bounds)
+        resultsBranch.accessibilityIdentifier = "sheet.results"
+        let results = UIScrollView(frame: resultsBranch.bounds)
+        results.contentSize = CGSize(width: 390, height: 1800)
+        results.contentInset = UIEdgeInsets(top: 56, left: 0, bottom: 0, right: 0)
+        results.contentOffset = CGPoint(x: 0, y: 240)
+        resultsBranch.addSubview(results)
+        sheet.addSubview(resultsBranch)
+        let header = UIView(frame: CGRect(x: 0, y: 56, width: 390, height: 128))
+        header.accessibilityIdentifier = "sheet.pinned-header"
+        let component = UIView(frame: header.bounds)
+        let decoration = UIView(frame: component.bounds)
+        component.addSubview(decoration)
+        header.addSubview(component)
+        let categories = UIScrollView(frame: header.bounds)
+        header.addSubview(categories)
+        let unrelatedInteraction = FixtureInteraction()
+        header.addInteraction(unrelatedInteraction)
+        sheet.addSubview(header)
+        parent.view.addSubview(sheet)
+        let edge = LavaSheetScrollEdge()
+        let offsetBeforeEdge = results.contentOffset
+        if #available(iOS 26.0, *) {
+            let edgeInteractions = { header.interactions.compactMap { $0 as? UIScrollEdgeElementContainerInteraction } }
+            expect(edge.update(from: decoration), "A list header binds to the results' native scroll edge")
+            let association = edgeInteractions().first
+            expect(association?.scrollView === results && association?.edge == .top,
+                   "The header binds the vertical results, never the horizontal categories")
+            header.frame.size.height = 180
+            expect(edge.update(from: decoration), "Resizing a header retains its edge association")
+            // UIKit may install its own supporting interactions alongside this
+            // public edge. Only our edge's count and identity establish reuse.
+            expect(edgeInteractions().count == 1 && edgeInteractions().first === association,
+                   "Repeated layout must not duplicate the native edge")
+            expect(results.contentOffset == offsetBeforeEdge && results.contentInset.top == 56,
+                   "The visual edge must not change scrolling geometry")
+            // Fabric may add a content container around a component. Resolve
+            // the marked header, not a fixed number of superviews above a leaf.
+            let componentContainer = UIView(frame: header.bounds)
+            component.removeFromSuperview()
+            componentContainer.addSubview(component)
+            header.insertSubview(componentContainer, at: 0)
+            sheet.insertSubview(UIView(), at: 0)
+            resultsBranch.insertSubview(UIView(), at: 0)
+            expect(edge.update(from: decoration) && edgeInteractions().first === association,
+                   "Fabric containers and non-scrolling native siblings preserve the same header edge")
+            results.removeFromSuperview()
+            expect(!edge.update(from: decoration) && edgeInteractions().isEmpty,
+                   "Unmounted results release the association without falling back to category scrolling")
+            resultsBranch.addSubview(results)
+            expect(edge.update(from: decoration), "A delayed results mount restores the native edge")
+            sheet.removeFromSuperview()
+            expect(!edge.update(from: decoration) && edgeInteractions().isEmpty,
+                   "An off-window sheet releases its edge association")
+            parent.view.addSubview(sheet)
+            expect(edge.update(from: decoration), "A retained sheet restores its edge on return")
+            edge.reset()
+            expect(edgeInteractions().isEmpty, "Fabric recycling releases the header interaction")
+            expect(association?.scrollView == nil, "Recycling releases the results reference")
+        } else {
+            expect(!edge.update(from: decoration) && header.interactions.count == 1 && header.interactions.first === unrelatedInteraction,
+                   "Older systems keep the shared header material without an unavailable interaction")
+        }
+        expect(unrelatedInteraction.view === header && header.interactions.contains { $0 === unrelatedInteraction },
+               "Edge mounting and recycling must preserve unrelated public interactions")
+        sheet.removeFromSuperview()
+
         // Real UIKit ancestors may locally invert transparent-toolbar traits.
         // The actual SF Symbol tint resolver must keep the app-selected palette.
         let symbol = UIImageView(image: UIImage(systemName: "chevron.left"))
@@ -183,6 +254,13 @@ final class NativeContainmentTests: UIResponder, UIApplicationDelegate {
         try! data.write(to: path)
         exit(failures.isEmpty ? 0 : 1)
     }
+}
+
+@MainActor
+private final class FixtureInteraction: NSObject, UIInteraction {
+    private(set) weak var view: UIView?
+    func willMove(to view: UIView?) {}
+    func didMove(to view: UIView?) { self.view = view }
 }
 
 @MainActor
