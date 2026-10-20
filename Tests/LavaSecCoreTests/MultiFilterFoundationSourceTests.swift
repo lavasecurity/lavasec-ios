@@ -675,11 +675,16 @@ final class MultiFilterFoundationSourceTests: XCTestCase {
                         && source.contains("library.filter(id: filterID) != nil && !isFilterFrozen(filterID)"),
                       "retainedFilterArtifactTokens must retain sidecar tokens only for current, switchable filters.")
 
-        // The background warm pass runs ONLY on bg-published — the one outcome that committed the fresh
-        // catalog to latest.json. bg-unchanged does NOT qualify (latest.json not committed; sync may have
+        // Both publication and authorization renewal commit latest.json. A renewal must repair
+        // inactive artifacts too. bg-unchanged does NOT qualify (latest.json not committed; sync may have
         // used cache or fetched non-active changes), nor do aborted outcomes (Codex #138 r6 P1).
-        XCTAssertTrue(source.contains("actionStatus == \"bg-published\""),
-                      "Background warming must be gated on bg-published (catalog committed to latest.json).")
+        XCTAssertTrue(source.contains("if !Task.isCancelled, actionStatus == \"bg-published\" || actionStatus == \"bg-renewed\" {"),
+                      "Background warming requires a committed catalog, including a successful renewal.")
+        let renewalWarm = try sourceBlock(in: source,
+            startingAt: "if actionStatus == \"bg-renewed\" {",
+            endingBefore: "await warmNonActiveFiltersInBackground(window: .processing)")
+        XCTAssertTrue(renewalWarm.contains("loadPersistedConfiguration()"),
+                      "Catalog-only renewal CAS does not fence library edits; reload before warming the sidecar.")
         XCTAssertFalse(source.contains("touchCachedCatalogFreshness"),
                        "The freshness touch is removed — latest.json is only trustworthy-current on a commit, which already refreshes its mtime (Codex #138 r6 P1).")
 

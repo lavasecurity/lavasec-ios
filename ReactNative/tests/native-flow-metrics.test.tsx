@@ -112,11 +112,12 @@ test.each([0,-1,Number.NaN,Number.POSITIVE_INFINITY])('invalid SF point size %s 
 
 test('real backup renderer retains native point fonts, panel insets and full proposed width on a roomy window',()=>{
   render(fixture(<AccountBackupFlowAdapter id="backup-visit" state={backup}/>));
-  expect(screen.UNSAFE_getByType(Inline).props.fontSize).toBe(17);
+  expect(font('Encrypted on this device. Only you can unlock your backup.')).toBe(15);
   expect(font('This device')).toBe(17);expect(font('A local unlock key stays on this device.')).toBe(17);
   expect(font(localized('Set up with Passkey'))).toBe(17);
-  const panel=screen.UNSAFE_getAllByType(LavaSurface).find(node=>node.props.role==='panel')!;
-  expect(panel.props.contentStyle).toEqual({paddingHorizontal:16,paddingVertical:12});
+  const introduction=screen.UNSAFE_getAllByType(Group).find(node=>node.props.tone==='green')!;
+  expect(within(introduction).getByText('Encrypted on this device. Only you can unlock your backup.')).toBeTruthy();
+  expect(introduction.findAllByType(Symbol)).toHaveLength(0);
   expect(screen.UNSAFE_getByType(ScrollView).props.contentContainerStyle).toMatchObject({maxWidth:960,paddingHorizontal:18});
   sibling();
 });
@@ -237,7 +238,7 @@ test.each(['backupSetup','backupRestore'] as const)('%s success retains the meas
 test('account and backup semantic glyph fonts follow their native Dynamic Type ramps without enlarging slots',()=>{
   const scales={headline:1.8,body:1.6,title3:1.4,subheadline:1.5};
   const view=render(fixture(<AccountBackupFlowAdapter id="backup-visit" state={backup}/>,scales));
-  const fact=screen.UNSAFE_getAllByType(Decoration).find(node=>node.props.symbol==='key.fill')!;
+  const fact=screen.UNSAFE_getAllByType(Decoration).find(node=>node.props.symbol==='key')!;
   expect(fact.props.fontPointSize).toBeCloseTo(17*1.8);expect(StyleSheet.flatten(fact.props.style)).toMatchObject({width:24,height:24});
   view.rerender(fixture(<AccountBackupFlowAdapter id="account-visit" state={{...backup,kind:'account',connections:[{provider:'apple',title:'Apple account'},{provider:'google',title:'Google account'}]}}/>,scales));
   const glyph=(symbol:string)=>screen.UNSAFE_getAllByType(Decoration).find(node=>node.props.symbol===symbol)!;
@@ -294,11 +295,11 @@ test.each([
 
 test('QA adapter hooks inherit native metrics before configuring native text fields and system buttons',()=>{
   render(fixture(<QAFlowAdapter id={qa.id}/>,{body:1.6,headline:1.8,footnote:1.7,title3:1.3}));
-  // The historical XCUIOther page anchor belongs to the existing outer View;
-  // the scroll viewport and its privacy-fenced content retain their identities.
+  // QA uses the shared Screen directly, without a native View above its scroll.
   const page=screen.getByTestId('device-qa-page');
-  expect(page.type).toBe('View');expect(StyleSheet.flatten(page.props.style)).toEqual({flex:1});
-  expect(within(page).getByTestId('qa.scroll')).toBeTruthy();expect(within(page).getByTestId('qa.surface')).toBeTruthy();
+  expect(page.type).toBe('RCTScrollView');
+  expect(screen.UNSAFE_getByType(Screen).props.testID).toBe('device-qa-page');
+  expect(screen.queryByTestId('qa.surface')).toBeNull();
   expect(screen.UNSAFE_getByType(Configuration).props.fontSize).toBeCloseTo(13*1.7);
   expect(screen.UNSAFE_getAllByType(SystemButton).find(node=>node.props.title==='Stage upstream')!.props.fontSize).toBeCloseTo(17*1.6);
   expect(screen.UNSAFE_getByType(Inline).props.fontSize).toBeCloseTo(17*1.8);
@@ -427,7 +428,8 @@ test.each([false,true])('account and backup use only native-authored system labe
   // BackupSetupFactRow uses .primary; its helper retains Lava's secondary ink.
   expect(paint('This device')).toEqual(label);
   expect(paint('A local unlock key stays on this device.')).toEqual(colors.secondaryText);
-  expect(screen.UNSAFE_getByType(Inline).props.textColor).toEqual(colors.ink);
+  if(ios)expect(paint('Encrypted on this device. Only you can unlock your backup.')).toEqual(colors.primaryText);
+  else expect(screen.UNSAFE_getByType(Inline).props.textColor).toEqual(colors.ink);
   view.rerender(content({...backup,kind:'account',connections:[{provider:'apple',title:'private@example.com'}]}));
   expect(paint('private@example.com')).toEqual(label);
   expect(paint(localized('Sign out of all accounts'))).toEqual(colors.primaryText);
@@ -649,4 +651,30 @@ test('native paragraph policy preserves explicit typography and never enters And
     // Existing FormParagraph's Android recipe remains unchanged.
     expect(StyleSheet.flatten(screen.getByTestId('explicit.paragraph').props.style)).toMatchObject({lineHeight:28,marginVertical:2});
   }finally{android.restore();}
+});
+
+test('backup activation retains its page and credentials while loading in the button, then shows Done',()=>{
+  const command=jest.fn();
+  const state={...backup,step:'recoveryPhrase' as const,saved:true,understands:true,canContinue:true};
+  const content=(value:AccountBackupFlowState)=>fixture(<AccountBackupFlow state={value} command={command} credentials={<View testID="retained-credentials"/>} confirmAccountDeletion={()=>{}}/>);
+  const view=render(content(state));
+  const credentials=screen.getByTestId('retained-credentials');
+  const scroll=screen.UNSAFE_getByType(ScrollView);
+  fireEvent.press(screen.getByRole('button',{name:localized('Turn On Backup')}));
+  expect(command).toHaveBeenLastCalledWith({action:'setup.finish'});
+  view.rerender(content({...state,step:'upload',busy:true,uploading:true}));
+  expect(screen.getByTestId('retained-credentials')).toBe(credentials);
+  expect(screen.UNSAFE_getByType(ScrollView)).toBe(scroll);
+  expect(screen.getByRole('button',{name:localized('Turn On Backup')})).toHaveProp('accessibilityState',{busy:true,disabled:true});
+  expect(screen.queryByText(localized('Set up on this device. Your online backup is pending.'))).toBeNull();
+  expect(screen.queryByRole('button',{name:localized('Retry upload')})).toBeNull();
+  view.rerender(content({...state,step:'upload',busy:false,uploading:false,uploadError:'Network unavailable'}));
+  expect(screen.getByTestId('retained-credentials')).toBe(credentials);
+  fireEvent.press(screen.getByRole('button',{name:localized('Turn On Backup')}));
+  expect(command).toHaveBeenLastCalledWith({action:'setup.retry'});
+  view.rerender(content({...state,success:true,step:'upload'}));
+  expect(screen.queryByTestId('retained-credentials')).toBeNull();
+  expect(screen.getByText('Backup is ready')).toBeOnTheScreen();
+  fireEvent.press(screen.getByRole('button',{name:'Done'}));
+  expect(command).toHaveBeenLastCalledWith({action:'close'});
 });

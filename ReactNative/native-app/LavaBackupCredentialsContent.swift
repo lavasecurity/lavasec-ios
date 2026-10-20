@@ -75,14 +75,28 @@ private struct BackupRecoveryPhraseContent: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     var body: some View {
         VStack(spacing: 12) {
-            LazyVGrid(columns: dynamicTypeSize.isAccessibilitySize ? [GridItem(.flexible())] : [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
-                ForEach(Array(session.recoveryWords.enumerated()), id: \.offset) { index, word in BackupRecoveryPhraseWord(number: index + 1, word: word) }
+            // All eight words participate in sizeThatFits. A lazy grid can
+            // report a partial height when Copy invalidates its hosted layout.
+            let columns = dynamicTypeSize.isAccessibilitySize ? 1 : 2
+            VStack(spacing: 8) {
+                ForEach(Array(stride(from: 0, to: session.recoveryWords.count, by: columns)), id: \.self) { start in
+                    HStack(spacing: 8) {
+                        ForEach(start..<min(start + columns, session.recoveryWords.count), id: \.self) { index in
+                            BackupRecoveryPhraseWord(number: index + 1, word: session.recoveryWords[index]).frame(maxWidth: .infinity)
+                        }
+                    }
+                }
             }
             Button { if LavaAppBridge.shared.accountBackupSession?.mayAccessCredentials == true { session.copyPhrase() } } label: {
-                Label((session.consent.copiedRecoveryPhrase ? "Copied" : "Copy phrase").lavaLocalized, systemImage: session.consent.copiedRecoveryPhrase ? "checkmark" : "doc.on.doc")
+                ZStack {
+                    Label("Copy phrase".lavaLocalized, systemImage: "doc.on.doc")
+                        .opacity(session.consent.copiedRecoveryPhrase ? 0 : 1).accessibilityHidden(session.consent.copiedRecoveryPhrase)
+                    Label("Copied".lavaLocalized, systemImage: "checkmark")
+                        .opacity(session.consent.copiedRecoveryPhrase ? 1 : 0).accessibilityHidden(!session.consent.copiedRecoveryPhrase)
+                }
             }
             .buttonStyle(LavaPanelActionButtonStyle())
-            .disabled(session.recoveryPhrase.isEmpty)
+            .disabled(session.recoveryPhrase.isEmpty || session.busy || session.step != .recoveryPhrase)
             .accessibilityInputLabels(["Copy phrase".lavaLocalized, "Copy".lavaLocalized] + (session.consent.copiedRecoveryPhrase ? ["Copied".lavaLocalized] : []))
         }
     }

@@ -17,7 +17,7 @@ enum BackupMaintenanceAction: Identifiable {
     var buttonTitle: String {
         switch self {
         case .clear:
-            return "Delete online backup copy"
+            return "Delete backup"
         case .disable:
             return "Turn off & delete backup"
         }
@@ -26,7 +26,7 @@ enum BackupMaintenanceAction: Identifiable {
     var title: String {
         switch self {
         case .clear:
-            return "Delete online backup copy?"
+            return "Delete backup?"
         case .disable:
             return "Turn off & delete backup?"
         }
@@ -35,7 +35,7 @@ enum BackupMaintenanceAction: Identifiable {
     var actionTitle: String {
         switch self {
         case .clear:
-            return "Delete online backup copy"
+            return "Delete backup"
         case .disable:
             return "Turn off & delete backup"
         }
@@ -44,16 +44,16 @@ enum BackupMaintenanceAction: Identifiable {
     var message: String {
         switch self {
         case .clear:
-            return "Permanently deletes your account's encrypted backup — this can't be undone. Backup stays on, and a fresh copy uploads next time."
+            return "Deletes your online and local backup copies and turns off backup. This can't be undone. Your current settings stay on this device."
         case .disable:
-            return "Turns off backup on this device and permanently deletes your account's copy. This can't be undone — you can set up a new backup later."
+            return "Deletes your online and local backup copies and turns off backup. This can't be undone. Your current settings stay on this device."
         }
     }
 
     var authReason: String {
         switch self {
         case .clear:
-            return "Clear encrypted backup"
+            return "Disable encrypted backup"
         case .disable:
             return "Disable encrypted backup"
         }

@@ -7,7 +7,7 @@ import {GuardianDrawing} from '../src/GuardianDrawing';
 import {Alert, localized} from '../app/presentation';
 import {Text} from '../app/presentation';
 import {createContext,useCallback,useContext,useEffect,useLayoutEffect,useRef, useState,useSyncExternalStore, type PropsWithChildren, type ReactNode} from 'react';
-import {AppState, Dimensions, Pressable, RefreshControl, ScrollView, StyleSheet, View, type ScrollViewInstance, type ColorValue, type TextProps, type TextStyle, type StyleProp, type ViewStyle} from 'react-native';
+import {AppState, Dimensions, Pressable, RefreshControl, ScrollView, StyleSheet, View, type LayoutChangeEvent, type ScrollViewInstance, type ColorValue, type TextProps, type TextStyle, type StyleProp, type ViewStyle} from 'react-native';
 import {useIsFocused,useNavigation,type ParamListBase} from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {SafeAreaInsetsContext} from 'react-native-safe-area-context';
@@ -78,7 +78,7 @@ export function usePageScrollObservation(observe:(sample?:PageScrollSample)=>voi
 // Only pages with their own text inputs participate in keyboard avoidance. RN
 // listens to window-wide keyboard frames, including keyboards in native sheets;
 // a read-only page must never retain extra scroll space from those notifications.
-export function Screen({children, onEndReached,onRefresh, keyboard = false, wide=false,showsVerticalScrollIndicator=false,contentContainerStyle}: PropsWithChildren<{wide?:boolean|'compact';keyboard?: boolean;showsVerticalScrollIndicator?:boolean;onEndReached?:()=>void;onRefresh?:()=>Promise<unknown>;contentContainerStyle?:StyleProp<ViewStyle>}>) {
+export function Screen({children, onEndReached,onRefresh, keyboard = false, wide=false,showsVerticalScrollIndicator=false,contentContainerStyle,testID='screen.scroll',onLayout,concealed:flowConcealed=false,interactionDisabled=false}: PropsWithChildren<{wide?:boolean|'compact';keyboard?: boolean;showsVerticalScrollIndicator?:boolean;onEndReached?:()=>void;onRefresh?:()=>Promise<unknown>;contentContainerStyle?:StyleProp<ViewStyle>;testID?:string;onLayout?:(event:LayoutChangeEvent)=>void;concealed?:boolean;interactionDisabled?:boolean}>) {
   const styles=useScaffoldStyles(windowBase_styles);
   const layout=useWindowLayout();
   const contentWidth=pageContentWidth(layout,wide);
@@ -91,13 +91,13 @@ export function Screen({children, onEndReached,onRefresh, keyboard = false, wide
     navigation?.setOptions?.({lavaHeaderContentInset:headerInset});
   },[navigation,headerInset]);
   const nativeLayout=usePresentationNativeLayout();
-  const review=useOptionalReview();const concealed=useRouteBodyConcealed();
+  const review=useOptionalReview();const routeConcealed=useRouteBodyConcealed();const concealed=routeConcealed||flowConcealed;
   const insets=useContext(SafeAreaInsetsContext);
   const horizontalContentInsets=insets&&(insets.left!==0||insets.right!==0)?{
     maxWidth:contentWidth+insets.left+insets.right,
     paddingLeft:layout.gutter+insets.left,paddingRight:layout.gutter+insets.right,
   }:undefined;
-  const canInteract=()=>!concealed&&mayInteractWithPresentation(review?.app);
+  const canInteract=()=>!concealed&&!interactionDisabled&&mayInteractWithPresentation(review?.app);
   const interactive=useSyncExternalStore(review?.app?.subscribe??(()=>()=>{}),canInteract);
   const scroll = useRef<ScrollViewInstance>(null);
   const focused = useIsFocused();
@@ -132,8 +132,8 @@ export function Screen({children, onEndReached,onRefresh, keyboard = false, wide
   // the physical width. Only Yoga content receives horizontal safe padding.
   // Include that padding in the width cap to retain the same reading envelope;
   // automatic adjustment still owns vertical bars and the keyboard.
-  return <ScrollView ref={scroll} testID="screen.scroll" pointerEvents={interactive?'auto':'none'} accessibilityElementsHidden={!interactive} importantForAccessibility={interactive?'auto':'no-hide-descendants'} refreshControl={onRefresh?<RefreshControl refreshing={refreshing} onRefresh={refresh}/>:undefined} style={[styles.screen,concealed&&{opacity:0}]}
-      onLayout={event=>{nativeLayout(event);resetObservers();}} onContentSizeChange={resetObservers}
+  return <ScrollView ref={scroll} testID={testID} pointerEvents={interactive?'auto':'none'} accessibilityElementsHidden={!interactive} importantForAccessibility={interactive?'auto':'no-hide-descendants'} refreshControl={onRefresh?<RefreshControl refreshing={refreshing} onRefresh={refresh}/>:undefined} style={[styles.screen,concealed&&{opacity:0}]}
+      onLayout={event=>{nativeLayout(event);onLayout?.(event);resetObservers();}} onContentSizeChange={resetObservers}
       onScrollBeginDrag={()=>{observingScrollGesture.current=true;}} onScrollEndDrag={()=>{observingScrollGesture.current=false;}}
       onMomentumScrollBegin={()=>{observingScrollGesture.current=true;}} onMomentumScrollEnd={()=>{observingScrollGesture.current=false;}}
       onTouchStart={()=>{if(canInteract())inspectionResets.current.forEach(reset=>reset());}} scrollEventThrottle={100} onScroll={event=>{const {contentOffset,contentSize,layoutMeasurement}=event.nativeEvent;

@@ -1,6 +1,6 @@
 import {Copy,Section,Group,Info,Search,SystemButton,BufferedInput} from '../ui';
 import {FlowConsentToggle} from '../FlowConsentToggle';
-import {useState,type ReactNode} from 'react';
+import {useState,type ReactNode,type ComponentType,type PropsWithChildren} from 'react';
 import {Pressable,ScrollView,StyleSheet,View,type LayoutChangeEvent,type ColorValue} from 'react-native';
 import {LavaActionButton,LavaCard,LavaRowLabel} from '../../index';
 import {foundation} from '../../foundation';
@@ -15,10 +15,15 @@ export type QAPort={
   labelColor?:ColorValue;
   searchField?:(props:{label:string;value:string;onChange:(value:string)=>void})=>ReactNode;
   onLayout?:(event:LayoutChangeEvent)=>void;
+  page?:ComponentType<PropsWithChildren<{port:QAPort;spacing:number}>>;
+  pageID?:string;
+  interactive?:boolean;
+  concealed?:boolean;
   localize:(text:string)=>string;
   textScale:number;
 };
 function QAPage({children,port,spacing=18}:{children:ReactNode;port:QAPort;spacing?:number}){
+  if(port.page){const Page=port.page;return <Page port={port} spacing={spacing}>{children}</Page>;}
   return <ScrollView testID="qa.scroll" onLayout={port.onLayout} style={styles.screen} contentInsetAdjustmentBehavior="automatic"
     keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator
     contentContainerStyle={[styles.content,{gap:spacing}]}>{children}</ScrollView>;

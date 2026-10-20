@@ -36,7 +36,7 @@ const expectedNumber = new Intl.NumberFormat();
 const backupEnablement=(value:boolean|null,signedIn=true,overrides:Partial<NonNullable<AppSnapshot['backup']['enablement']>>={})=>({
   state:value===null?'unavailable' as const:value?'on' as const:'off' as const,value,
   canEnable:signedIn&&value===false,canDisable:signedIn&&value===true,
-  canBackUp:signedIn&&value===true,canRestore:signedIn&&value!==null,
+  canBackUp:signedIn&&value===true,canRestore:signedIn&&value===true,
   canChangeAutomatic:signedIn&&value===true,canRetryDeletion:false,...overrides,
 });
 
@@ -308,7 +308,8 @@ test('signing out displays backup Off while retaining its saved state for sign-i
   expect(command).not.toHaveBeenCalled();
   view.rerender(<Provider live={live} app={app}><AccountScreen /></Provider>);
   expect(screen.getByRole('switch',{name:'Enable backup'})).toHaveProp('value',true);
-  expect(screen.getByRole('button',{name:'Backup maintenance'})).toBeOnTheScreen();
+  expect(screen.queryByRole('button',{name:'Backup maintenance'})).toBeNull();
+  expect(screen.getByRole('switch',{name:'Automatic backup'})).toBeOnTheScreen();
 });
 
 test('backup opt-in opens setup without claiming enablement on command completion or cancellation',async()=>{
@@ -317,7 +318,7 @@ test('backup opt-in opens setup without claiming enablement on command completio
   const view=render(<Provider live={live} app={app}><AccountScreen/></Provider>);
   const toggle=()=>screen.getByRole('switch',{name:'Enable backup'});
   expect(toggle()).toBeEnabled();expect(toggle()).toHaveProp('value',false);
-  expect(screen.getByRole('button',{name:'Restore backup'})).toBeEnabled();
+  expect(screen.queryByRole('button',{name:'Restore backup'})).toBeNull();
   expect(screen.queryByRole('button',{name:'Back up now'})).toBeNull();
   await act(async()=>fireEvent(toggle(),'valueChange',true));
   expect(command).toHaveBeenCalledWith({type:'native.flow',flow:'backupSetup'});
@@ -366,7 +367,6 @@ test('automatic upload scheduling remains independent from backup enablement',as
   const command=jest.fn(async()=>undefined);const app={command} as unknown as AppStore;
   const live={account:{signedIn:true},backup:{enablement:backupEnablement(true),configured:true,busy:false,automatic:true}} as AppSnapshot;
   const view=render(<Provider live={live} app={app}><AccountScreen/></Provider>);
-  fireEvent.press(screen.getByRole('button',{name:'Backup maintenance'}));
   await act(async()=>fireEvent(screen.getByRole('switch',{name:'Automatic backup'}),'valueChange',false));
   expect(command.mock.calls).toEqual([[{type:'settings.set',key:'backup.automatic',value:false}]]);
   view.rerender(<Provider live={{...live,backup:{...live.backup,automatic:false}}} app={app}><AccountScreen/></Provider>);
@@ -374,34 +374,21 @@ test('automatic upload scheduling remains independent from backup enablement',as
   expect(screen.getByRole('button',{name:'Back up now'})).toBeEnabled();
 });
 
-test('account status stays separate and follows sign-in changes while feedback appears once',()=>{
-  const message='Sign-in unavailable';
-  const live={account:{signedIn:false,status:'Not signed in',detail:message,message},backup:{enablement:backupEnablement(false,false),configured:false,busy:false}} as AppSnapshot;
-  const view=render(<Provider live={live}><AccountScreen/></Provider>);
-  const {SettingsSurface,SettingsStatus}=require('../review/settings-scaffold');
-  const {Section,Symbol}=require('../review/primitives');
-  const surfaces=()=>screen.UNSAFE_getAllByType(Section).find(node=>node.props.title==='Account')!.findAllByType(SettingsSurface);
-  const status=()=>surfaces()[0]!;
-  expect(surfaces()).toHaveLength(2);
-  expect(status().findAllByType(SettingsStatus)).toHaveLength(1);
-  expect(status().findAllByType(ListRow)).toHaveLength(1);
-  expect(surfaces()[1]!.findAllByType(ListRow)).toHaveLength(2);
-  expect(status().props.tone).toBe('neutral');
-  expect(status().findByType(Symbol).props).toMatchObject({name:'person.crop.circle',tone:'primary'});
-  expect(screen.getAllByText(message)).toHaveLength(1);
+test('account status is one line in every state and both signed-in rows open the account sheet',async()=>{
+  const command=jest.fn(async()=>undefined);const app={command} as unknown as AppStore;
+  const live={account:{signedIn:false,status:'Not signed in',detail:'Signed out.',message:'Signed out.'},backup:{enablement:backupEnablement(false,false),configured:false,busy:false}} as AppSnapshot;
+  const view=render(<Provider live={live} app={app}><AccountScreen/></Provider>);
   expect(screen.getByText('Not signed in')).toBeOnTheScreen();
-
-  const title='Signed in with Apple';
-  view.rerender(<Provider live={{...live,account:{...live.account,signedIn:true,status:title,detail:'',message:title}}}><AccountScreen/></Provider>);
-  expect(status().props.tone).toBe('green');
-  expect(status().findByType(Symbol).props).toMatchObject({name:'checkmark.circle.fill',tone:'white'});
-  expect(screen.getAllByText(title)).toHaveLength(1);
-  expect(screen.queryByText(message)).toBeNull();
-
-  view.rerender(<Provider live={live}><AccountScreen/></Provider>);
-  expect(status().props.tone).toBe('neutral');
-  expect(status().findByType(Symbol).props).toMatchObject({name:'person.crop.circle',tone:'primary'});
-  expect(screen.getAllByText(message)).toHaveLength(1);
+  expect(screen.queryByText('Signed out.')).toBeNull();
+  view.rerender(<Provider live={{...live,account:{...live.account,busy:true,detail:'Opening Apple sign-in…',message:'Opening Apple sign-in…'}}} app={app}><AccountScreen/></Provider>);
+  expect(screen.getByText(localized('Signing in'))).toBeOnTheScreen();
+  expect(screen.queryByText('Opening Apple sign-in…')).toBeNull();
+  view.rerender(<Provider live={{...live,account:{...live.account,signedIn:true,appleConnected:true,appleTitle:'Signed in with Apple'}}} app={app}><AccountScreen/></Provider>);
+  expect(screen.getByText('Signed in')).toBeOnTheScreen();
+  expect(screen.getAllByText('Signed in with Apple')).toHaveLength(1);
+  await act(async()=>fireEvent.press(screen.getByTestId('account.status')));
+  await act(async()=>fireEvent.press(screen.getByRole('button',{name:'Signed in with Apple'})));
+  expect(command.mock.calls).toEqual([[{type:'native.flow',flow:'account'}],[{type:'native.flow',flow:'account'}]]);
 });
 
 test('a paid subscriber retains management and restore while fresh entitlements load',async()=>{
@@ -1176,14 +1163,14 @@ test('disabled Top Domains retains its native explanation without the history-on
   render(<Provider live={off}><DomainListScreen/></Provider>);
   expect(screen.getByText('Turn on domain history to see your most frequent domains.')).toBeOnTheScreen();
   expect(screen.queryByRole('button',{name:'Turn on domain history'})).toBeNull();
-  expect(screen.queryByText('Touch and hold a domain to allow or block it.')).toBeNull();
+  expect(screen.queryByText('Long-press to allow or block a domain')).toBeNull();
 });
 
 test.each([false,true])('empty domain search retains the native reason and hides actions on history=%s',history=>{
   render(<Provider><DomainListScreen history={history}/></Provider>);
   act(()=>nativeDomainSearch().onChangeText({nativeEvent:{text:'missing.example'}}));
   expect(screen.getByText('No domains match this search')).toBeOnTheScreen();
-  expect(screen.queryByText('Touch and hold a domain to allow or block it.')).toBeNull();
+  expect(screen.queryByText('Long-press to allow or block a domain')).toBeNull();
 });
 
 test('network log clearing becomes enabled after the native rows arrive',async()=>{
@@ -1943,10 +1930,10 @@ test.each([['fr',false],['fr',true],['ja',false],['ja',true]] as const)('filter 
 
 describe('native backup maintenance confirmations',()=>{
   test.each([
-    ['en','Delete online backup copy','backup.delete',"Permanently deletes your account's encrypted backup — this can't be undone. Backup stays on, and a fresh copy uploads next time."],
-    ['ja','Delete online backup copy','backup.delete',"Permanently deletes your account's encrypted backup — this can't be undone. Backup stays on, and a fresh copy uploads next time."],
-    ['en','Turn off & delete backup','backup.disable',"Turns off backup on this device and permanently deletes your account's copy. This can't be undone — you can set up a new backup later."],
-    ['ja','Turn off & delete backup','backup.disable',"Turns off backup on this device and permanently deletes your account's copy. This can't be undone — you can set up a new backup later."],
+    ['en','Delete backup','backup.delete',"Deletes your online and local backup copies and turns off backup. This can't be undone. Your current settings stay on this device."],
+    ['ja','Delete backup','backup.delete',"Deletes your online and local backup copies and turns off backup. This can't be undone. Your current settings stay on this device."],
+    ['en','Turn off & delete backup','backup.disable',"Deletes your online and local backup copies and turns off backup. This can't be undone. Your current settings stay on this device."],
+    ['ja','Turn off & delete backup','backup.disable',"Deletes your online and local backup copies and turns off backup. This can't be undone. Your current settings stay on this device."],
   ])('preserves the native %s confirmation for %s',async(locale,title,type,message)=>{
     configurePresentation({locale,textScales:null});
     const alert=jest.spyOn(Alert,'alert').mockImplementation(()=>{});
@@ -1954,7 +1941,6 @@ describe('native backup maintenance confirmations',()=>{
       const command=jest.fn(async(_input:AppCommand)=>undefined);
       const live={account:{signedIn:true},backup:{enablement:backupEnablement(true,true),configured:true,automatic:true,busy:false}} as AppSnapshot;
       render(<Provider live={live} app={{command} as unknown as AppStore}><AccountScreen/></Provider>);
-      fireEvent.press(screen.getByRole('button',{name:localized('Backup maintenance')}));
       if(type==='backup.disable')fireEvent(screen.getByRole('switch',{name:localized('Enable backup')}),'valueChange',false);
       else fireEvent.press(screen.getByRole('button',{name:localized(title)}));
       expect(alert.mock.calls.at(-1)![0]).toBe(localized(title+'?'));
@@ -2096,6 +2082,20 @@ test.each(['Sign in with Apple','Sign in with Google'])('%s cannot queue another
   }finally{alert.mockRestore();}
 });
 
+test.each(['Sign in with Apple','Sign in with Google'])('%s reports real failure without adding a status subtitle',async title=>{
+  const command=jest.fn(async()=>{throw new Error('Sign-in unavailable');});
+  const alert=jest.spyOn(Alert,'alert').mockImplementation(()=>{});
+  try{
+    const live={account:{signedIn:false,busy:false},backup:{enablement:backupEnablement(false,false),configured:false,busy:false}} as AppSnapshot;
+    render(<Provider live={live} app={{command} as unknown as AppStore}><AccountScreen/></Provider>);
+    await act(async()=>fireEvent.press(screen.getByRole('button',{name:localized(title)})));
+    expect(alert.mock.calls[0]?.slice(0,2)).toEqual(['Lava','Sign-in unavailable']);
+    expect(screen.getByText('Not signed in')).toBeOnTheScreen();
+    expect(screen.queryByText('Sign-in unavailable')).toBeNull();
+    expect(screen.getByRole('button',{name:localized(title)})).toBeEnabled();
+  }finally{alert.mockRestore();}
+});
+
 test.each(['backup.now','backup.delete','backup.disable'])('%s excludes replayed backup operations before the native busy snapshot',async type=>{
   let reject!:(error:Error)=>void;
   const command=jest.fn((input:AppCommand)=>input.type==='backup.refresh'?Promise.resolve(null):new Promise<null>((_resolve,fail)=>{reject=fail;}));
@@ -2103,11 +2103,10 @@ test.each(['backup.now','backup.delete','backup.disable'])('%s excludes replayed
   try{
     const live={account:{signedIn:true,busy:false},backup:{enablement:backupEnablement(true,true),configured:true,automatic:true,busy:false}} as AppSnapshot;
     render(<Provider live={live} app={{command} as unknown as AppStore}><AccountScreen/></Provider>);
-    fireEvent.press(screen.getByRole('button',{name:localized('Backup maintenance')}));
     const rows=screen.UNSAFE_getAllByType(ListRow);
     const now=rows.find(node=>node.props.title==='Back Up Now')!.props.onPress;
     const actions:Record<string,()=>void>={'backup.now':now};
-    for(const [label,kind] of [['Delete online backup copy','backup.delete'],['Turn off & delete backup','backup.disable']]){
+    for(const [label,kind] of [['Delete backup','backup.delete'],['Turn off & delete backup','backup.disable']]){
       if(kind==='backup.disable')fireEvent(screen.getByRole('switch',{name:localized('Enable backup')}),'valueChange',false);
       else fireEvent.press(screen.getByRole('button',{name:localized(label!)}));
       const confirm=alert.mock.calls.at(-1)![2]!.find(button=>button.style==='destructive')!.onPress!;
@@ -2117,7 +2116,7 @@ test.each(['backup.now','backup.delete','backup.disable'])('%s excludes replayed
     act(()=>{actions[type]!();for(const action of Object.values(actions))action();screen.UNSAFE_getAllByType(Toggle).find(node=>node.props.title==='Enable backup')!.props.onChange(false);});
     expect(command.mock.calls).toEqual([[{type}]]);
     expect(alert).not.toHaveBeenCalled();
-    for(const label of ['Back Up Now','Delete online backup copy'])expect(screen.getByRole('button',{name:localized(label)})).toBeDisabled();
+    for(const label of ['Back Up Now','Delete backup'])expect(screen.getByRole('button',{name:localized(label)})).toBeDisabled();
     expect(screen.getByRole('switch',{name:localized('Enable backup')})).toBeDisabled();
     expect(screen.getByRole('switch',{name:localized('Automatic Backup')})).toBeDisabled();
     await act(async()=>reject(new Error('Authentication cancelled.')));
@@ -2556,15 +2555,13 @@ test('reduced motion keeps explicit autoplay and readable captions',async()=>{
 
 
 
-test('Account keeps native failure detail inside the enable row when maintenance is collapsed',()=>{
+test('Account shows maintenance directly and keeps failure detail inside the enable row',()=>{
   const live={account:{signedIn:true},backup:{enablement:backupEnablement(true,true),configured:true,automatic:false,busy:false,title:'Needs attention',summary:'Needs attention',detail:'Upload was not confirmed. Try again.',needsAttention:true}} as AppSnapshot;
   render(<Provider live={live}><AccountScreen/></Provider>);
   expect(screen.getByText('Upload was not confirmed. Try again.')).toBeOnTheScreen();
-  const disclosure=screen.getByRole('button',{name:localized('Backup maintenance')});
-  expect(disclosure).toHaveProp('accessibilityState',expect.objectContaining({expanded:false}));
-  fireEvent.press(disclosure);
-  fireEvent.press(disclosure);
-  expect(screen.queryByRole('button',{name:localized('Delete online backup copy')})).toBeNull();
+  expect(screen.queryByRole('button',{name:localized('Backup maintenance')})).toBeNull();
+  expect(screen.getByRole('button',{name:localized('Delete backup')})).toBeOnTheScreen();
+  expect(screen.getByRole('switch',{name:localized('Automatic Backup')})).toBeOnTheScreen();
   expect(screen.getByText('Upload was not confirmed. Try again.')).toBeOnTheScreen();
 });
 
@@ -2574,7 +2571,7 @@ test('pending deletion keeps its confirmed native retry reachable after local co
   try{
     render(<Provider live={live} app={{command} as unknown as AppStore}><AccountScreen/></Provider>);
     expect(screen.getByText(live.backup.detail!)).toBeOnTheScreen();
-    expect(screen.queryByRole('button',{name:localized('Delete online backup copy')})).toBeNull();
+    expect(screen.queryByRole('button',{name:localized('Delete backup')})).toBeNull();
     fireEvent.press(screen.getByRole('button',{name:localized('Turn off & delete backup')}));
     expect(command).not.toHaveBeenCalled();
     const confirmation=alert.mock.calls.at(-1)![2]!.find(button=>button.style==='destructive')!;

@@ -41,6 +41,18 @@ test('account deletion asks the platform for its confirmation before invoking a 
   const {command,confirmAccountDeletion}=mount({kind:'account',connections:[{provider:'apple',title:'private@example.com'}]});
   fireEvent.press(screen.getByRole('button',{name:localized('Delete my Lava account')}));expect(confirmAccountDeletion).toHaveBeenCalledTimes(1);expect(command).not.toHaveBeenCalled();
 });
+test('account deletion failure is visible in the fresh flow and clears with the next successful projection',()=>{
+  const {props}=mount({kind:'account',error:'Could not delete account: Network unavailable'});
+  expect(screen.getByText('Could not delete account: Network unavailable')).toBeOnTheScreen();
+  screen.rerender(<AccountBackupFlow {...props} state={{...props.state,error:''}}/>);
+  expect(screen.queryByText('Could not delete account: Network unavailable')).toBeNull();
+});
+test('an unavailable setup upload cannot retry while Close remains available',()=>{
+  const {command}=mount({step:'upload',canContinue:false,canClose:true,uploadError:'Backup upload paused. Return to Account & Backup to continue.'});
+  const button=screen.getByRole('button',{name:localized('Turn On Backup')});
+  expect(button).toBeDisabled();fireEvent.press(button);expect(command).not.toHaveBeenCalled();
+  expect(screen.getByText(localized('Backup upload paused. Return to Account & Backup to continue.'))).toBeOnTheScreen();
+});
 test('a confirmed success displays stable copy and Done without credential material',()=>{
   const {command}=mount({success:true});expect(screen.getByText('Your encrypted backup is set up on this device.')).toBeTruthy();expect(screen.queryByTestId('native-credential-atom')).toBeNull();fireEvent.press(screen.getByRole('button',{name:localized('Done')}));expect(command).toHaveBeenCalledWith({action:'close'});
 });
@@ -98,6 +110,18 @@ test('current busy backup keeps its Close control disabled',async()=>{
   render(<ReviewContext.Provider value={{app,live} as ReviewState}><AccountBackupFlowAdapter id="busy-visit" state={state}/></ReviewContext.Provider>);
   const close=headerOptions().unstable_headerRightItems()[0];expect(close.disabled).toBe(true);
   await act(async()=>close.onPress());expect(command).not.toHaveBeenCalled();
+});
+
+test('a committed setup keeps Close available while its upload button is busy',async()=>{
+  mockNavigation.setOptions.mockClear();
+  const state={...base,step:'upload' as const,busy:true,uploading:true,canClose:true};
+  const live=scopedSnapshot('upload-visit',state);const store=nativeStore(live);
+  render(<ReviewContext.Provider value={{app:store.app,live} as ReviewState}><AccountBackupFlowAdapter id="upload-visit" state={state}/></ReviewContext.Provider>);
+  const close=headerOptions().unstable_headerRightItems()[0];
+  expect(close.disabled).toBe(false);
+  expect(screen.getByRole('button',{name:localized('Turn On Backup')})).toBeDisabled();
+  await act(async()=>close.onPress());
+  expect(store.command).toHaveBeenLastCalledWith({type:'foreground.dismiss',id:'upload-visit'});
 });
 
 

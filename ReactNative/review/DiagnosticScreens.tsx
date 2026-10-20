@@ -73,7 +73,7 @@ export function DomainListScreen({history=false}: {history?: boolean}) {
     <Section title="Show"><Choice label="Show" options={['All','Allowed','Blocked']} value={decision} onChange={setDecision}/></Section>
     <View style={{gap:foundation.space.md}}>
       <QueryContent pending={!!enabled&&!!app&&!query.value} testID="domain-query-content">
-      {rows.length>0&&(query.error?<Quiet>{query.error}</Quiet>:<Quiet>Long-press a domain</Quiet>)}
+      {rows.length>0&&(query.error?<Quiet>{query.error}</Quiet>:<Quiet>Long-press to allow or block a domain</Quiet>)}
       <Group>{!enabled&&history?<View style={s.insetStack}>
         <View style={s.row}><Symbol name="lock.shield"/><Copy role="section" color={colors.safeGreen}>Local history is off</Copy></View>
         <Copy color={colors.secondaryText}>Turn on local history only if you want this searchable list.</Copy>

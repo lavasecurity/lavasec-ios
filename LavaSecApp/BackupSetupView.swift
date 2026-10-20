@@ -27,15 +27,26 @@ final class BackupSetupSession: ObservableObject {
         self.backup = backup; self.isCurrent = isCurrent
         ensureRecoveryPhrase()
         progressSubscription = backup.$setupUploadProgress.sink { [weak self] _ in
-            Task { @MainActor [weak self] in self?.updateUploadProgress() }
+            Task { @MainActor [weak self] in self?.objectWillChange.send(); self?.updateUploadProgress() }
         }
     }
-    var busy: Bool { isPreparingPasskey || isValidatingPasskey || isFinishingSetup }
-    var blocksInteractiveDismiss: Bool { busy || step == .validatePasskey }
+    var busy: Bool { isPreparingPasskey || isValidatingPasskey || isFinishingSetup || isUploadingSetup }
+    // Upload owns the button after the local setup has committed. Leaving the
+    // sheet retires credentials without cancelling the controller-owned upload.
+    var canClose: Bool { !busy || step == .upload }
+    var blocksInteractiveDismiss: Bool { !canClose || step == .validatePasskey }
     var canBack: Bool { !busy && [.validatePasskey, .recoveryPhrase].contains(step) }
     var canAdvance: Bool { step == .recoveryPhrase && selectedPasskeyMode != nil && !recoveryPhrase.isEmpty && consent.canFinish }
     var recoveryWords: [String] { BackupRecoveryPhrase.words(from: recoveryPhrase) }
-    var isUploadingSetup: Bool { backup.setupUploadProgress?.id == setupAttemptID && backup.setupUploadProgress?.state == .uploading }
+    var isUploadingSetup: Bool {
+        guard let progress = backup.setupUploadProgress, progress.id == setupAttemptID else { return false }
+        return progress.state == .pending || progress.state == .uploading
+    }
+    var canRetryUpload: Bool {
+        guard let progress = backup.setupUploadProgress, progress.id == setupAttemptID else { return false }
+        if case .failed = progress.state { return true }
+        return false
+    }
     var uploadError: String? {
         guard backup.setupUploadProgress?.id == setupAttemptID else { return "Backup upload paused. Return to Account & Backup to continue." }
         switch backup.setupUploadProgress?.state {
@@ -99,7 +110,10 @@ final class BackupSetupSession: ObservableObject {
             do {
                 try await backup.turnOnEncryptedBackup(recoveryPhrase: recoveryPhrase)
                 guard !Task.isCancelled, !retired, isCurrent() else { return }
-                setupAttemptID = backup.setupUploadProgress?.id; recoveryPhrase = ""; consent.reset(); isFinishingSetup = false; step = .upload; updateUploadProgress()
+                // Keep the accepted phrase and consent in place while the same
+                // button waits for the online copy. Clear credentials on success
+                // or retirement, not during the transition into an upload.
+                setupAttemptID = backup.setupUploadProgress?.id; step = .upload; isFinishingSetup = false; updateUploadProgress()
             } catch {
                 guard !retired, isCurrent() else { return }
                 errorMessage = error.localizedDescription; isFinishingSetup = false
@@ -109,15 +123,23 @@ final class BackupSetupSession: ObservableObject {
             }
         }
     }
-    func retryUpload() { guard !busy, step == .upload, let setupAttemptID else { return }; Task { await backup.retrySetupUpload(attemptID: setupAttemptID) } }
+    func retryUpload() {
+        guard !busy, !retired, isCurrent(), step == .upload, canRetryUpload, let setupAttemptID else { return }
+        isFinishingSetup = true
+        task = Task { [weak self] in
+            guard let self else { return }
+            await backup.retrySetupUpload(attemptID: setupAttemptID)
+            isFinishingSetup = false; updateUploadProgress()
+        }
+    }
     private func ensureRecoveryPhrase() {
         guard step != .complete, step != .upload, recoveryPhrase.isEmpty else { return }
         do { recoveryPhrase = try BackupRecoveryPhrase.generate(); consent.reset() } catch { errorMessage = error.localizedDescription }
     }
     private func updateUploadProgress() {
-        guard !retired, isCurrent(), step == .upload, let setupAttemptID, backup.isSetupUploadConfirmed(attemptID: setupAttemptID) else { return }
+        guard !retired, isCurrent(), !setupComplete, step == .upload, let setupAttemptID, backup.isSetupUploadConfirmed(attemptID: setupAttemptID) else { return }
         if let setupFeedbackID { LavaFeedbackCoordinator.shared.finish("backup.setup", setupFeedbackID, .succeeded); self.setupFeedbackID = nil }
-        LavaAccessibilityAnnouncer.announce("Backup is ready".lavaLocalized); setupComplete = true
+        LavaAccessibilityAnnouncer.announce("Backup is ready".lavaLocalized); setupComplete = true; recoveryPhrase = ""; consent.reset()
     }
 }
 
@@ -128,7 +150,7 @@ enum BackupSetupStep: String {
         case .overview: "Set Up Encrypted Backup"
         case .validatePasskey: "Confirm your passkey"
         case .recoveryPhrase: "Save your recovery phrase"
-        case .upload: "Uploading backup"
+        case .upload: "Save your recovery phrase"
         case .complete: "Backup is ready"
         }
     }

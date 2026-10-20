@@ -425,6 +425,7 @@ jobs:
           # Native backup lifecycle semantics run with isolated Keychain/storage/session I/O.
           # This does not contact Supabase or use a simulator/account.
           ci/run-with-maintenance-lock.sh -- python3 Tests/NativeBackupDeletionCompatibilityTests.py
+          ci/run-with-maintenance-lock.sh -- python3 Tests/NativeBackupSetupPresentationTests.py
           ci/run-with-maintenance-lock.sh -- python3 Tests/NativeProtectedPreferenceRecoveryTests.py
 
   ios-simulator-build:

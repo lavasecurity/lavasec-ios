@@ -68,12 +68,9 @@ export function AccountScreen() {
   },[app,focused,live?.account.signedIn,live?.backup.enablement?.value]);
   const maintain=(button:string,type:'backup.delete'|'backup.disable')=>{
     if(backup.isBusy())return;
-    const confirmation=live?.confirmations?.[button]??{title:button+'?',action:button,message:type==='backup.delete'
-      ?"Permanently deletes your account's encrypted backup — this can't be undone. Backup stays on, and a fresh copy uploads next time."
-      :"Turns off backup on this device and permanently deletes your account's copy. This can't be undone — you can set up a new backup later."};
+    const confirmation=live?.confirmations?.[button]??{title:button+'?',action:button,message:"Deletes your online and local backup copies and turns off backup. This can't be undone. Your current settings stay on this device."};
     return new Promise<void>(resolve=>Alert.alert(confirmation.title,confirmation.message,[{text:'Cancel',style:'cancel',onPress:resolve},{text:confirmation.action,style:'destructive',onPress:()=>{void backup.run({type}).finally(resolve);}}],{onDismiss:resolve}));
   };
-  const [maintenanceOpen,setMaintenanceOpen]=useState(false);
   const enablement=live?.backup.enablement;
   const signedIn=!!live?.account.signedIn;
   // Signed-out backup cannot upload, so present Off without changing the saved
@@ -90,8 +87,9 @@ export function AccountScreen() {
     <SettingsIntro summary="Use Lava without an account, or sign in to back up your settings securely."/>
     <Section title="Account">
       <SettingsSurface tone={signedIn?'green':'neutral'}>
-        <SettingsStatus icon="person.crop.circle" title={live?.account.status??'Not signed in'} description={live?.account.message||live?.account.detail||undefined}
-          leading={signedIn?<Symbol name="checkmark.circle.fill" tone="white"/>:undefined}/>
+        <ListRow testID="account.status" title={signedIn?'Signed in':live?.account.busy?'Signing in':'Not signed in'} icon="person.crop.circle"
+          leading={signedIn?<Symbol name="checkmark.circle.fill" tone="white"/>:undefined}
+          disabled={signedIn&&signIn.busy} onPress={signedIn?()=>signIn.run({type:'native.flow',flow:'account'}):undefined}/>
       </SettingsSurface>
       <SettingsSurface>
         <ListRow action title={live?.account.appleTitle??'Sign in with Apple'} disabled={signIn.busy} leading={<SettingsGlyph name="apple.logo" busy={live?.account.appleBusy}/>}
@@ -109,21 +107,21 @@ export function AccountScreen() {
               onChange={next=>{if(next)setup();else disable();}}/>}
         {canShowTools&&<ListRow action title={live?.backup.backingUp?'Backing Up':'Back Up Now'} icon="icloud.and.arrow.up.fill" leading={live?.backup.backingUp?<SettingsGlyph name="icloud.and.arrow.up.fill" busy/>:undefined}
           disabled={backup.busy||!enablement?.canBackUp} onPress={()=>backup.run({type:'backup.now'})}/>}
-        {!!live?.account.signedIn&&!pendingDeletion&&enabled!==null&&<ListRow action title="Restore Backup" icon="icloud.and.arrow.down.fill"
+        {canShowTools&&!pendingDeletion&&<ListRow action title="Restore Backup" icon="icloud.and.arrow.down.fill"
           disabled={backup.busy||!enablement?.canRestore} onPress={()=>backup.run({type:'native.flow',flow:'backupRestore'})}/>}
         {pendingDeletion&&<ListRow action title="Turn off & delete backup" icon="trash" color={colors.errorText}
           disabled={backup.busy||!enablement?.canRetryDeletion} onPress={()=>maintain('Turn off & delete backup','backup.disable')}/>}
       </SettingsSurface>
-      {canShowTools&&<SettingsDisclosure title="Backup maintenance" icon="ellipsis.circle" testID="backup.maintenance" expanded={maintenanceOpen} onChange={setMaintenanceOpen}>
+      {canShowTools&&<>
         <SettingsSurface footer="Lava waits 5 minutes after your last settings change before it tries an automatic upload.">
           <Toggle title="Automatic Backup" accessibilityHint="Lava waits 5 minutes after your last settings change before it tries an automatic upload."
             value={!!live?.backup.automatic} disabled={backup.busy||!enablement?.canChangeAutomatic}
             onChange={value=>run({type:'settings.set',key:'backup.automatic',value})}/>
         </SettingsSurface>
-        <SettingsSurface><ListRow action title="Delete online backup copy"
+        <SettingsSurface><ListRow action title="Delete backup"
           icon="trash" disabled={backup.busy||!enablement?.canDisable} color={colors.errorText}
-          onPress={()=>maintain('Delete online backup copy','backup.delete')}/></SettingsSurface>
-      </SettingsDisclosure>}
+          onPress={()=>maintain('Delete backup','backup.delete')}/></SettingsSurface>
+      </>}
     </Section>
   </Screen>;
 }

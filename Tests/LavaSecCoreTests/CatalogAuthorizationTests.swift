@@ -285,6 +285,61 @@ final class CatalogAuthorizationTests: XCTestCase {
         }
     }
 
+    func testBackgroundRecoveryRequiresFreshAuthorizedReadableCatalog() throws {
+        try withTemporaryDirectory(prefix: "catalog-background-recovery") { directory in
+            let (catalog, policy) = try signedNow()
+            let repository = BlocklistCatalogRepository(cacheDirectoryURL: directory, trustPolicy: policy)
+            let latest = BlocklistCatalogSynchronizer.latestCatalogURL(in: directory)
+            func needsRecovery(now: Date = Date()) -> Bool {
+                BlocklistCatalogSynchronizer.cachedCatalogNeedsBackgroundRefresh(in: directory,
+                    maxAge: 7 * 86400, requiredSourceIDs: ["example"], trustPolicy: policy, now: now)
+            }
+            XCTAssertTrue(needsRecovery(), "Missing metadata needs network recovery.")
+            try repository.saveLatestCatalog(encode(catalog))
+            XCTAssertFalse(needsRecovery(), "A usable catalog stays on the cache-only path.")
+            try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 1)],
+                                                 ofItemAtPath: latest.path)
+            XCTAssertTrue(needsRecovery(), "Age alone must request recovery.")
+            try FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: latest.path)
+            XCTAssertTrue(needsRecovery(now: Date().addingTimeInterval(2 * 86400)),
+                          "Expired authorization needs recovery even within the seven-day age window.")
+            try Data("invalid catalog".utf8).write(to: latest, options: .atomic)
+            XCTAssertTrue(needsRecovery(), "Unreadable metadata must not strand the cache-only task.")
+        }
+    }
+
+    func testBackgroundRecoveryDetectsLaunchMigrationWithoutMutatingFreshCache() throws {
+        try withTemporaryDirectory(prefix: "catalog-background-migration") { directory in
+            let (catalog, policy) = try signedNow()
+            let repository = BlocklistCatalogRepository(cacheDirectoryURL: directory, trustPolicy: policy)
+            let original = try encode(catalog)
+            try repository.saveLatestCatalog(original)
+            let latest = BlocklistCatalogSynchronizer.latestCatalogURL(in: directory)
+            let modified = try FileManager.default.attributesOfItem(atPath: latest.path)[.modificationDate] as? Date
+            XCTAssertTrue(repository.hasFreshCachedCatalog(maxAge: 7 * 86400))
+            XCTAssertTrue(BlocklistCatalogSynchronizer.cachedCatalogNeedsBackgroundRefresh(in: directory,
+                maxAge: 7 * 86400, requiredSourceIDs: ["example", "new-launch-source"], trustPolicy: policy),
+                "A fresh catalog missing a required source cannot be repaired by cache-only warming.")
+            XCTAssertEqual(try repository.cachedCatalogData(), original)
+            XCTAssertEqual(try FileManager.default.attributesOfItem(atPath: latest.path)[.modificationDate] as? Date,
+                           modified, "The recovery probe must not renew freshness without a network check.")
+        }
+    }
+
+    func testBackgroundRecoveryDecodesCatalogUnderProductionTrustPolicy() throws {
+        try withTemporaryDirectory(prefix: "catalog-background-production") { directory in
+            let repository = BlocklistCatalogRepository(cacheDirectoryURL: directory)
+            try repository.saveLatestCatalog(encode(fixture().catalog))
+            XCTAssertFalse(BlocklistCatalogSynchronizer.cachedCatalogNeedsBackgroundRefresh(in: directory,
+                maxAge: 7 * 86400, requiredSourceIDs: ["example"]))
+            let latest = BlocklistCatalogSynchronizer.latestCatalogURL(in: directory)
+            try Data("invalid catalog".utf8).write(to: latest, options: .atomic)
+            XCTAssertTrue(BlocklistCatalogSynchronizer.cachedCatalogNeedsBackgroundRefresh(in: directory,
+                maxAge: 7 * 86400, requiredSourceIDs: ["example"]),
+                "The production probe must decode even before signature pins are commissioned.")
+        }
+    }
+
     func testWithdrawalsRequireConfiguredVerifiedAuthorization() async throws {
         try await withTemporaryDirectory(prefix: "catalog-withdrawal") { directory in
             let key = Curve25519.Signing.PrivateKey()
@@ -303,6 +358,9 @@ final class CatalogAuthorizationTests: XCTestCase {
             for _ in 0..<2 {
                 XCTAssertFalse(BlocklistCatalogSynchronizer.cachedCatalogRequiresLowRiskLaunchRefresh(
                     in: directory, requiredSourceIDs: ["example"], trustPolicy: policy))
+                XCTAssertFalse(BlocklistCatalogSynchronizer.cachedCatalogNeedsBackgroundRefresh(
+                    in: directory, maxAge: 7 * 86400, requiredSourceIDs: ["example"], trustPolicy: policy),
+                    "A verified withdrawal satisfies the inventory and must not cause endless recovery.")
                 XCTAssertEqual(try repository.cachedCatalogData(), original)
             }
             XCTAssertTrue(BlocklistCatalogSynchronizer.cachedCatalogRequiresLowRiskLaunchRefresh(

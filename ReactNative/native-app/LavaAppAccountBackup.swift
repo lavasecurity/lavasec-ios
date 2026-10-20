@@ -39,14 +39,18 @@ final class LavaAccountBackupSession {
         if let r, r.restoreStatus != .choosing { status = ["title": r.restoreStatus.title.lavaLocalized, "detail": r.restoreStatus.detail.lavaLocalized, "tone": r.restoreStatus.tone] }
         else { status = NSNull() }
         let supportsPasskey: Bool; if #available(iOS 18.0, *) { supportsPasskey = true } else { supportsPasskey = false }
+        // Account deletion revokes JS reads before dispatch. Deliver its error
+        // through the fresh scoped projection, not an alert from the old epoch.
+        // pinned: AccountBackupSessionSourceTests.testAccountDeletionFailureUsesTheFreshScopedProjection
+        let accountError = kind == "account" && bridge.model.account.accountAuthMessageIsError ? bridge.model.account.accountAuthMessage : nil
         return ["kind": kind, "title": (kind == "account" ? "Account" : s.map { $0.setupComplete ? "Backup is ready" : $0.step.title } ?? "Restore Backup").lavaLocalized,
             "busy": s?.busy ?? r?.isRestoring ?? false,
-            "canBack": s?.canBack ?? (r?.review != nil && r?.isRestoring != true), "canClose": !(s?.busy ?? r?.isRestoring ?? false),
+            "canBack": s?.canBack ?? (r?.review != nil && r?.isRestoring != true), "canClose": s?.canClose ?? (r?.isRestoring != true),
             "success": s?.setupComplete == true || r?.restoreStatus == .success,
             "connections": bridge.model.account.accountConnections.map { ["provider": $0.provider == .apple ? "apple" : "google", "title": $0.email ?? "%@ account".lavaLocalizedFormat($0.provider.displayName)] },
             "deleting": bridge.model.account.isAccountDeletionInProgress,
-            "step": s?.step.rawValue ?? "overview", "error": s?.errorMessage ?? "", "copied": s?.consent.copiedRecoveryPhrase ?? false,
-            "canContinue": s?.canAdvance ?? r?.canContinue ?? false, "supportsPasskey": supportsPasskey,
+            "step": s?.step.rawValue ?? "overview", "error": s?.errorMessage ?? accountError ?? "", "copied": s?.consent.copiedRecoveryPhrase ?? false,
+            "canContinue": s.map { $0.step == .upload ? $0.canRetryUpload : $0.canAdvance } ?? r?.canContinue ?? false, "supportsPasskey": supportsPasskey,
             "selectedPasskey": s?.selectedPasskeyMode == .withPasskey,
             "saved": s?.consent.savedRecoveryPhrase ?? false, "understands": s?.consent.understandsNoRecovery ?? false,
             "uploading": s?.isUploadingSetup ?? false, "uploadError": s?.uploadError ?? "",
@@ -78,7 +82,7 @@ extension LavaAppBridge {
         if action == "close" {
             if let owner = accountBackupSession {
                 guard owner.id == flow.id, owner.kind == flow.name, owner.isCurrent else { throw CommandError("The app screen closed before this action started.") }
-                guard owner.setup?.busy != true, owner.restore?.isRestoring != true else { return false }
+                guard owner.setup?.canClose != false, owner.restore?.isRestoring != true else { return false }
             }
             retireAccountBackup(flow.id); self.flow = nil
             return NSNull()

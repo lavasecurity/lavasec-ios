@@ -41,7 +41,7 @@ names = [
     'private func loadLocalEncryptedBackupEnvelope()',
     'private func synchronizeRemoteBackupAccount()', 'private func invalidateMetadataRequest()',
     'private func confirmRemoteBackupStatus(', 'private func fetchRemoteBackupStatus()',
-    'func refreshRemoteBackupStatus()', 'func retrySetupUpload(', 'func isSetupUploadConfirmed(',
+    'func refreshRemoteBackupStatus()', 'func existingBackupBeforeSetup()', 'func retrySetupUpload(', 'func isSetupUploadConfirmed(',
     'var encryptedBackupFailureMessage: String?',
     'func scheduleAutomaticBackupAfterConfigurationChange()', 'private func runScheduledAutomaticBackup(',
     'private func refreshLocalEncryptedBackupEnvelope()',
@@ -345,6 +345,40 @@ tests = '\n}\n@MainActor final class AccountChangeSubject {\n    let backup = Su
         let key = "com.lavasec.zero-knowledge-backup:deletion-intent-v1"
         let auto = "lavasec.encryptedBackup.automaticBackupEnabled"
         let enabled = "lavasec.encryptedBackup.enabled"
+        reset()
+        do {
+            let app = Subject()
+            app.loadEncryptedBackupState()
+            let existing = try await app.existingBackupBeforeSetup()
+            check(existing == true, "Enable on a new device detects its existing online backup")
+            check(app.backupSyncService!.uploads.isEmpty && app.backupEnvelopeStore.loadEnvelope() == nil,
+                  "Checking an existing backup cannot replace it or create local credentials")
+            app.backupSyncService!.fetchResult = { _ in nil }
+            let absent = try await app.existingBackupBeforeSetup()
+            check(absent == false, "Confirmed absence permits fresh setup")
+            app.backupSyncService = nil
+            let unavailable = try await app.existingBackupBeforeSetup()
+            check(unavailable == nil, "Unavailable metadata cannot be treated as no backup")
+        }
+        reset()
+        do {
+            let app = Subject()
+            app.backupSyncService!.fetchResult = { account in
+                app.hub.currentBackupAccountID = "B"
+                return BackupRemoteMetadata(userID: account, uploadedAt: nil)
+            }
+            let superseded = try await app.existingBackupBeforeSetup()
+            check(superseded == nil, "An account change during metadata read cannot open setup")
+        }
+        reset()
+        do {
+            let app = Subject(); try app.seed(); app.loadEncryptedBackupState()
+            await app.disableEncryptedBackup()
+            app.backupSyncService!.fetchResult = { _ in nil }
+            let absent = try await app.existingBackupBeforeSetup()
+            check(absent == false, "Explicit setup can check online absence after completed deletion")
+            check(!app.isBackupEnabled, "Checking for setup cannot enable backup")
+        }
         reset()
         do {
             let app = Subject(); try app.seed(); app.loadEncryptedBackupState()
@@ -979,7 +1013,7 @@ tests = '\n}\n@MainActor final class AccountChangeSubject {\n    let backup = Su
         do {
             let app = Subject(); app.loadEncryptedBackupState()
             let off = app.enablementPresentation()
-            check(off.state == .off && off.value == false && off.canEnable && off.canRestore, "unset backup is an explicit opt-in with restore available")
+            check(off.state == .off && off.value == false && off.canEnable && !off.canRestore, "backup Off never exposes restore")
             check(!off.canDisable && !off.canBackUp && !off.canChangeAutomatic, "unset backup cannot expose enabled operations")
             let setup = app.enablementPresentation(isSetupOrRestorePresented: true)
             check(setup.state == .setup && setup.value == false && !setup.canEnable && !setup.canRestore, "opening setup blocks duplicates without enabling")

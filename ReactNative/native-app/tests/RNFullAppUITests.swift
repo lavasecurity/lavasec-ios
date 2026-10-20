@@ -4477,11 +4477,9 @@ final class RNFullAppUITests: XCTestCase {
         scrollFullyIntoView(app, account)
         account.tap()
         XCTAssertTrue(app.navigationBars["Account & backup"].waitForExistence(timeout: 10))
-        let maintenance = app.buttons["row.Backup maintenance"]
-        if maintenance.exists {
-            scrollFullyIntoView(app, maintenance)
-            maintenance.tap()
-            let automatic = app.switches["Automatic backup"]
+        let automatic = app.switches["Automatic backup"]
+        XCTAssertFalse(app.buttons["row.Backup maintenance"].exists)
+        if automatic.exists {
             let helper = app.staticTexts["Lava waits 5 minutes after your last settings change before it tries an automatic upload."].firstMatch
             scrollFullyIntoView(app, helper)
             XCTAssertGreaterThan(helper.frame.minY, automatic.frame.maxY)
@@ -9009,7 +9007,7 @@ final class RNFullAppUITests: XCTestCase {
         for _ in 0..<4 where !qaRow.isHittable { app.swipeUp() }
         XCTAssertTrue(qaRow.isHittable, app.debugDescription)
         qaRow.tap()
-        let qa = app.otherElements["device-qa-page"]
+        let qa = app.descendants(matching: .any)["device-qa-page"].firstMatch
         XCTAssertTrue(qa.waitForExistence(timeout: 15), app.debugDescription)
         XCTAssertTrue(app.tabBars.buttons["Settings"].isHittable)
         let back = nativeBack(app)
@@ -9017,6 +9015,17 @@ final class RNFullAppUITests: XCTestCase {
         capture(app, "Device QA uses the same Settings page navigation")
         let search = app.textFields["Search Device QA"]
         XCTAssertTrue(search.waitForExistence(timeout: 10))
+        waitForSettledFrame(search)
+        let originalSearchY = search.frame.minY
+        for _ in 0..<3 {
+            XCUIDevice.shared.press(.home)
+            app.activate()
+            XCTAssertTrue(search.waitForExistence(timeout: 10))
+            waitForSettledFrame(search)
+            XCTAssertEqual(search.frame.minY, originalSearchY, accuracy: 2,
+                           "QA content must keep its native header inset after resume.")
+            XCTAssertFalse(app.buttons["Unlock Lava"].exists)
+        }
         search.tap()
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "hasKeyboardFocus == true"), object: search

@@ -319,5 +319,5 @@ function LavaPresentation({app, onboardingPreview, fullApp, activityExample, rev
 function RuntimeUnavailable({concealed,background,error,retry}: {concealed:boolean;background:string;error:string|null;retry:()=>void}) {
   const failure=error&&AppState.currentState==='active'?<Screens.RuntimeError message={error} retry={retry}/>:null;
   return concealed?<PresentationCover background={background}>{failure}</PresentationCover>
-    :<View style={{flex:1,backgroundColor:background}}><PresentationContent testID="lava-runtime-content">{failure??<Screens.RuntimeError message="Lava Security" retry={retry}/>}</PresentationContent></View>;
+    :<View style={{flex:1,backgroundColor:background}}><PresentationContent testID="lava-runtime-content">{failure}</PresentationContent></View>;
 }
