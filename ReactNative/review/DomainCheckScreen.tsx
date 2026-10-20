@@ -120,7 +120,6 @@ export function DomainCheckScreen(){
       </View>
     </StorySurface>}
     {checked?.decision==='allow'&&<Quiet>An allowed result does not guarantee the site is safe.</Quiet>}
-    {checked?.reason==='localAllowlist'&&<Quiet>An allowed-domain rule lets this domain through.</Quiet>}
     {checked?.protection&&<Quiet>{checked.protection==='paused'?'Lava is paused':'Lava is off'}</Quiet>}
     {visibleResult?.status==='invalid'&&<Copy color={colors.errorText}>{visibleResult.message}</Copy>}
     {visibleResult?.status==='unavailable'&&<Quiet>Cannot check this filter yet. Open Filters to review its preparation.</Quiet>}
