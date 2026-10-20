@@ -168,6 +168,12 @@ final class BackupSetupSourceTests: XCTestCase {
         XCTAssertFalse(source.contains("UIPasteboard.general.string = recoveryPhrase"))
     }
 
+    func testCredentialCopyButtonUsesTheCurrentSetupCopyAdmission() throws {
+        let source = try readSource(.reactNativeBackupCredentials)
+        XCTAssertTrue(source.contains(".disabled(!session.canCopyPhrase)"))
+        XCTAssertTrue(source.contains("accountBackupSession?.mayAccessCredentials == true { session.copyPhrase() }"))
+    }
+
     func testSetupCopyAvoidsDeviceKeyLabel() throws {
         let source = try readSource(.reactNativeAccountBackupFlow)
         XCTAssertTrue(source.contains("'This device'"))

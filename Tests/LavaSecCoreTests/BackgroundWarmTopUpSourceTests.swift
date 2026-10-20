@@ -85,9 +85,19 @@ final class BackgroundWarmTopUpSourceTests: XCTestCase {
             startingAt: "enum BackgroundWarmTopUp {",
             endingBefore: "    @MainActor\n    private static func handle(")
 
+        let adapter = try sourceBlock(in: app,
+            startingAt: "submit: { proposal in", endingBefore: "isEnabled: { identifier in")
+        let routing = sourceWithoutCommentLines(adapter)
         XCTAssertTrue(
-            app.contains("request = BGAppRefreshTaskRequest(identifier: proposal.identifier)"),
+            routing.contains("if proposal.identifier == BackgroundCatalogRefresh.taskIdentifier {"),
+            "only the catalog-refresh identifier may select the processing request")
+        XCTAssertTrue(
+            routing.contains("} else {\n                request = BGAppRefreshTaskRequest(identifier: proposal.identifier)"),
             "a BGProcessingTaskRequest would inherit the long-window scheduling this exists to avoid")
+        let scheduling = try sourceBlock(in: scheduleBlock,
+            startingAt: "static func scheduleNext()", endingBefore: "LavaBackgroundTaskScheduling.scheduleKeepingAppAlive(proposal)")
+        XCTAssertTrue(scheduling.contains("identifier: taskIdentifier"))
+        XCTAssertTrue(scheduleBlock.contains("static let taskIdentifier = \"com.lavasec.warm-topup\""))
         XCTAssertFalse(
             sourceWithoutCommentLines(scheduleBlock).contains("requiresNetworkConnectivity"),
             "requiring connectivity would gate a cache-only compile on a condition it does not need")

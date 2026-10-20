@@ -96,7 +96,7 @@ private struct BackupRecoveryPhraseContent: View {
                 }
             }
             .buttonStyle(LavaPanelActionButtonStyle())
-            .disabled(session.recoveryPhrase.isEmpty || session.busy || session.step != .recoveryPhrase)
+            .disabled(!session.canCopyPhrase)
             .accessibilityInputLabels(["Copy phrase".lavaLocalized, "Copy".lavaLocalized] + (session.consent.copiedRecoveryPhrase ? ["Copied".lavaLocalized] : []))
         }
     }

@@ -37,6 +37,8 @@ final class BackupSetupSession: ObservableObject {
     var blocksInteractiveDismiss: Bool { !canClose || step == .validatePasskey }
     var canBack: Bool { !busy && [.validatePasskey, .recoveryPhrase].contains(step) }
     var canAdvance: Bool { step == .recoveryPhrase && selectedPasskeyMode != nil && !recoveryPhrase.isEmpty && consent.canFinish }
+    /// Copy remains available while the current setup retains its recovery phrase.
+    var canCopyPhrase: Bool { !retired && isCurrent() && [.recoveryPhrase, .upload].contains(step) && !recoveryPhrase.isEmpty }
     var recoveryWords: [String] { BackupRecoveryPhrase.words(from: recoveryPhrase) }
     var isUploadingSetup: Bool {
         guard let progress = backup.setupUploadProgress, progress.id == setupAttemptID else { return false }
@@ -63,7 +65,7 @@ final class BackupSetupSession: ObservableObject {
     func back() { guard canBack else { return }; if step == .validatePasskey { cancelPasskeyValidation() } else { step = .overview } }
     func setConsent(saved: Bool, understands: Bool) { guard !busy, step == .recoveryPhrase else { return }; consent.savedRecoveryPhrase = saved; consent.understandsNoRecovery = understands }
     func copyPhrase() {
-        guard !retired, isCurrent(), step == .recoveryPhrase, !recoveryPhrase.isEmpty else { return }
+        guard canCopyPhrase else { return }
         UIPasteboard.general.setItems([[UTType.plainText.identifier: recoveryPhrase]], options: [UIPasteboard.OptionsKey.localOnly: true, UIPasteboard.OptionsKey.expirationDate: Date().addingTimeInterval(600)])
         consent.recordCopy(); ProtectionHapticFeedback.play(.selectionConfirmed)
     }
