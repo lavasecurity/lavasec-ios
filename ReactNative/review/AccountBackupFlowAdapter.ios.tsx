@@ -9,6 +9,7 @@ import {useReview} from './ReviewContext';
 import {nativeInlineHeader,toolbarAction,useToolbar} from './scaffold';
 import {NativeFlowMetrics} from './NativeFlowMetrics.ios';
 import {useNativeFlowAlert} from './NativeFlowAlert.ios';
+import {SettingsIntro} from './settings-scaffold';
 
 const noSubscribe=()=>()=>{};
 
@@ -30,7 +31,7 @@ function AccountBackupFlowBody({id,state}:{id:string;state:AccountBackupFlowStat
     const flow=snapshot?.foregroundFlow;
     return flow?.id===id&&flow.kind===state.kind&&flow.accountBackup?.kind===state.kind?flow.accountBackup:undefined;
   };
-  const blocksClose=()=>{const scoped=scopedState();return !!scoped&&(scoped.busy||!scoped.canClose);};
+  const blocksClose=()=>{const scoped=scopedState();return !!scoped&&!scoped.canClose;};
   // A concealed projection can retain busy after native work has finished.
   // Only native admission may decide whether that retained visit can retire.
   const canClose=!useSyncExternalStore(app?.subscribe??noSubscribe,blocksClose);
@@ -70,5 +71,5 @@ function AccountBackupFlowBody({id,state}:{id:string;state:AccountBackupFlowStat
   };
   const credentials=<View style={{height}}><Credentials ownerID={id} mode={state.kind==='backupSetup'?'display':'entry'} style={{flex:1}}
     onSizeChange={event=>{const next=event.nativeEvent.height;if(next>0&&mounted.current)setHeight(old=>Math.abs(old-next)>.5?next:old);}}/></View>;
-  return <AccountBackupFlow state={state} command={run} credentials={credentials} confirmAccountDeletion={confirmDeletion} labelColor={PlatformColor('label')} secondaryColor={PlatformColor('secondaryLabel')} labelSymbolTone="label"/>;
+  return <AccountBackupFlow state={state} command={run} credentials={credentials} confirmAccountDeletion={confirmDeletion} intro={summary=><SettingsIntro summary={summary}/>} labelColor={PlatformColor('label')} secondaryColor={PlatformColor('secondaryLabel')} labelSymbolTone="label"/>;
 }

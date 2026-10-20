@@ -140,16 +140,23 @@ extension AppViewModel {
                 // Phase 2: with the active filter republished + latest.json committed, warm the
                 // NON-active filters too (capped, most-stale-first) into the sidecar warm-index.
                 // Headless-safe — it records into the sidecar, never filter-library.json, and self-guards
-                // on the BGTask deadline + per-run budget. Run it ONLY on "bg-published": that is the one
-                // outcome where the background published artifacts and committed latest.json (so it
-                // holds the current catalog AND its mtime is fresh). "bg-unchanged" does NOT qualify — it
+                // on the BGTask deadline + per-run budget. Both "bg-published" and "bg-renewed"
+                // committed latest.json. A renewal can restore catalog validity without changing
+                // the active snapshot; it must still repair missing inactive artifacts before the
+                // pending-switch drain. "bg-unchanged" does NOT qualify — it
                 // only means the ACTIVE filter's artifact didn't need republishing; latest.json was not
                 // committed and the sync may have fallen back to cache or fetched non-active-only changes,
                 // so warming would compile against a non-committed catalog and the freshness gate would
-                // be unreliable (Codex #138 r6 P1). "bg-renewed" commits only equivalent inputs and
-                // remains outside the warm-pass scope. Aborted outcomes never committed either. Also skip if
+                // be unreliable (Codex #138 r6 P1). Aborted outcomes never committed either. Also skip if
                 // the BGTask deadline already passed (Codex r2).
-                if !Task.isCancelled, actionStatus == "bg-published" {
+                if !Task.isCancelled, actionStatus == "bg-published" || actionStatus == "bg-renewed" {
+                    if actionStatus == "bg-renewed" {
+                        // Renewal CAS protects only latest.json. A foreground library edit
+                        // can land after the publish helper's reload, during its off-main
+                        // build/renewal awaits. Warm from the current persisted pair; the
+                        // warm pass still rejects unreadable or reseeded placeholder state.
+                        loadPersistedConfiguration()
+                    }
                     await warmNonActiveFiltersInBackground(window: .processing)
                 }
                 if Task.isCancelled || actionStatus == "bg-cancelled" {

@@ -13,6 +13,70 @@ extension Notification.Name {
     static let lavaOpenDeepLinkURL = Notification.Name("com.lavasec.openDeepLinkURL")
 }
 
+/// One serialized scheduling port for both identifiers, including recovery requests.
+private enum LavaBackgroundTaskScheduling {
+    static let coordinator = BackgroundTaskScheduleCoordinator(
+        pendingRequests: {
+            await withCheckedContinuation { continuation in
+                BGTaskScheduler.shared.getPendingTaskRequests { requests in
+                    continuation.resume(returning: requests.map {
+                        .init(identifier: $0.identifier, earliestBeginDate: $0.earliestBeginDate)
+                    })
+                }
+            }
+        },
+        submit: { proposal in
+            let request: BGTaskRequest
+            if proposal.identifier == BackgroundCatalogRefresh.taskIdentifier {
+                let processing = BGProcessingTaskRequest(identifier: proposal.identifier)
+                processing.requiresNetworkConnectivity = true
+                processing.requiresExternalPower = false
+                request = processing
+            } else {
+                request = BGAppRefreshTaskRequest(identifier: proposal.identifier)
+            }
+            request.earliestBeginDate = proposal.earliestBeginDate
+            try BGTaskScheduler.shared.submit(request)
+        },
+        isEnabled: { identifier in
+            let key = identifier == BackgroundCatalogRefresh.taskIdentifier
+                ? BackgroundCatalogRefresh.killSwitchDefaultsKeyName
+                : BackgroundWarmTopUp.killSwitchDefaultsKeyName
+            return !LavaSecAppGroup.sharedDefaults.bool(forKey: key)
+        })
+
+    /// Acquire execution time before the lifecycle callback returns: scheduling
+    /// includes an asynchronous system read, so a fire-and-forget Task can suspend
+    /// before submitting the first request. Release on completion or expiration.
+    @MainActor
+    static func scheduleKeepingAppAlive(_ proposal: BackgroundTaskScheduleCoordinator.Request) {
+        let window = BackgroundSchedulingWindow()
+        Task {
+            defer { window.end() }
+            _ = await coordinator.schedule(proposal)
+        }
+    }
+}
+
+/// Owns only the brief scheduling assertion, not the later maintenance work.
+@MainActor
+private final class BackgroundSchedulingWindow {
+    private var identifier: UIBackgroundTaskIdentifier = .invalid
+
+    init() {
+        identifier = UIApplication.shared.beginBackgroundTask(withName: "Schedule Lava maintenance") { [weak self] in
+            MainActor.assumeIsolated { self?.end() }
+        }
+    }
+
+    func end() {
+        guard identifier != .invalid else { return }
+        let ending = identifier
+        identifier = .invalid
+        UIApplication.shared.endBackgroundTask(ending)
+    }
+}
+
 /// Daily background refresh of the filter lists (LAV-90 Phase 2). Registered at launch
 /// and re-submitted whenever the app backgrounds. The handler runs the same catalog sync
 /// as a manual refresh, but in `isBackgroundRefresh` mode: it re-reads the live on-disk
@@ -67,13 +131,21 @@ enum BackgroundCatalogRefresh {
 
     /// Best-effort submit of the next run (~daily). Safe to call repeatedly. No-op when the
     /// kill switch is set (see `killSwitchDefaultsKeyName`).
+    @MainActor
     static func scheduleNext() {
         guard !LavaSecAppGroup.sharedDefaults.bool(forKey: killSwitchDefaultsKeyName) else { return }
-        let request = BGProcessingTaskRequest(identifier: taskIdentifier)
-        request.requiresNetworkConnectivity = true
-        request.requiresExternalPower = false
-        request.earliestBeginDate = Date(timeIntervalSinceNow: 12 * 60 * 60)
-        try? BGTaskScheduler.shared.submit(request)
+        let proposal = BackgroundTaskScheduleCoordinator.Request(
+            identifier: taskIdentifier, earliestBeginDate: Date(timeIntervalSinceNow: 12 * 60 * 60))
+        LavaBackgroundTaskScheduling.scheduleKeepingAppAlive(proposal)
+    }
+
+    /// A cache-only top-up cannot repair an expired/untrusted catalog. Ask the
+    /// network-capable task to run without adding another twelve-hour delay.
+    /// iOS still decides when it can execute; this does not promise an immediate run.
+    static func scheduleRecovery() async -> BackgroundTaskScheduleCoordinator.Outcome? {
+        guard !Task.isCancelled else { return nil }
+        return await LavaBackgroundTaskScheduling.coordinator.schedule(.init(
+            identifier: taskIdentifier, earliestBeginDate: nil))
     }
 
     @MainActor
@@ -104,12 +176,12 @@ enum BackgroundCatalogRefresh {
             let viewModel = AppViewModel(loadVPNState: false, headless: true)
             await viewModel.syncCatalog(isBackgroundRefresh: true)
             // Drain a pending Focus/Automation switch AFTER the sync: the sync re-stamped the
-            // catalog freshness (verified-unchanged) or committed + sidecar-warmed (published),
+            // catalog freshness (verified-unchanged) or committed + sidecar-warmed (published/renewed),
             // so warm reuse commits for the main pocket — an ALREADY-COMPILED target whose
             // catalog basis is unchanged — and the tunnel adopts it via its generation poll: a
             // deferred automation switch no longer waits for the next app open. HONEST COVERAGE
             // LIMIT: a never-compiled or disk-pressure-evicted target still re-defers here every
-            // cycle (the sidecar warm pass runs only on published cycles, and this pass never
+            // cycle (the sidecar warm pass runs only on committed catalog cycles, and this pass never
             // cold-compiles in the BGTask's budgeted window) and waits for the next foreground —
             // the drain plan's optional Phase 2 is that remainder's fix. Skipped when the BGTask
             // already expired — the marker is the correctness guarantee, not this best-effort pass.
@@ -142,8 +214,9 @@ enum BackgroundCatalogRefresh {
 ///
 /// Refilling the index afterwards is opportunistic, and the audit in `lavasec-infra`
 /// `plans/2026-09-03-warm-index-coverage-plan.md` found why that is thin: the only background
-/// window declared today is `BackgroundCatalogRefresh`, a `BGProcessingTask` asking for
-/// `+12h` AND network connectivity, and its warm pass runs only on the `bg-published` outcome.
+/// window declared then was `BackgroundCatalogRefresh`, a `BGProcessingTask` asking for
+/// `+12h` AND network connectivity. Its warm pass now covers committed catalogs from both
+/// `bg-published` and `bg-renewed` outcomes.
 /// Field capture 2026-09-02: the catalog moved at 12:17, a switch fired at 20:30 with nothing warm
 /// to flip to, and deferred correctly to a foreground the user reached hours later.
 ///
@@ -156,11 +229,11 @@ enum BackgroundCatalogRefresh {
 /// **The safety that makes a sync-free warm sound is already in `compileAndStageWarmArtifact`, not
 /// in the caller.** It self-gates on a FRESH cached catalog, on catalog-only filters, on
 /// non-active and non-frozen, and on no pending low-risk cache migration — staying read-only with
-/// respect to the shared cache. That is why this task can skip the `bg-published` condition the
-/// refresh's own warm pass carries: that condition exists because after a SYNC you cannot trust
+/// respect to the shared cache. That is why this task can skip the committed-catalog condition
+/// the refresh's warm pass carries: that condition exists because after a SYNC you cannot trust
 /// `latest.json` unless the sync committed it. With no sync at all, `latest.json` is simply the
-/// last committed catalog, and the freshness gate decides. A stale cache means no warming, which
-/// is correct — the next switch takes the network-first cold path.
+/// last committed catalog, and the freshness gate decides. An unusable cache means no warming;
+/// the handler asks the network-capable processing task to repair it.
 ///
 /// Requires `Info.plist`: `UIBackgroundModes` includes `fetch`, and
 /// `BGTaskSchedulerPermittedIdentifiers` includes this identifier.
@@ -197,11 +270,12 @@ enum BackgroundWarmTopUp {
     /// NO `requiresNetworkConnectivity`: this task compiles from the cache already on disk, and
     /// asking for connectivity would make it wait for a condition it does not need — which is the
     /// whole reason it can run when the refresh cannot.
+    @MainActor
     static func scheduleNext() {
         guard !LavaSecAppGroup.sharedDefaults.bool(forKey: killSwitchDefaultsKeyName) else { return }
-        let request = BGAppRefreshTaskRequest(identifier: taskIdentifier)
-        request.earliestBeginDate = Date(timeIntervalSinceNow: 2 * 60 * 60)
-        try? BGTaskScheduler.shared.submit(request)
+        let proposal = BackgroundTaskScheduleCoordinator.Request(
+            identifier: taskIdentifier, earliestBeginDate: Date(timeIntervalSinceNow: 2 * 60 * 60))
+        LavaBackgroundTaskScheduling.scheduleKeepingAppAlive(proposal)
     }
 
     @MainActor
@@ -221,6 +295,15 @@ enum BackgroundWarmTopUp {
             // listener, no temporary-protection resume, no live-activity observer — none of which
             // may write this short-lived model's launch-time state over newer on-disk state.
             let viewModel = AppViewModel(loadVPNState: false, headless: true)
+            if await viewModel.cachedCatalogNeedsBackgroundRefresh() {
+                let scheduling = await BackgroundCatalogRefresh.scheduleRecovery()
+                LavaSecDeviceDebugLog.append(component: "app", event: "warm-topup-recovery", details: [
+                    "reason": "catalog-needs-refresh",
+                    "scheduling": scheduling.map { String(describing: $0) } ?? "cancelled"
+                ])
+                completion.complete(success: !Task.isCancelled && scheduling != .failed)
+                return
+            }
             await viewModel.topUpWarmIndexFromCachedCatalog()
             // WARMING WITHOUT DRAINING LEAVES THE SWITCH STILL WAITING. A Focus or Shortcut switch
             // that deferred for a missing artifact leaves its marker in `PendingFilterSwitchStore`;

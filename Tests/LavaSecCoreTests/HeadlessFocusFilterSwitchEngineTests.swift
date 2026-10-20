@@ -688,6 +688,31 @@ final class HeadlessFocusFilterSwitchEngineTests: XCTestCase {
                        "The durable marker is the correctness guarantee even when the immediate commit is skipped.")
         XCTAssertEqual(h.spy.posted, [FocusFilterSwitchSignal.darwinNotificationName])
     }
+
+    func testCatalogFreshnessRecoveryDrainsDeferredSwitchWithoutForeground() async throws {
+        let h = makeFocusSwitchEngineHarness(); defer { cleanupFocusSwitchHarness(h) }
+        let staged = try await stageFocusSwitchWarmArtifact(cacheDir: h.env.catalogCacheURL, containerDir: h.dir)
+        try seedFocusSwitchLibraryWithWarmTarget(h, token: staged.token, targetEnabled: ["source-a"])
+        let latestURL = h.env.catalogCacheURL.appendingPathComponent("catalog/latest.json")
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 1)], ofItemAtPath: latestURL.path)
+
+        let deferred = await HeadlessFocusFilterSwitchEngine.performSwitch(toFilterID: "f2", env: h.env)
+        XCTAssertEqual(deferred, .deferred)
+        let originalRequest = try XCTUnwrap(PendingFilterSwitchStore.current(in: h.defaults))
+        let stillStale = await BackgroundPendingSwitchDrain.drain(env: h.env)
+        XCTAssertEqual(stillStale, .drove(.deferred))
+        XCTAssertEqual(SharedFilterStatePersistence.onDiskActiveFilterID(at: h.env.filterLibraryURL), "f1")
+
+        // Model a successful network-verified unchanged catalog refresh. Production
+        // renews freshness only after validation; recovery must replay the same
+        // request without a new intent or an app foreground.
+        try FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: latestURL.path)
+        let recovered = await BackgroundPendingSwitchDrain.drain(env: h.env)
+        XCTAssertEqual(recovered, .drove(.committed))
+        XCTAssertEqual(SharedFilterStatePersistence.onDiskActiveFilterID(at: h.env.filterLibraryURL), "f2")
+        XCTAssertEqual(FilterArtifactStore(directoryURL: h.dir).loadArtifactPointer()?.token, staged.token)
+        XCTAssertEqual(PendingFilterSwitchStore.current(in: h.defaults), originalRequest)
+    }
 }
 
 private final class FocusBlockedPublicationObservation: @unchecked Sendable {

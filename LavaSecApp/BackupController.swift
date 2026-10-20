@@ -349,7 +349,7 @@ final class BackupController: ObservableObject {
             canEnable: canAct && value == false,
             canDisable: canAct && value == true,
             canBackUp: canAct && value == true,
-            canRestore: canAct,
+            canRestore: canAct && value == true,
             canChangeAutomatic: canAct && value == true,
             canRetryDeletion: canRetryDeletion
         )
@@ -413,6 +413,22 @@ final class BackupController: ObservableObject {
             subtitle = available ? "Backup available".lavaLocalized : "No backup".lavaLocalized
         }
         if remoteBackupStatus != subtitle { remoteBackupStatus = subtitle }
+    }
+
+    /// An explicit Enable request checks for an existing online copy before setup
+    /// can replace it. Passive refresh still leaves disabled backup alone.
+    func existingBackupBeforeSetup() async throws -> Bool? {
+        try requireExplicitBackupSetupAllowed()
+        guard let accountID = hub.currentBackupAccountID else { return nil }
+        synchronizeRemoteBackupAccount()
+        invalidateMetadataRequest()
+        hasConfirmedRemoteBackupStatus = false
+        await fetchRemoteBackupStatus()
+        try requireExplicitBackupSetupAllowed()
+        guard !Task.isCancelled, hub.currentBackupAccountID == accountID,
+              remoteBackupAccountID == accountID, hasConfirmedRemoteBackupStatus,
+              !remoteBackupStatusUnavailable else { return nil }
+        return remoteBackupAvailable
     }
 
     /// Refresh server evidence for the current account without reading the local envelope.

@@ -1,6 +1,18 @@
 import XCTest
 
 final class AccountSignInSourceTests: XCTestCase {
+    func testSignInFailuresReachTheExistingActionAlertWithoutAStatusSubtitle() throws {
+        let signIn = try sourceBlock(in: readSource(.reactNativeAppBridge),
+                                    startingAt: "case \"account.apple\", \"account.google\":",
+                                    endingBefore: "case \"account.signOut\":")
+        XCTAssertTrue(sourceContainsInOrder([
+            "await model.account.beginSignInWithApple().value",
+            "await model.account.beginSignInWithGoogle().value",
+            "if model.account.accountAuthMessageIsError, let message = model.account.accountAuthMessage",
+            "throw CommandError(message)"
+        ], in: signIn))
+    }
+
     func testSuccessfulProviderChangeRefreshesBackupMetadataForTheCurrentAccount() throws {
         let bridge = try readSource(.appViewModelHubBridges)
         let signIn = try sourceBlock(in: bridge, startingAt: "func accountDidSignIn() async {",

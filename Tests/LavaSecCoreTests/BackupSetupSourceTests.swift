@@ -154,7 +154,7 @@ final class BackupSetupSourceTests: XCTestCase {
 
     func testRecoveryWordsRemainFullyDisclosedAtAccessibilitySizes() throws {
         let source = try readSource(.reactNativeBackupCredentials)
-        XCTAssertTrue(source.contains("dynamicTypeSize.isAccessibilitySize ? [GridItem(.flexible())]"))
+        XCTAssertTrue(source.contains("dynamicTypeSize.isAccessibilitySize ? 1 : 2"))
         XCTAssertTrue(source.contains("@ScaledMetric(relativeTo: .caption) private var numberWidth"))
         XCTAssertTrue(source.contains(".fixedSize(horizontal: false, vertical: true)"))
         XCTAssertFalse(source.contains(".minimumScaleFactor"))

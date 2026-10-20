@@ -200,11 +200,11 @@ extension LavaAppBridge {
         } catch { throw CommandError("Please wait a moment and try again.") }
         guard admitsActivityShare(grant) else { throw CommandError("Read access changed.") }
         #if DEBUG && targetEnvironment(simulator)
-        ShareSheetPresenter.present(image: image, title: "My activity".lavaLocalized,
+        ShareSheetPresenter.present(image: image, title: "See my activity on Lava Security".lavaLocalized,
             onComplete: LavaShareCardUITestEvidence.shared.completion(for: image,
                 isCurrent: { self.admitsActivityShare(grant) }))
         #else
-        ShareSheetPresenter.present(image: image, title: "My activity".lavaLocalized)
+        ShareSheetPresenter.present(image: image, title: "See my activity on Lava Security".lavaLocalized)
         #endif
     }
 

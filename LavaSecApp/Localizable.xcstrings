@@ -49933,72 +49933,6 @@
         }
       }
     },
-    "Touch and hold a domain to allow or block it.": {
-      "comment": "Quiet hint above the domain list (Top Domains / Domain History) telling the user a long-press exposes allow and block actions.",
-      "extractionState": "manual",
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Mantén pulsado un dominio para permitirlo o bloquearlo."
-          }
-        },
-        "it": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Tocca e tieni premuto un dominio per consentirlo o bloccarlo."
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "도메인을 길게 눌러 허용하거나 차단하세요."
-          }
-        },
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Toque e segure um domínio para liberar ou bloquear."
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Halte eine Domain gedrückt, um sie zu erlauben oder zu blockieren."
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Touch and hold a domain to allow or block it."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Touchez un domaine de manière prolongée pour l’autoriser ou le bloquer."
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "ドメインを長押しすると、許可またはブロックできます。"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "长按域名以允许或拦截。"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "長按網域即可允許或封鎖。"
-          }
-        }
-      }
-    },
     "Translation is not quite right": {
       "comment": "Feedback / bug-report topic picker option.",
       "extractionState": "manual",
@@ -76417,68 +76351,68 @@
         }
       }
     },
-    "Long-press a domain": {
-      "comment": "Shared interface copy. Preserve product names and technical abbreviations.",
+    "Long-press to allow or block a domain": {
+      "comment": "Hint above Top domains and Domain history. Long-press opens allow and block actions.",
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Long-press a domain"
+            "value": "Long-press to allow or block a domain"
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Domain lange drücken"
+            "value": "Lange drücken, um eine Domain zu erlauben oder zu blockieren"
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Mantén pulsado un dominio"
+            "value": "Mantén pulsado para permitir o bloquear un dominio"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Appuyez longuement sur un domaine"
+            "value": "Appuyez longuement pour autoriser ou bloquer un domaine"
           }
         },
         "it": {
           "stringUnit": {
             "state": "translated",
-            "value": "Tieni premuto un dominio"
+            "value": "Tieni premuto per consentire o bloccare un dominio"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "ドメインを長押し"
+            "value": "長押ししてドメインを許可またはブロック"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "도메인을 길게 누르세요"
+            "value": "길게 눌러 도메인을 허용하거나 차단하세요"
           }
         },
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Pressione um domínio por mais tempo"
+            "value": "Pressione e segure para permitir ou bloquear um domínio"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "长按域名"
+            "value": "长按以允许或拦截域名"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "長按網域"
+            "value": "長按以允許或封鎖網域"
           }
         }
       }
@@ -118152,8 +118086,74 @@
         }
       }
     },
+    "See my activity on Lava Security": {
+      "comment": "Share-sheet preview title for the personal Activity chart image.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "See my activity on Lava Security"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sieh dir meine Aktivität in Lava Security an"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mira mi actividad en Lava Security"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Découvrez mon activité sur Lava Security"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Guarda la mia attività su Lava Security"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava Securityで私のアクティビティを見る"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lava Security에서 내 활동 보기"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Veja minha atividade no Lava Security"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "查看我在 Lava Security 上的活动"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "查看我在 Lava Security 上的活動"
+          }
+        }
+      }
+    },
     "My activity": {
-      "comment": "Heading and share-sheet metadata title for the personal Activity chart image.",
+      "comment": "Heading for the personal Activity chart image.",
       "extractionState": "manual",
       "localizations": {
         "en": {
@@ -119075,6 +119075,336 @@
           }
         }
       }
+    },
+    "Signed in": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Signed in"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Angemeldet"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connecté"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "サインイン済み"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已登录"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已登入"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sesión iniciada"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "로그인됨"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conectado"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Accesso effettuato"
+          }
+        }
+      },
+      "comment": "Concise account status; the provider is shown in the separate sign-in row."
+    },
+    "Delete backup": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete backup"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Backup löschen"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Supprimer la sauvegarde"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "バックアップを削除"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "删除备份"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "刪除備份"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Eliminar copia de seguridad"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "백업 삭제"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Excluir backup"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Elimina backup"
+          }
+        }
+      },
+      "comment": "Destructive action removing online and on-device backup copies and disabling backup."
+    },
+    "Delete backup?": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete backup?"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Backup löschen?"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Supprimer la sauvegarde ?"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "バックアップを削除しますか？"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "删除备份？"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "刪除備份？"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "¿Eliminar copia de seguridad?"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "백업을 삭제할까요?"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Excluir backup?"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Eliminare il backup?"
+          }
+        }
+      },
+      "comment": "Confirmation title for removing online and on-device backup copies."
+    },
+    "Try your passkey now. You’ll use it to restore your backup.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Try your passkey now. You’ll use it to restore your backup."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Probiere jetzt deinen Passkey aus. Damit stellst du dein Backup wieder her."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Essayez votre clé d’accès maintenant. Elle vous servira à restaurer votre sauvegarde."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "パスキーを試してみましょう。バックアップを復元するときも、このパスキーを使います。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "现在试用你的通行密钥。恢复备份时，你会用到它。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "現在試用你的通行密鑰。還原備份時，你會用到它。"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Prueba tu clave de acceso ahora. La usarás para restaurar tu copia de seguridad."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "지금 패스키를 사용해 보세요. 백업을 복원할 때도 이 패스키를 사용합니다."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Experimente sua chave de acesso agora. Você a usará para restaurar seu backup."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Prova ora la tua passkey. La userai per ripristinare il backup."
+          }
+        }
+      },
+      "comment": "Single explanation panel before validating a newly created backup passkey."
+    },
+    "Deletes your online and local backup copies and turns off backup. This can't be undone. Your current settings stay on this device.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deletes your online and local backup copies and turns off backup. This can't be undone. Your current settings stay on this device."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Löscht deine Online- und lokalen Backup-Kopien und schaltet das Backup aus. Dies kann nicht rückgängig gemacht werden. Deine aktuellen Einstellungen bleiben auf diesem Gerät."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Supprime vos copies de sauvegarde en ligne et locales et désactive la sauvegarde. Cette action est irréversible. Vos réglages actuels restent sur cet appareil."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "オンラインとローカルのバックアップを削除し、バックアップをオフにします。この操作は取り消せません。現在の設定はこのデバイスに残ります。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "删除在线和本地备份副本，并关闭备份。此操作无法撤销。当前设置会保留在此设备上。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "刪除線上和本機備份副本，並關閉備份。此操作無法復原。目前的設定會保留在此裝置上。"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Elimina las copias de seguridad en línea y locales y desactiva la copia de seguridad. Esta acción no se puede deshacer. Los ajustes actuales permanecen en este dispositivo."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "온라인 및 로컬 백업 사본을 삭제하고 백업을 끕니다. 이 작업은 취소할 수 없습니다. 현재 설정은 이 기기에 유지됩니다."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Exclui as cópias de backup on-line e locais e desativa o backup. Isso não pode ser desfeito. Suas configurações atuais permanecem neste dispositivo."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Elimina le copie di backup online e locali e disattiva il backup. L’operazione non può essere annullata. Le impostazioni attuali restano su questo dispositivo."
+          }
+        }
+      },
+      "comment": "Backup deletion confirmation; active protection settings are preserved."
     }
   },
   "version": "1.0"

@@ -402,7 +402,9 @@ final class LavaAppBridge: NSObject, ObservableObject {
     private func claimCommandOwners(_ name: String, _ input: [String: Any], previousFlow: UUID?) {
         guard let runtime = LavaAppRuntimeContext.id, runtimeOwnership.isActive(runtime) else { return }
         let id = input["id"] as? String
-        let newFlow = name == "native.flow" && flow?.id != previousFlow && flow?.name == input["flow"] as? String
+        let requestedFlow = input["flow"] as? String
+        let matchesRequestedFlow = flow?.name == requestedFlow || (requestedFlow == "backupSetup" && flow?.name == "backupRestore")
+        let newFlow = name == "native.flow" && flow?.id != previousFlow && matchesRequestedFlow
         let entered = name == "foreground.enter" && id == flow?.id.uuidString
         if let owner = accountBackupSession, (newFlow || entered || name == "accountBackup.command" && id == owner.id.uuidString), flow?.id == owner.id {
             runtimeOwnership.claim(runtimeOwner("accountBackup", owner.id.uuidString, owner), runtime: runtime)
@@ -902,6 +904,13 @@ final class LavaAppBridge: NSObject, ObservableObject {
                 try requireCurrentRuntime()
                 security.disablePasscode()
                 guard !security.isPasscodeEnabled else { throw CommandError(security.statusMessage ?? "Passcode could not be removed.") }
+            } else if name == "backupSetup" {
+                let accountID = model.currentBackupAccountID
+                let existing = try await model.backup.existingBackupBeforeSetup()
+                try requireCurrentRuntime()
+                guard canReadPresentation(.appSettings), model.currentBackupAccountID == accountID else { throw CommandError("Read access changed.") }
+                guard let existing else { throw CommandError("Backup status unavailable".lavaLocalized) }
+                flow = LavaAppNativeFlow(name: existing ? "backupRestore" : "backupSetup")
             } else { flow = LavaAppNativeFlow(name: name) }
         case "activity.visibility": try await setActivityVisibility(input)
         case "domains.enableHistory":
@@ -978,6 +987,7 @@ final class LavaAppBridge: NSObject, ObservableObject {
         case "account.apple", "account.google":
             try await authorize(.appSettings, "Edit Account settings")
             if name == "account.apple" { await model.account.beginSignInWithApple().value } else { await model.account.beginSignInWithGoogle().value }
+            if model.account.accountAuthMessageIsError, let message = model.account.accountAuthMessage { throw CommandError(message) }
         case "account.signOut":
             try await authorize(.appSettings, "Sign Out")
             model.account.signOutAccount()
@@ -987,7 +997,9 @@ final class LavaAppBridge: NSObject, ObservableObject {
         case "backup.refresh": await model.backup.refreshRemoteBackupStatus()
         case "backup.now": try await authorize(.appSettings, "Back up settings"); await model.backup.backUpNow()
         case "backup.disable": try await authorize(.appSettings, BackupMaintenanceAction.disable.authReason); await model.backup.disableEncryptedBackup()
-        case "backup.delete": try await authorize(.appSettings, BackupMaintenanceAction.clear.authReason); await model.backup.clearEncryptedBackup()
+        // Delete intentionally aliases full disable: no local copy or future
+        // automatic upload survives an explicit deletion from Account & Backup.
+        case "backup.delete": try await authorize(.appSettings, BackupMaintenanceAction.clear.authReason); await model.backup.disableEncryptedBackup()
         case "purchase.buy":
             try await authorize(.appSettings, "Upgrade to Lava Security Plus")
             guard let offer = LavaPlusPresentation.displayedOffers(for: model.plus).first(where: { $0.id == input["id"] as? String }) else { throw CommandError("This purchase is unavailable. Refresh the available plans.") }

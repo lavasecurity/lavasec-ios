@@ -883,8 +883,8 @@ test.each<AppStateStatus|null>(['active','inactive','background','unknown',null]
 test('an all-off blocked marker never creates a loading or privacy cover and cannot invent a private frame',async()=>{
   render(<LavaUIReview fullApp initialSnapshot={JSON.stringify({schema:1,fullApp:true,revision:1,presentationBlocked:true,backgroundPrivacyCoverRequired:false})}/>);
   expect(screen.queryByTestId('lava-privacy-cover')).toBeNull();
-  expect(screen.getByText('Lava Security')).toBeTruthy();
-  expect(screen.getByLabelText('Retry runtime')).toBeTruthy();
+  expect(screen.queryByText('Lava Security')).toBeNull();
+  expect(screen.queryByLabelText('Retry runtime')).toBeNull();
   expect(screen.UNSAFE_queryAllByType(ActivityIndicator)).toHaveLength(0);
   expect(screen.queryByTestId('private-route-body')).toBeNull();
   expect(screen.getByTestId('private-route-body',{includeHiddenElements:true})).toBeTruthy();

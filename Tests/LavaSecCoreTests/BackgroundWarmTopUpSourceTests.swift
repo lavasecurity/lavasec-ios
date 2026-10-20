@@ -9,6 +9,53 @@ import XCTest
 /// EXECUTION can only be validated on a device; what is pinnable is the declaration, the shape of
 /// the request, and that the path stays sync-free.
 final class BackgroundWarmTopUpSourceTests: XCTestCase {
+    func testLifecycleSchedulingHoldsExecutionTimeUntilSubmissionOrExpiration() throws {
+        let app = try readSource(.lavaSecApp)
+        let scheduling = try sourceBlock(in: app,
+            startingAt: "static func scheduleKeepingAppAlive(",
+            endingBefore: "/// Owns only the brief scheduling assertion")
+        let window = try XCTUnwrap(scheduling.range(of: "let window = BackgroundSchedulingWindow()"))
+        let task = try XCTUnwrap(scheduling.range(of: "Task {"))
+        XCTAssertLessThan(window.lowerBound, task.lowerBound,
+                          "Execution time must be acquired synchronously before the lifecycle callback can return.")
+        XCTAssertTrue(scheduling.contains("defer { window.end() }"))
+        XCTAssertTrue(scheduling.contains("await coordinator.schedule(proposal)"))
+        XCTAssertEqual(app.components(separatedBy: "LavaBackgroundTaskScheduling.scheduleKeepingAppAlive(proposal)").count - 1, 2,
+                       "Both routine maintenance identifiers need the execution window.")
+        let lease = try sourceBlock(in: app,
+            startingAt: "private final class BackgroundSchedulingWindow",
+            endingBefore: "enum BackgroundCatalogRefresh")
+        XCTAssertTrue(lease.contains("UIApplication.shared.beginBackgroundTask"))
+        XCTAssertTrue(lease.contains("MainActor.assumeIsolated { self?.end() }"),
+                      "System expiration must release the assertion even if scheduling has not completed.")
+        XCTAssertTrue(lease.contains("guard identifier != .invalid else { return }"))
+        XCTAssertTrue(lease.contains("UIApplication.shared.endBackgroundTask(ending)"))
+    }
+
+    func testRejectedCatalogSchedulesNetworkRecoveryInsteadOfRepeatingCacheOnlyWork() throws {
+        let app = try readSource(.lavaSecApp)
+        let recovery = try sourceBlock(in: app,
+            startingAt: "if await viewModel.cachedCatalogNeedsBackgroundRefresh() {",
+            endingBefore: "await viewModel.topUpWarmIndexFromCachedCatalog()")
+        XCTAssertTrue(recovery.contains("await BackgroundCatalogRefresh.scheduleRecovery()"))
+        XCTAssertTrue(recovery.contains("completion.complete(success: !Task.isCancelled && scheduling != .failed)"))
+        XCTAssertTrue(recovery.contains("warm-topup-recovery"))
+        XCTAssertTrue(recovery.contains("scheduling.map { String(describing: $0) }"))
+        XCTAssertTrue(recovery.contains("return"))
+        let scheduling = try sourceBlock(in: app,
+            startingAt: "static func scheduleRecovery() async ->", endingBefore: "private static func handle(")
+        XCTAssertTrue(scheduling.contains("guard !Task.isCancelled"))
+        XCTAssertTrue(scheduling.contains("earliestBeginDate: nil"))
+        let model = try readAppViewModelSource()
+        let freshness = try sourceBlock(in: model,
+            startingAt: "func cachedCatalogNeedsBackgroundRefresh() async -> Bool {",
+            endingBefore: "func topUpWarmIndexFromCachedCatalog() async {")
+        XCTAssertTrue(freshness.contains("!sharedStateUnavailableAtLoad"))
+        XCTAssertTrue(freshness.contains("!didReseedFilterLibraryOnLastLoad"))
+        XCTAssertTrue(freshness.contains("BlocklistCatalogSynchronizer.cachedCatalogNeedsBackgroundRefresh"))
+        XCTAssertTrue(freshness.contains("requiredSourceIDs: DefaultCatalog.recommendedDefaultSourceIDs"))
+    }
+
     /// The identifier and background mode have to be declared, or iOS refuses the registration at
     /// launch — and a missing handler for a permitted identifier is a hard crash, not a no-op.
     func testInfoPlistDeclaresFetchModeAndTheTopUpIdentifier() throws {
@@ -35,11 +82,11 @@ final class BackgroundWarmTopUpSourceTests: XCTestCase {
         let app = try readSource(.lavaSecApp)
         let scheduleBlock = try sourceBlock(
             in: app,
-            startingAt: "    static func scheduleNext() {\n        guard !LavaSecAppGroup.sharedDefaults.bool(forKey: killSwitchDefaultsKeyName) else { return }\n        let request = BGAppRefreshTaskRequest(",
+            startingAt: "enum BackgroundWarmTopUp {",
             endingBefore: "    @MainActor\n    private static func handle(")
 
         XCTAssertTrue(
-            scheduleBlock.contains("BGAppRefreshTaskRequest(identifier: taskIdentifier)"),
+            app.contains("request = BGAppRefreshTaskRequest(identifier: proposal.identifier)"),
             "a BGProcessingTaskRequest would inherit the long-window scheduling this exists to avoid")
         XCTAssertFalse(
             sourceWithoutCommentLines(scheduleBlock).contains("requiresNetworkConnectivity"),
@@ -93,7 +140,7 @@ final class BackgroundWarmTopUpSourceTests: XCTestCase {
         let app = try readSource(.lavaSecApp)
         let workBlock = try sourceBlock(
             in: app,
-            startingAt: "            let viewModel = AppViewModel(loadVPNState: false, headless: true)\n            await viewModel.topUpWarmIndexFromCachedCatalog()",
+            startingAt: "            if await viewModel.cachedCatalogNeedsBackgroundRefresh() {",
             endingBefore: "private final class BGTaskBox")
         XCTAssertFalse(
             sourceWithoutCommentLines(workBlock).contains("syncCatalog"),
@@ -416,7 +463,7 @@ final class BackgroundWarmTopUpSourceTests: XCTestCase {
         let app = try readSource(.lavaSecApp)
         let workBlock = try sourceBlock(
             in: app,
-            startingAt: "            let viewModel = AppViewModel(loadVPNState: false, headless: true)\n            await viewModel.topUpWarmIndexFromCachedCatalog()",
+            startingAt: "            if await viewModel.cachedCatalogNeedsBackgroundRefresh() {",
             endingBefore: "private final class BGTaskBox")
 
         XCTAssertTrue(

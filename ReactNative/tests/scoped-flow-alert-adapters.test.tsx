@@ -8,6 +8,7 @@ import type {AccountBackupFlowState} from '../src/flows/account-backup/types';
 let mockApp:AppStore;
 jest.mock('../review/ReviewContext',()=>({useReview:()=>({app:mockApp})}));
 jest.mock('../review/scaffold',()=>({nativeInlineHeader:{},toolbarAction:jest.fn(),useToolbar:jest.fn()}));
+jest.mock('../review/settings-scaffold',()=>({SettingsIntro:()=>null}));
 jest.mock('@react-navigation/native',()=>({useNavigation:()=>({setOptions:jest.fn()})}));
 jest.mock('../src/flows/import/ImportFlow',()=>({ImportFlow:()=>null}));
 jest.mock('../src/flows/account-backup/AccountBackupFlow',()=>({AccountBackupFlow:({confirmAccountDeletion}:any)=>{

@@ -1,4 +1,4 @@
-import {useEffect,useLayoutEffect,useRef,useState,useSyncExternalStore,type ReactNode} from 'react';
+import {useEffect,useLayoutEffect,useRef,useState,useSyncExternalStore,type ReactNode,type PropsWithChildren} from 'react';
 import {AppState,Modal,PlatformColor,StyleSheet,View} from 'react-native';
 import {NavigationContainer,NavigationIndependentTree,DefaultTheme,DarkTheme,useNavigation,useNavigationContainerRef,usePreventRemove} from '@react-navigation/native';
 import {createNativeStackNavigator,type NativeStackHeaderItem} from '@react-navigation/native-stack';
@@ -14,7 +14,7 @@ import {useTextScale} from '../app/text-metrics';
 import {localized} from '../app/presentation';
 import {LavaActionButton} from '../src';
 import {colors} from '../src/colors';
-import {Copy,Symbol} from './primitives';
+import {Copy,Screen,Symbol} from './primitives';
 import {PresentationCover} from './PresentationCover';
 import {nativeInlineHeader,Search,toolbarAction,useToolbar} from './scaffold';
 import {useOrdinaryPushPresentation} from './navigation-scaffold';
@@ -41,6 +41,10 @@ function useQACleanupHeader(title:string,kind:'back'|'close',action:()=>void,ena
 }
 export function QAFlowAdapter({id,sheet=false}:{id:string;sheet?:boolean}){
   return <NativeFlowMetrics><QAFlowBody id={id} sheet={sheet}/></NativeFlowMetrics>;
+}
+function QAFlowPage({children,port,spacing}:PropsWithChildren<{port:QAPort;spacing:number}>){
+  return <Screen testID={port.pageID} keyboard showsVerticalScrollIndicator onLayout={port.onLayout}
+    concealed={port.concealed} interactionDisabled={port.interactive===false} contentContainerStyle={{gap:spacing}}>{children}</Screen>;
 }
 function QAFlowBody({id,sheet=false}:{id:string;sheet?:boolean}){
   const {app,live}=useReview();const state=live?.qa?.id===id?live.qa:undefined;
@@ -79,7 +83,9 @@ function QAFlowBody({id,sheet=false}:{id:string;sheet?:boolean}){
     mounted.current=true;const listener=AppState.addEventListener('change',value=>setForeground(value==='active'));
     return()=>{mounted.current=false;listener.remove();void app?.command({type:'qa.command',id,action:'leave'}).catch(()=>{});};
   },[app,id]);
-  useEffect(()=>{if(!state&&!entryError)void enter();},[app,id,!!state,foreground,authority,live?.security.readRevision]);
+  useEffect(()=>{if(state)setEntryError('');else if(!entryError)void enter();},[app,id,!!state,foreground,authority,live?.security.readRevision]);
+  const active=!!state&&authority&&foreground&&interactive;
+  const visible=!!state||!!presentation&&app?.getSnapshot?.().privacyCoverRequired===false;
   const portFor=(detail?:QADetail):QAPort=>({
     // Freeze the rendered detail identity. A callback from an old check never
     // obtains the new check's token by consulting a mutable current-state ref.
@@ -101,6 +107,7 @@ function QAFlowBody({id,sheet=false}:{id:string;sheet?:boolean}){
     fieldBackground:PlatformColor('tertiarySystemFill'),
     labelColor:PlatformColor('label'),
     searchField:props=><Search {...props} surface="localLog"/>,
+    page:QAFlowPage,pageID:detail?'qa.detail-page':'device-qa-page',interactive:active,concealed:!visible,
     onLayout,localize:localized,textScale:scale,
   });
   const rootPort=portFor();
@@ -109,19 +116,17 @@ function QAFlowBody({id,sheet=false}:{id:string;sheet?:boolean}){
   const systemTitleColor=PlatformColor('label') as unknown as string;
   useToolbar({title:'Device QA',...(sheet?nativeInlineHeader:{headerTitleStyle:{color:systemTitleColor},headerLargeTitleStyle:{color:systemTitleColor}}),unstable_headerRightItems:()=>[resultToolbarButton(()=>rootPort.send({action:'result'}),!state?.hasResult)]},[sheet,!!state?.hasResult,id,scope]);
   useQACleanupHeader(localized('Device QA'),'close',()=>{if(app)void app.command({type:'qa.command',id,action:'close'}).catch(()=>{});},sheet);
-  const active=!!state&&authority&&foreground&&interactive;
-  const retainInactive=!foreground&&app?.getSnapshot?.().privacyCoverRequired===false;
-  const visible=!!state||retainInactive;
-  const cover=()=> <PresentationCover testID="qa.privacy-cover">{entryError&&entryError!=='Authentication cancelled.'?<Copy role="supporting">{entryError}</Copy>:null}<LavaActionButton title="Unlock Lava" role="secondary" onPress={()=>void enter()}/></PresentationCover>;
-  return <View testID="device-qa-page" style={{flex:1}}>
-    {presentation&&<View testID="qa.surface" style={{flex:1,opacity:visible?1:0}} pointerEvents={active?'auto':'none'} accessibilityElementsHidden={!active} importantForAccessibility={active?'auto':'no-hide-descendants'}>
-      <QAScreen state={presentation} port={rootPort}/>
-    </View>}
-    {!visible&&<View style={StyleSheet.absoluteFill}>{cover()}</View>}
+  const cover=()=> <PresentationCover testID="qa.privacy-cover">{entryError&&entryError!=='Authentication cancelled.'?<Copy role="supporting">{entryError}</Copy>:null}{!!entryError&&<LavaActionButton title="Unlock Lava" role="secondary" onPress={()=>void enter()}/>}</PresentationCover>;
+  // The shared Screen stays the route's direct native scroll child. Main-page
+  // concealment is already owned by LiveRenderBoundary; modal routes cover
+  // themselves because UIKit presents them above that boundary.
+  return <>
+    {presentation&&!entryError?<QAScreen state={presentation} port={rootPort}/>:<Screen testID="qa.entry-state" onLayout={onLayout}>{!!entryError&&<><Copy>{entryError}</Copy><LavaActionButton title="Try again" onPress={()=>void enter()}/></>}</Screen>}
+    {sheet&&!visible&&!entryError&&<View style={StyleSheet.absoluteFill}>{cover()}</View>}
     <Modal visible={!!detail} presentationStyle="pageSheet" animationType="slide" onRequestClose={()=>{if(detail)portFor(detail).send({action:'detail.close'});}}>
       <SafeAreaProvider><View style={{flex:1}}><NavigationIndependentTree>{detail&&<QADetailNavigation detail={detail} portFor={portFor} dark={dark} body={{active,visible,cover}}/>}</NavigationIndependentTree></View></SafeAreaProvider>
     </Modal>
-  </View>;
+  </>;
 }
 function QADetailNavigation({detail,portFor,dark,body}:{detail:QADetail;portFor:(detail:QADetail)=>QAPort;dark:boolean;body:QABodyState}){
   const navigation=useNavigationContainerRef<{QARoot:undefined;QACheck:undefined}>();
@@ -148,5 +153,5 @@ function QACheckAdapter({state,canReturn,port,body}:{state:QADetail;canReturn:bo
 }
 function QADetailAdapter({state,port,body}:{state:QADetail;port:QAPort;body:QABodyState}){
   useQACleanupHeader(state.title,state.canBack?'back':'close',()=>port.send({action:state.canBack?'detail.back':'detail.close'}));
-  return <View style={{flex:1}}><View testID="qa.detail-surface" style={{flex:1,opacity:body.visible?1:0}} pointerEvents={body.active?'auto':'none'} accessibilityElementsHidden={!body.active} importantForAccessibility={body.active?'auto':'no-hide-descendants'}><QADetailScreen state={state} port={port}/></View>{!body.visible&&<View style={StyleSheet.absoluteFill}>{body.cover()}</View>}</View>;
+  return <><QADetailScreen state={state} port={port}/>{!body.visible&&<View style={StyleSheet.absoluteFill}>{body.cover()}</View>}</>;
 }

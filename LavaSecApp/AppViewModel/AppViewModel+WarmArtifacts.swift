@@ -889,11 +889,23 @@ extension AppViewModel {
         return total
     }
 
+    /// A cache-only top-up cannot repair an invalid catalog or a pending launch migration.
+    /// Read both warm-compile gates without migrating or mutating the cache.
+    func cachedCatalogNeedsBackgroundRefresh() async -> Bool {
+        guard isHeadless, !sharedStateUnavailableAtLoad, !didReseedFilterLibraryOnLastLoad,
+              let cacheURL = catalogCacheURL else { return false }
+        let maxAge = catalogSyncFreshnessInterval
+        return await Task.detached(priority: .utility) {
+            BlocklistCatalogSynchronizer.cachedCatalogNeedsBackgroundRefresh(in: cacheURL,
+                maxAge: maxAge, requiredSourceIDs: DefaultCatalog.recommendedDefaultSourceIDs)
+        }.value
+    }
+
     /// The `BGAppRefreshTask` top-up's entry point: re-warm non-active filters from the catalog
     /// cache ALREADY HELD, with no sync and no network.
     ///
-    /// Deliberately NOT gated on the `bg-published` condition the catalog refresh applies before
-    /// its own warm pass. That condition exists because after a SYNC you cannot trust
+    /// Deliberately NOT gated on the committed-catalog outcomes (`bg-published` / `bg-renewed`)
+    /// the catalog refresh requires before its warm pass. After a SYNC you cannot trust
     /// `latest.json` unless the sync committed it — a warm compiled against a non-committed
     /// catalog would record a token whose freshness gate is unreliable. This path runs no sync, so
     /// `latest.json` is simply the last committed catalog, and the decision belongs to
@@ -1192,8 +1204,8 @@ extension AppViewModel {
         // THE CATALOG IS ALREADY COMMITTED WHEN THIS RUNS, by either of its two callers, and this pass
         // deliberately does not touch latest.json's mtime.
         //
-        // The catalog-refresh caller reaches here only on `bg-published`, where the background just
-        // COMMITTED the fresh catalog. The `BGAppRefreshTask` top-up runs no sync at all, so
+        // The catalog-refresh caller reaches here only on `bg-published` or `bg-renewed`, where the
+        // background just COMMITTED the fresh catalog. The `BGAppRefreshTask` top-up runs no sync, so
         // latest.json is simply the last committed catalog. In both cases
         // `compileAndStageWarmArtifact`'s own `hasFreshCachedCatalog` gate decides whether that
         // catalog is fresh enough to warm against — a stale cache warms nothing and the next switch

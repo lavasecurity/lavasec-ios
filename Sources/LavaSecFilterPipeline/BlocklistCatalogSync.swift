@@ -895,6 +895,34 @@ public struct BlocklistCatalogSynchronizer: Sendable {
             .hasFreshCachedCatalog(maxAge: maxAge, now: now)
     }
 
+    /// Whether cache-only warming needs a network refresh first. Reads without
+    /// migrating or deleting the last committed catalog, including launch inventory gaps.
+    public static func cachedCatalogNeedsBackgroundRefresh(
+        in cacheDirectoryURL: URL,
+        maxAge: TimeInterval,
+        requiredSourceIDs: Set<String>,
+        now: Date = Date()
+    ) -> Bool {
+        cachedCatalogNeedsBackgroundRefresh(in: cacheDirectoryURL, maxAge: maxAge,
+            requiredSourceIDs: requiredSourceIDs, trustPolicy: .production, now: now)
+    }
+
+    internal static func cachedCatalogNeedsBackgroundRefresh(
+        in cacheDirectoryURL: URL,
+        maxAge: TimeInterval,
+        requiredSourceIDs: Set<String>,
+        trustPolicy: CatalogTrustPolicy,
+        now: Date = Date()
+    ) -> Bool {
+        let repository = BlocklistCatalogRepository(cacheDirectoryURL: cacheDirectoryURL, trustPolicy: trustPolicy)
+        // The pre-commissioning trust policy permits unsigned catalogs, so its
+        // freshness check alone does not decode. Corrupt metadata still needs recovery.
+        guard (try? repository.cachedCatalogSnapshot(now: now)) != nil else { return true }
+        return !repository.hasFreshCachedCatalog(maxAge: maxAge, now: now)
+            || cachedCatalogRequiresLowRiskLaunchRefresh(in: cacheDirectoryURL,
+                requiredSourceIDs: requiredSourceIDs, trustPolicy: trustPolicy)
+    }
+
     // Temporary launch holds for GPL catalog sources that must be purged from
     // existing caches. AdGuard is intentionally active under the source-url-only,
     // off-by-default posture, so this set is empty for the catalog launch.

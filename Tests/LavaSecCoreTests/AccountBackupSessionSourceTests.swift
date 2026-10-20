@@ -3,6 +3,46 @@ import XCTest
 /// Cross-process ownership pins; backup cryptography and persistence retain their
 /// executable controller/storage suites, while RN flow behavior is tested in Jest.
 final class AccountBackupSessionSourceTests: XCTestCase {
+    func testEnableToRestoreRedirectClaimsTheInitiatingRuntime() throws {
+        let source = try readSource(.reactNativeAppBridge)
+        let claim = try sourceBlock(in: source, startingAt: "private func claimCommandOwners(",
+                                    endingBefore: "@objc func retireRuntime(")
+        XCTAssertTrue(sourceContainsInOrder([
+            "runtimeOwnership.isActive(runtime)",
+            "(requestedFlow == \"backupSetup\" && flow?.name == \"backupRestore\")",
+            "name == \"native.flow\" && flow?.id != previousFlow && matchesRequestedFlow",
+            "if let owner = accountBackupSession",
+            "runtimeOwnership.claim(runtimeOwner(\"accountBackup\""
+        ], in: claim))
+    }
+
+    func testEnableRoutesExistingOnlineBackupToRestoreWithoutReplacingIt() throws {
+        let source = try readSource(.reactNativeAppBridge)
+        let enable = try sourceBlock(in: source, startingAt: "else if name == \"backupSetup\"")
+        XCTAssertTrue(sourceContainsInOrder([
+            "let accountID = model.currentBackupAccountID",
+            "try await model.backup.existingBackupBeforeSetup()",
+            "try requireCurrentRuntime()",
+            "canReadPresentation(.appSettings), model.currentBackupAccountID == accountID",
+            "guard let existing",
+            "existing ? \"backupRestore\" : \"backupSetup\""
+        ], in: enable))
+    }
+
+    func testAccountDeletionFailureUsesTheFreshScopedProjection() throws {
+        let source = try readSource(.reactNativeAppAccountBackup)
+        let command = try sourceBlock(in: readSource(.reactNativeAppAccountBackup),
+                                      startingAt: "case \"account.delete\":", endingBefore: "case \"setup.begin\":")
+        XCTAssertTrue(sourceContainsInOrder([
+            "await model.account.deleteAccount()",
+            "if deleted, self.flow?.id == flow.id",
+            "retireAccountBackup(flow.id)"
+        ], in: command))
+        XCTAssertFalse(command.contains("throw CommandError"))
+        XCTAssertTrue(source.contains("kind == \"account\" && bridge.model.account.accountAuthMessageIsError"))
+        XCTAssertTrue(source.contains("\"error\": s?.errorMessage ?? accountError ?? \"\""))
+    }
+
     func testCredentialAtomUsesSafeNativeContainmentForHostedSwiftUI() throws {
         let source = try readSource(.reactNativeBackupCredentials)
         XCTAssertTrue(source.contains("LavaNativeContainment.update(controller, in: self)"))
@@ -48,7 +88,7 @@ final class AccountBackupSessionSourceTests: XCTestCase {
         XCTAssertTrue(sourceContainsInOrder([
             "if let owner = accountBackupSession",
             "owner.id == flow.id", "owner.kind == flow.name", "owner.isCurrent",
-            "owner.setup?.busy != true, owner.restore?.isRestoring != true",
+            "owner.setup?.canClose != false, owner.restore?.isRestoring != true",
             "retireAccountBackup(flow.id); self.flow = nil", "return NSNull()"
         ], in: cleanup))
         XCTAssertFalse(cleanup.contains("accountBackupOwner("))

@@ -154,7 +154,12 @@ final class LavaDesignTokensSourceTests: XCTestCase {
         let confirmed = try XCTUnwrap(operation.range(of: "try await backup.turnOnEncryptedBackup(recoveryPhrase: recoveryPhrase)"))
         let upload = try XCTUnwrap(operation.range(of: "step = .upload"))
         XCTAssertLessThan(confirmed.lowerBound, upload.lowerBound)
-        XCTAssertTrue(operation.contains("recoveryPhrase = \"\""))
+        XCTAssertFalse(operation.contains("recoveryPhrase = \"\""))
+        let completion = try sourceBlock(in: source, startingAt: "private func updateUploadProgress()")
+        XCTAssertTrue(sourceContainsInOrder([
+            "backup.isSetupUploadConfirmed(attemptID: setupAttemptID)",
+            "setupComplete = true", "recoveryPhrase = \"\"", "consent.reset()"
+        ], in: completion))
         XCTAssertTrue(source.contains("backup.isSetupUploadConfirmed(attemptID: setupAttemptID)"))
         XCTAssertTrue(source.contains("setupComplete = true"))
         XCTAssertTrue(try readSource(.reactNativeAccountBackupFlow).contains("Your encrypted backup is set up on this device."))
