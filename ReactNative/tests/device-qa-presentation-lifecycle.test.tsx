@@ -48,7 +48,7 @@ function harness({rootLayout=true,foreground=false,privacy=true,deferDetailClose
     Object.defineProperty(AppState,'currentState',{configurable:true,value:state});
     listeners.forEach(listener=>listener(state));
   });
-  let current={schema:1,fullApp:true,revision:1,qaTools:true,backgroundPrivacyCoverRequired:privacy,
+  let current={schema:1,fullApp:true,revision:1,qaTools:true,backgroundPrivacyCoverRequired:privacy,appPrivacyCoverRequired:privacy,
     ...(foreground?{foregroundFlow:{id:'qa-flow',kind:'phoneQASheet',name:'',emoji:'🌿',dismissAttempt:0,canCreate:false,templates:[]}}:{}),
     security:{ownerRevision:'qa-owner',readRevision:1},session:initialSession(),
   } as unknown as AppSnapshot;

@@ -140,6 +140,7 @@ final class SecurityController: ObservableObject {
     private let keychainStore: SecurityPasscodeKeychainStore
     private let securityGateProjectionURL: URL?
     private var didFailGatePublication = false
+    private var appUnlockCoverChoice: Bool?
     private var lockSession = SecurityLockSession()
     private var passcodeContinuations = [UUID: [CheckedContinuation<Bool, Never>]]()
     private var appUnlockTask: (ticket: SecurityLockSession.Ticket, task: Task<Bool, Never>)?
@@ -195,6 +196,11 @@ final class SecurityController: ObservableObject {
         isBiometricEnabled = defaults.bool(forKey: biometricEnabledDefaultsKeyName) && isPasscodeEnabled
         protectedSurfaces = SecurityProtectedSurfaceStorage.loadProtectedSurfaces(from: defaults, projectionURL: securityGateProjectionURL)
         if credentialAvailability == .absent {
+            appUnlockCoverChoice = false
+        } else if let choice = SecurityProtectedSurfaceStorage.appUnlockCoverChoice(projectionURL: securityGateProjectionURL, defaults: defaults) {
+            appUnlockCoverChoice = choice
+        }
+        if credentialAvailability == .absent {
             defaults.set(false, forKey: biometricEnabledDefaultsKeyName)
         }
         return published
@@ -218,13 +224,21 @@ final class SecurityController: ObservableObject {
 
     /// Conceals opted-in protected content without treating credential setup as consent.
     var backgroundPrivacyCoverRequired: Bool {
-        SecurityPrivacyPolicy.requiresBackgroundCover(
-            authenticationAvailability: isAuthenticationUnavailable ? .unavailable
-                : isPasscodeEnabled ? .available : .absent,
-            protectedSurfaces: protectedSurfaces,
-            gatesAreAvailable: !didFailGatePublication,
-            protectedDataIsAvailable: protectedDataIsAvailableForPresentation
-        )
+        SecurityPrivacyPolicy.requiresBackgroundCover(appUnlockIsSelected: appUnlockCoverChoice)
+    }
+
+    /// Public recovery metadata, independent of the user's cover choice.
+    var presentationAvailabilityError: String? {
+        if isAuthenticationUnavailable { return SecurityPasscodeKeychainStoreError.credentialUnavailable.localizedDescription }
+        if didFailGatePublication { return SecuritySettingsError.publicationUnavailable.localizedDescription }
+        return nil
+    }
+
+    /// Explicit Retry reclassifies security state; only an opted-in app lock can prompt.
+    func retryPresentationAvailability() async {
+        guard UIApplication.shared.applicationState == .active, protectedDataIsAvailableForPresentation else { return }
+        lockSession.enterForeground()
+        await authenticateAppUnlockIfNeeded()
     }
 
     /// A pre-lock announcement stays authoritative until the corresponding unlock event.
@@ -292,8 +306,9 @@ final class SecurityController: ObservableObject {
             protectedSurfaces.remove(surface)
         }
 
-        guard saveProtectedSurfaces() else { return }
+        guard saveProtectedSurfaces(appUnlockChoice: surface == .appUnlock ? isProtected : nil) else { return }
         if surface == .appUnlock {
+            appUnlockCoverChoice = isProtected
             lockSession.setAppUnlockEnabled(isProtected)
             isAppUnlockBlockingUI = false
             if !isProtected {
@@ -513,17 +528,10 @@ final class SecurityController: ObservableObject {
     }
 
     func lockForBackgroundIfNeeded() {
-        lockSession.suspend()
+        lockSession.suspend(preservingVisitForAppUnlock: backgroundPrivacyCoverRequired)
         retireAuthentication()
-        if isPasscodeEnabled, protectedSurfaces.contains(.appUnlock) || lockSession.hasSuspendedVisit {
-            isAppUnlockBlockingUI = true
-            isAppUnlockPrivacyMaskVisible = true
-        }
-    }
-
-    func showAppUnlockPrivacyMaskIfNeeded() {
-        guard !isBiometricAuthenticationInProgress else { return }
-        isAppUnlockPrivacyMaskVisible = isPasscodeEnabled && protectedSurfaces.contains(.appUnlock)
+        isAppUnlockBlockingUI = backgroundPrivacyCoverRequired
+        isAppUnlockPrivacyMaskVisible = backgroundPrivacyCoverRequired
     }
 
     /// Activation caused by Face ID is not a new unlock request. One automatic
@@ -539,11 +547,16 @@ final class SecurityController: ObservableObject {
         guard protectedDataIsAvailableForPresentation, lockSession.isForeground else { return }
         if automatically, !lockSession.claimAutomaticUnlock() { return }
         refreshAuthenticationAvailability()
+        guard backgroundPrivacyCoverRequired else {
+            isAppUnlockBlockingUI = false
+            isAppUnlockPrivacyMaskVisible = false
+            return
+        }
         if isAuthenticationUnavailable || didFailGatePublication {
             isAppUnlockBlockingUI = true
             return
         }
-        guard isPasscodeEnabled, protectedSurfaces.contains(.appUnlock) || lockSession.hasSuspendedVisit else {
+        guard isPasscodeEnabled, protectedSurfaces.contains(.appUnlock) else {
             isAppUnlockBlockingUI = false
             isAppUnlockPrivacyMaskVisible = false
             return
@@ -701,9 +714,9 @@ final class SecurityController: ObservableObject {
         return accepted && isCurrentAuthenticationRevision(authenticationRevision) && !Task.isCancelled
     }
 
-    private func saveProtectedSurfaces() -> Bool {
+    private func saveProtectedSurfaces(appUnlockChoice: Bool? = nil) -> Bool {
         guard SecurityProtectedSurfaceStorage.saveProtectedSurfaces(protectedSurfaces, to: defaults,
-            projectionURL: securityGateProjectionURL) else {
+            projectionURL: securityGateProjectionURL, appUnlockCoverChoice: appUnlockChoice ?? self.appUnlockCoverChoice) else {
             refreshAuthenticationAvailability()
             statusMessage = SecuritySettingsError.publicationUnavailable.localizedDescription
             return false

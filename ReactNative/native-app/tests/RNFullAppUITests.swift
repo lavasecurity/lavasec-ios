@@ -3619,20 +3619,19 @@ final class RNFullAppUITests: XCTestCase {
         createdPasscode = true
         if app.buttons["OK"].waitForExistence(timeout: 2) { app.buttons["OK"].tap() }
         waitForValue(passcode, "1")
-        // Selecting an unrelated action opts into background concealment while
-        // Stats itself needs no prompt. This isolates readiness from credential
-        // UI timing, and never starts, stops or pauses an actual VPN.
-        for title in ["Open Lava", "Turn protection on or off", "Edit filters", "View Activity", "Change settings"] {
+        // Only Open Lava opts into the app cover. After its one resume unlock,
+        // the cover stays until the focused delayed query is ready.
+        for title in ["Pause protection", "Turn protection on or off", "Edit filters", "View Activity", "Change settings"] {
             let flag = app.switches[title]
             XCTAssertTrue(flag.exists)
-            XCTAssertEqual(flag.value as? String, "0", "Only Pause protection is selected in this lane.")
+            XCTAssertEqual(flag.value as? String, "0", "Only Open Lava is selected in this lane.")
         }
-        let pause = app.switches["Pause protection"]
-        scrollFullyIntoView(app, pause)
-        XCTAssertEqual(pause.value as? String, "0")
-        pause.tap()
+        let appUnlock = app.switches["Open Lava"]
+        scrollFullyIntoView(app, appUnlock)
+        XCTAssertEqual(appUnlock.value as? String, "0")
+        appUnlock.tap()
         if app.staticTexts["Enter passcode"].waitForExistence(timeout: 2) { enterPasscode(app) }
-        waitForValue(pause, "1")
+        waitForValue(appUnlock, "1")
         nativeBack(app).tap()
         let stats = app.buttons["row.Nerd stats"]
         scrollFullyIntoView(app, stats)
@@ -3651,6 +3650,7 @@ final class RNFullAppUITests: XCTestCase {
         }, object: app)
         XCTAssertEqual(XCTWaiter.wait(for: [backgrounded], timeout: 10), .completed)
         app.activate()
+        enterPasscode(app)
         let cover = app.descendants(matching: .any).matching(identifier: "lava-privacy-cover").firstMatch
         let statsRouteCover = app.descendants(matching: .any).matching(identifier: "lava-route-privacy-cover").firstMatch
         XCTAssertTrue(cover.exists || statsRouteCover.exists,
@@ -3717,6 +3717,7 @@ final class RNFullAppUITests: XCTestCase {
         }, object: app)
         XCTAssertEqual(XCTWaiter.wait(for: [shareBackgrounded], timeout: 10), .completed)
         app.activate()
+        enterPasscode(app)
         let routeCover = app.descendants(matching: .any).matching(identifier: "lava-route-privacy-cover").firstMatch
         XCTAssertTrue(routeCover.exists,
                       "The presented Share sheet must own a cover above its erased body during refresh.")
@@ -3760,11 +3761,11 @@ final class RNFullAppUITests: XCTestCase {
         scrollFullyIntoView(app, securityRow)
         securityRow.tap()
         enterPasscode(app) // Security settings always authenticate an existing code.
-        scrollFullyIntoView(app, pause)
-        XCTAssertEqual(pause.value as? String, "1")
-        pause.tap()
+        scrollFullyIntoView(app, appUnlock)
+        XCTAssertEqual(appUnlock.value as? String, "1")
+        appUnlock.tap()
         if app.staticTexts["Enter passcode"].waitForExistence(timeout: 2) { enterPasscode(app) }
-        waitForValue(pause, "0")
+        waitForValue(appUnlock, "0")
         scrollFullyIntoView(app, passcode)
         passcode.tap()
         enterPasscode(app)
@@ -4315,6 +4316,114 @@ final class RNFullAppUITests: XCTestCase {
         assertRound8GuardIsOff(app)
         capture(app, "WireGuard comment discarded with Guard and chaining off")
         #endif
+    }
+
+    func testVPNPlusReturnPreservesSessionAndNativeTitleWithAppUnlockOffAndOn() throws {
+        let app = launch(largeText: true)
+        nativeTab(app, "Settings").tap()
+        let customization = app.buttons["row.Customization"]
+        scrollFullyIntoView(app, customization); customization.tap()
+        let systemSize = app.switches["Match system"]
+        scrollFullyIntoView(app, systemSize)
+        if systemSize.value as? String == "0" { tapNativeSwitch(systemSize) }
+        let systemSizeSelected = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            systemSize.value as? String == "1" && systemSize.isEnabled
+        }, object: systemSize)
+        XCTAssertEqual(XCTWaiter.wait(for: [systemSizeSelected], timeout: 10), .completed)
+        nativeBack(app).tap()
+        let securityRow = app.buttons["row.Security"]
+        scrollFullyIntoView(app, securityRow); securityRow.tap()
+        let passcode = app.switches["Passcode"]
+        XCTAssertTrue(passcode.waitForExistence(timeout: 10))
+        XCTAssertEqual(passcode.value as? String, "0")
+        passcode.tap()
+        XCTAssertTrue(app.staticTexts["Set passcode"].waitForExistence(timeout: 10))
+        app.typeText("1234")
+        XCTAssertTrue(app.staticTexts["Confirm passcode"].waitForExistence(timeout: 10))
+        app.typeText("1234")
+        XCTAssertTrue(passcode.waitForExistence(timeout: 10))
+        let settingsGate = app.switches["Change settings"]
+        scrollFullyIntoView(app, settingsGate)
+        settingsGate.tap()
+        let settingsSelected = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            settingsGate.value as? String == "1" && settingsGate.isEnabled
+        }, object: settingsGate)
+        XCTAssertEqual(XCTWaiter.wait(for: [settingsSelected], timeout: 10), .completed)
+        let appUnlock = app.switches["Open Lava"]
+        for enabled in [false, true] {
+            scrollFullyIntoView(app, appUnlock)
+            if appUnlock.value as? String != (enabled ? "1" : "0") { appUnlock.tap() }
+            let policyCommitted = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                appUnlock.value as? String == (enabled ? "1" : "0") && appUnlock.isEnabled
+            }, object: appUnlock)
+            XCTAssertEqual(XCTWaiter.wait(for: [policyCommitted], timeout: 10), .completed)
+            if enabled {
+                backgroundAppAndResume(app)
+                enterPasscode(app)
+                XCTAssertTrue(passcode.waitForExistence(timeout: 10),
+                              "Exercise the active ON session after a real app unlock.")
+            }
+            nativeBack(app).tap()
+            let vpnRow = app.buttons["connection.vpn"]
+            scrollFullyIntoView(app, vpnRow); vpnRow.tap()
+            enterPasscode(app) // The selected Settings gate, independently of Open Lava.
+            let header = app.navigationBars["VPN chaining"]
+            let setup = app.descendants(matching: .any).matching(identifier: "vpn.setup-toggle").firstMatch.switches.firstMatch
+            XCTAssertTrue(setup.waitForExistence(timeout: 10), app.debugDescription)
+            waitForSettledFrame(header)
+            for _ in 0..<3 where header.frame.height < 70 {
+                app.swipeDown()
+                waitForSettledFrame(header)
+            }
+            let expandedTitleHeight = header.frame.height
+            XCTAssertGreaterThan(expandedTitleHeight, 70, "Start with the native large title expanded.")
+            scrollFullyIntoView(app, setup)
+            if setup.value as? String == "1" { setup.tap() }
+            let prerequisiteOff = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                setup.value as? String == "0" && setup.isEnabled
+            }, object: setup)
+            XCTAssertEqual(XCTWaiter.wait(for: [prerequisiteOff], timeout: 10), .completed,
+                           "Start the free-plan upgrade from its disabled prerequisite.")
+            for _ in 0..<3 where header.frame.height >= expandedTitleHeight - 10 {
+                app.swipeUp()
+                waitForSettledFrame(header)
+            }
+            scrollFullyIntoView(app, setup)
+            waitForSettledFrame(setup)
+            let titleHeight = header.frame.height
+            XCTAssertLessThan(titleHeight, expandedTitleHeight - 10, "The requesting VPN title must already be collapsed before opening Plus.")
+            capture(app, "Collapsed VPN title before Plus, Open Lava \(enabled)")
+            let setupY = setup.frame.minY
+            for swipe in [false, true] {
+                setup.tap()
+                XCTAssertTrue(app.navigationBars["Lava Plus"].waitForExistence(timeout: 10))
+                if swipe {
+                    app.coordinate(withNormalizedOffset: CGVector(dx: 0.005, dy: 0.55))
+                        .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.55)),
+                               withVelocity: .slow, thenHoldForDuration: 0.2)
+                } else { nativeBack(app).tap() }
+                XCTAssertTrue(setup.waitForExistence(timeout: 10))
+                waitForSettledFrame(setup)
+                for identifier in ["lava-privacy-cover", "lava-route-privacy-cover", "lavaPrivacyShield",
+                                   "securityPrivacyMaskOverlay", "securityLockOverlay"] {
+                    XCTAssertFalse(app.descendants(matching: .any).matching(identifier: identifier).firstMatch.exists,
+                                   "An active Plus return must not create an app cover (Open Lava: \(enabled)).")
+                }
+                XCTAssertFalse(app.staticTexts["Enter passcode"].exists)
+                XCTAssertEqual(app.navigationBars.matching(identifier: "VPN chaining").count, 1)
+                XCTAssertEqual(header.frame.height, titleHeight, accuracy: 2, "Return must retain the native title state.")
+                XCTAssertEqual(setup.frame.minY, setupY, accuracy: 2, "Return must retain the existing scroll position.")
+                XCTAssertEqual(setup.value as? String, "0", "A cancelled upgrade must not enable VPN setup.")
+            }
+            capture(app, "VPN Plus returns retain the active visit, Open Lava \(enabled)")
+            nativeBack(app).tap()
+            scrollFullyIntoView(app, securityRow); securityRow.tap()
+            enterPasscode(app)
+            XCTAssertTrue(passcode.waitForExistence(timeout: 10))
+        }
+        // Remove the synthetic credential through the real Security UI.
+        scrollFullyIntoView(app, passcode); passcode.tap(); enterPasscode(app)
+        XCTAssertEqual(passcode.value as? String, "0")
     }
 
     func testVPNChainingUsesTheSameLargeTitleAsDNS() throws {
@@ -7263,12 +7372,11 @@ final class RNFullAppUITests: XCTestCase {
         XCTAssertEqual(content.value as? String, comment)
         revokeAndResume(vpnName, privateFields: [content], coverID: "vpn-editor-privacy-cover", phase: "WireGuard")
         XCTAssertEqual(vpnName.value as? String, "Retained protected VPN draft")
-        XCTAssertFalse(content.exists, "Authorization alone cannot reveal a private native configuration buffer.")
-        let reveal = app.buttons["Show configuration"]
-        XCTAssertTrue(reveal.waitForExistence(timeout: 10))
-        reveal.tap()
         XCTAssertTrue(content.waitForExistence(timeout: 10))
-        XCTAssertEqual(content.value as? String, comment, "Reauthorization must retain the same opaque native input owner.")
+        XCTAssertEqual(content.value as? String, comment,
+                       "With Open Lava off, scoped reauthorization restores the same already-revealed user-entered draft.")
+        XCTAssertFalse(app.buttons["Show configuration"].exists,
+                       "A scoped action gate cannot opt this revealed draft into app-wide concealment. No saved credentials enter this fixture.")
         app.navigationBars["WireGuard configuration"].buttons["Cancel"].tap()
         let discard = app.alerts["Discard changes?"].buttons["Discard"]
         XCTAssertTrue(discard.waitForExistence(timeout: 10))
@@ -7418,11 +7526,13 @@ final class RNFullAppUITests: XCTestCase {
         for _ in 0..<4 where !settings.isHittable { app.swipeUp() }
         if settings.value as? String == "0" { settings.tap() }
         let unlock = app.switches["Open Lava"]
-        if unlock.value as? String == "1" {
-            for _ in 0..<4 where !unlock.isHittable { app.swipeDown() }
-            unlock.tap()
-            enterPasscode(app)
-        }
+        scrollFullyIntoView(app, unlock)
+        if unlock.value as? String == "0" { unlock.tap() }
+        let coverSelected = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            unlock.value as? String == "1" && unlock.isEnabled
+        }, object: unlock)
+        XCTAssertEqual(XCTWaiter.wait(for: [coverSelected], timeout: 10), .completed,
+                       "The native resume lock requires the selected Open Lava gate.")
         nativeBack(app).tap()
         // DNS no longer carries a promotional Explore row. Follow the actual
         // Settings connection invitation, then open its protected DNS destination.
@@ -7491,9 +7601,10 @@ final class RNFullAppUITests: XCTestCase {
         func reopenAfterRetiredVisit(cancelOnce: Bool) {
             XCTAssertTrue(app.navigationBars["DNS settings"].waitForNonExistence(timeout: 10))
             assertRestoredExplore()
-            // A native pop retires the settings grant. With Open Lava off,
-            // Explore remains public; Configure must obtain a fresh grant.
+            // A native pop retires the settings grant. App Unlock admits the
+            // app on resume; Configure still needs a fresh scoped grant.
             backgroundAndResume()
+            enterPasscode(app)
             assertRestoredExplore()
             func requestDNS() {
                 configure.tap()
@@ -7634,6 +7745,72 @@ final class RNFullAppUITests: XCTestCase {
         capture(app, "Cold launch reveals Guard after one unlock")
     }
 
+    func testNativeSettingsActionReauthenticatesAfterBackgroundWithAppUnlockOff() throws {
+        let app = launch()
+        nativeTab(app, "Settings").tap()
+        let security = app.buttons["row.Security"]
+        scrollFullyIntoView(app, security); security.tap()
+        let passcode = app.switches["Passcode"]
+        XCTAssertTrue(passcode.waitForExistence(timeout: 10))
+        XCTAssertEqual(passcode.value as? String, "0")
+        passcode.tap()
+        XCTAssertTrue(app.staticTexts["Set passcode"].waitForExistence(timeout: 10))
+        app.typeText("1234")
+        XCTAssertTrue(app.staticTexts["Confirm passcode"].waitForExistence(timeout: 10))
+        app.typeText("1234")
+        XCTAssertTrue(passcode.waitForExistence(timeout: 10))
+        if app.buttons["OK"].exists { app.buttons["OK"].tap() }
+        XCTAssertTrue(app.navigationBars["Passcode"].waitForNonExistence(timeout: 10))
+        let settings = app.switches["Change settings"]
+        scrollFullyIntoView(app, settings); settings.tap()
+        let selected = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            settings.value as? String == "1" && settings.isEnabled
+        }, object: settings)
+        XCTAssertEqual(XCTWaiter.wait(for: [selected], timeout: 10), .completed)
+        XCTAssertEqual(app.switches["Open Lava"].value as? String, "0")
+        nativeBack(app).tap()
+        app.buttons["row.Customization"].tap()
+        enterPasscode(app)
+        app.buttons["Choose Lava Guard"].tap()
+        let header = fullSheetHeader(app, title: "Lava Guard")
+        XCTAssertTrue(header.waitForExistence(timeout: 10))
+        let icon = app.switches["Match app icon to Lava Guard"]
+        scrollFullyIntoView(app, icon); waitForSettledFrame(icon)
+        let before = icon.value as? String
+
+        backgroundAppAndResume(app)
+        XCTAssertTrue(icon.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts["Enter passcode"].exists,
+                       "A scoped setting must not create an automatic app unlock when Open Lava is off.")
+        for identifier in ["lava-privacy-cover", "lava-route-privacy-cover", "lavaPrivacyShield",
+                           "securityPrivacyMaskOverlay", "securityLockOverlay"] {
+            XCTAssertFalse(app.descendants(matching: .any).matching(identifier: identifier).firstMatch.exists)
+        }
+        XCTAssertEqual(icon.value as? String, before)
+        waitForSettledFrame(icon)
+        icon.tap()
+        XCTAssertTrue(app.staticTexts["Enter passcode"].waitForExistence(timeout: 10),
+                      "Real backgrounding must revoke the scoped mutation grant even without an app cover.")
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
+        capture(app, "Explicit settings action authenticates above its retained sheet with Open Lava off")
+        app.buttons["Cancel"].tap()
+        XCTAssertTrue(app.staticTexts["Enter passcode"].waitForNonExistence(timeout: 10))
+        let unchanged = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            icon.value as? String == before && icon.isEnabled
+        }, object: icon)
+        XCTAssertEqual(XCTWaiter.wait(for: [unchanged], timeout: 10), .completed,
+                       "Cancelling scoped authentication cannot change the setting.")
+        header.buttons["Close"].tap()
+        nativeBack(app).tap()
+        scrollFullyIntoView(app, security); security.tap()
+        enterPasscode(app)
+        passcode.tap(); enterPasscode(app)
+        let removed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            passcode.value as? String == "0"
+        }, object: passcode)
+        XCTAssertEqual(XCTWaiter.wait(for: [removed], timeout: 10), .completed)
+    }
+
     func testNativePasscodeSetupAndAuthenticationAboveReactSheet() throws {
         let app = launch()
         nativeTab(app, "Settings").tap()
@@ -7662,12 +7839,13 @@ final class RNFullAppUITests: XCTestCase {
         }, object: nil)], timeout: 10), .completed,
                        "Change settings protection must be committed before testing authentication.")
         let unlock = app.switches["Open Lava"]
-        if unlock.value as? String == "1" {
-            for _ in 0..<4 where !unlock.isHittable { app.swipeDown() }
-            unlock.tap()
-            enterPasscode(app)
-        }
-        XCTAssertEqual(unlock.value as? String, "0", "This journey exercises protected visits with the whole-app entry gate off.")
+        scrollFullyIntoView(app, unlock)
+        if unlock.value as? String == "0" { unlock.tap() }
+        let appUnlockSelected = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            unlock.value as? String == "1" && unlock.isEnabled
+        }, object: unlock)
+        XCTAssertEqual(XCTWaiter.wait(for: [appUnlockSelected], timeout: 10), .completed,
+                       "Covered resume requires the committed Open Lava gate.")
         nativeBack(app).tap()
         app.buttons["row.Customization"].tap()
         enterPasscode(app)
@@ -7678,10 +7856,8 @@ final class RNFullAppUITests: XCTestCase {
         for _ in 0..<5 where !icon.isHittable { app.swipeUp() }
         XCTAssertTrue(icon.isHittable, app.debugDescription)
         let before = icon.value as? String
-        // The protected settings visit is retained beneath the shared lock even
-        // when the separate whole-app entry gate is off.
-        XCUIDevice.shared.press(.home)
-        app.activate()
+        // Open Lava explicitly owns the resume prompt and restores this scoped visit.
+        backgroundAppAndResume(app)
         XCTAssertTrue(app.staticTexts["Enter passcode"].waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
         waitForSettledFrame(app.keyboards.firstMatch)
@@ -7704,8 +7880,7 @@ final class RNFullAppUITests: XCTestCase {
         XCTAssertTrue(restore.waitForExistence(timeout: 20), app.debugDescription)
         for _ in 0..<7 where !restore.isHittable { app.swipeUp() }
         XCTAssertTrue(restore.isHittable, app.debugDescription)
-        XCUIDevice.shared.press(.home)
-        app.activate()
+        backgroundAppAndResume(app)
         XCTAssertTrue(app.staticTexts["Enter passcode"].waitForExistence(timeout: 5), "The protected purchase visit must reauthenticate after backgrounding.")
         app.buttons["Cancel"].tap()
         XCTAssertTrue(retry.waitForExistence(timeout: 10))
@@ -7714,11 +7889,14 @@ final class RNFullAppUITests: XCTestCase {
         waitForSettledFrame(restore)
         nativeBack(app).tap()
 
+        // Leave the requesting Settings visit before testing a fresh protected entry.
+        nativeTab(app, "Guard").tap()
+        nativeTab(app, "Settings").tap()
+        enterPasscode(app) // The protected tab authorizes before its child push.
         let vpn = app.buttons["connection.vpn"]
         for _ in 0..<5 where !vpn.isHittable { app.swipeDown() }
         XCTAssertTrue(vpn.isHittable, app.debugDescription)
         vpn.tap()
-        enterPasscode(app)
         let protectedSetup = app.descendants(matching: .any).matching(identifier: "vpn.setup-toggle").firstMatch.switches.firstMatch
         XCTAssertTrue(protectedSetup.waitForExistence(timeout: 10))
         XCTAssertEqual(protectedSetup.value as? String, "0", "Free users stop at the VPN prerequisite.")
@@ -7733,50 +7911,28 @@ final class RNFullAppUITests: XCTestCase {
         let nativePlus = app.navigationBars["Lava Plus"]
         XCTAssertTrue(nativePlus.waitForExistence(timeout: 10))
         nativePlus.buttons.firstMatch.tap()
-        let returnPromptAppeared = app.staticTexts["Enter passcode"].waitForExistence(timeout: 10)
-        if !returnPromptAppeared {
-            capture(app, "Native child return missing authentication")
-            var observations = [app.debugDescription]
-            let setup = app.descendants(matching: .any).matching(identifier: "vpn.setup-toggle").firstMatch.switches.firstMatch
-            observations.append("setup exists=\(setup.exists) hittable=\(setup.isHittable)")
-            let receipt = XCTAttachment(string: observations.joined(separator: "\n"))
-            receipt.name = "Native child return admission diagnostic — isolated QA simulator"
-            receipt.lifetime = .keepAlways
-            add(receipt)
-        }
-        XCTAssertTrue(returnPromptAppeared,
-            "Returning from a native child must reauthorize a revoked Settings turn.")
-        XCTAssertFalse(protectedSetup.exists, "Protected native controls must leave the accessibility tree while authentication is pending.")
-        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
-        waitForSettledFrame(app.keyboards.firstMatch)
-        capture(app, "Native child return requires authentication with controls closed")
-        app.buttons["Cancel"].tap()
-        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 10),
-            "Cancelling must leave the protected native page, not expose editable controls.")
-        // Settings exists under the native page before its automatic pop finishes.
-        // Wait for dismissal and the restored row geometry before requesting access
-        // again, otherwise the transition can consume the tap without opening auth.
-        XCTAssertTrue(app.navigationBars["VPN chaining"].waitForNonExistence(timeout: 10))
-        for _ in 0..<5 where !vpn.isHittable { app.swipeDown() }
-        waitForSettledFrame(vpn)
-        vpn.tap()
-        enterPasscode(app)
-        XCTAssertEqual(protectedSetup.value as? String, protectedSetupValue,
-                       "Cancelled child-return authentication must preserve the setting.")
+        XCTAssertTrue(nativePlus.waitForNonExistence(timeout: 10))
         XCTAssertTrue(protectedSetup.waitForExistence(timeout: 10))
+        waitForSettledFrame(protectedSetup)
+        XCTAssertFalse(app.staticTexts["Enter passcode"].exists,
+                       "An active Plus return retains its requesting Settings visit.")
+        XCTAssertEqual(protectedSetup.value as? String, protectedSetupValue,
+                       "Returning from Plus cannot enable the VPN prerequisite.")
+        capture(app, "Active Plus return retains its scoped VPN visit")
         tapNativeSwitch(protectedSetup)
         XCTAssertTrue(nativePlus.waitForExistence(timeout: 10))
-        XCUIDevice.shared.press(.home)
-        app.activate()
+        backgroundAppAndResume(app)
         enterPasscode(app)
         XCTAssertTrue(nativePlus.waitForExistence(timeout: 10))
         nativePlus.buttons.firstMatch.tap()
-        enterPasscode(app)
+        XCTAssertTrue(nativePlus.waitForNonExistence(timeout: 10))
+        waitForSettledFrame(protectedSetup)
+        XCTAssertFalse(app.staticTexts["Enter passcode"].exists,
+                       "The one App Unlock already restored the requesting VPN visit.")
         XCTAssertTrue(app.navigationBars["VPN chaining"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 10))
         capture(app, "Native VPN reauthorizes after its Plus page and backgrounding")
-        XCUIDevice.shared.press(.home)
-        app.activate()
+        backgroundAppAndResume(app)
         XCTAssertTrue(app.staticTexts["Enter passcode"].waitForExistence(timeout: 10),
             "The native VPN page also reauthorizes when resumed directly.")
         app.buttons["Cancel"].tap()
@@ -7888,8 +8044,7 @@ final class RNFullAppUITests: XCTestCase {
         XCTAssertTrue(editor.waitForExistence(timeout: 10))
         editor.tap()
         app.typeText("LF1-private-in-progress")
-        XCUIDevice.shared.press(.home)
-        app.activate()
+        backgroundAppAndResume(app)
         enterPasscode(app)
         XCTAssertTrue(codeEntry.waitForExistence(timeout: 10), "Unlock must recreate the staged importer at its original entry point.")
         codeEntry.tap()
@@ -7964,11 +8119,15 @@ final class RNFullAppUITests: XCTestCase {
         codeEntry.tap()
         let editor = app.textViews.firstMatch
         XCTAssertTrue(editor.waitForExistence(timeout: 10))
+        waitForSettledFrame(editor)
         editor.tap()
-        app.typeText(code)
-        app.buttons["Continue"].tap()
+        editor.typeText(code)
+        let continueImport = app.buttons["Continue"]
+        XCTAssertTrue(continueImport.wait(for: \.isEnabled, toEqual: true, timeout: 20),
+                      "Wait for the native code editor's change event before submitting.")
+        continueImport.tap()
         let chooseReplacement = app.buttons["Replace a filter instead"]
-        XCTAssertTrue(chooseReplacement.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(chooseReplacement.waitForExistence(timeout: 30), app.debugDescription)
         chooseReplacement.tap()
         let target = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", targetName)).firstMatch
         XCTAssertTrue(target.waitForExistence(timeout: 10), app.debugDescription)
@@ -8214,6 +8373,16 @@ final class RNFullAppUITests: XCTestCase {
         }
         waitForSettledFrame(element)
         XCTAssertTrue(viewport().contains(element.frame), "The complete scene must fit in the capture. Scene=\(element.frame), visible=\(viewport()).")
+    }
+
+    private func backgroundAppAndResume(_ app: XCUIApplication) {
+        XCUIDevice.shared.press(.home)
+        let backgrounded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            app.state == .runningBackground || app.state == .runningBackgroundSuspended
+        }, object: app)
+        XCTAssertEqual(XCTWaiter.wait(for: [backgrounded], timeout: 10), .completed,
+                       "A resume test requires actual backgrounding, not transient inactivity.")
+        app.activate()
     }
 
     private func enterPasscode(_ app: XCUIApplication) {

@@ -177,7 +177,7 @@ test('retained native header callbacks are inert through all-off resume and cove
 test.each(['form','list'] as const)('a separately presented native %s sheet keeps its direct ScrollView covered and inert until fresh scoped reads commit',async scrollMode=>{
   const previousState=AppState.currentState;AppState.currentState='active';
   const lifecycle=jest.spyOn(AppState,'addEventListener').mockReturnValue({remove(){}});
-  const live={schema:1,fullApp:true,revision:1,backgroundPrivacyCoverRequired:true} as AppSnapshot;
+  const live={schema:1,fullApp:true,revision:1,backgroundPrivacyCoverRequired:true,appPrivacyCoverRequired:true} as AppSnapshot;
   let publish!:(value:string)=>void,resolve!:(value:string)=>void;
   const native={getSnapshot:()=>new Promise<string>(()=>{}),command:jest.fn(()=>new Promise<string>(done=>{resolve=done;})),
     onSnapshot:(callback:(value:string)=>void)=>{publish=callback;return {remove(){}};}} as unknown as Spec;

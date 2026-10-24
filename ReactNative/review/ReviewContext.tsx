@@ -68,7 +68,7 @@ export function LiveRenderBoundary({component: Component,retainBody=true,directS
     owner.current.scope=scope;
   }
   const required=useSyncExternalStore(app?.subscribe??(()=>()=>{}),()=>!!app?.getPresentationHydration?.().required);
-  const coverRequired=app?.getSnapshot?.()?.privacyCoverRequired!==false;
+  const coverRequired=app?.getSnapshot?.()?.appPrivacyCoverRequired===true;
   const concealed=!!app&&coverRequired&&(!live||required);
   // Only a query-free public scaffold (Guard) opts into layout before the first
   // projection. It receives no native fields and stays covered/inert. First

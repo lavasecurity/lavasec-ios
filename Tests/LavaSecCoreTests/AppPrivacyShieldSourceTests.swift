@@ -74,9 +74,8 @@ final class AppPrivacyShieldSourceTests: XCTestCase {
         let controller = try readSource(.securityController)
         let policy = try sourceBlock(in: controller, startingAt: "var backgroundPrivacyCoverRequired: Bool", endingBefore: "private var faceIDUsageDescriptionIsPresent")
         XCTAssertTrue(policy.contains("SecurityPrivacyPolicy.requiresBackgroundCover("))
-        XCTAssertTrue(policy.contains("isAuthenticationUnavailable ? .unavailable"))
-        XCTAssertTrue(policy.contains("gatesAreAvailable: !didFailGatePublication"))
-        XCTAssertTrue(policy.contains("protectedDataIsAvailable: protectedDataIsAvailableForPresentation"))
+        XCTAssertTrue(policy.contains("appUnlockIsSelected: appUnlockCoverChoice"))
+        XCTAssertTrue(controller.contains("SecurityProtectedSurfaceStorage.appUnlockCoverChoice(projectionURL: securityGateProjectionURL, defaults: defaults)"))
         XCTAssertTrue(controller.contains("!protectedDataPrivacyBoundaryActive && UIApplication.shared.isProtectedDataAvailable"))
         XCTAssertTrue(controller.contains("guard protectedDataIsAvailableForPresentation else { return false }"))
         XCTAssertTrue(controller.contains("@Published private var protectedDataPrivacyBoundaryActive"))
@@ -85,6 +84,24 @@ final class AppPrivacyShieldSourceTests: XCTestCase {
         let snapshot = try sourceBlock(in: bridge, startingAt: "@objc func snapshot()", endingBefore: "@objc func command(")
         XCTAssertTrue(snapshot.contains("guard canReadPresentation(.appUnlock) else"))
         XCTAssertEqual(snapshot.components(separatedBy: "\"backgroundPrivacyCoverRequired\": security.backgroundPrivacyCoverRequired").count - 1, 2)
+    }
+
+    func testOnlyRealLifecycleBoundariesCanArmTheRendererCover() throws {
+        let bridge = try readSource(.reactNativeAppBridge)
+        let inactive = try sourceBlock(in: bridge,
+            startingAt: "NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)",
+            endingBefore: "NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)")
+        XCTAssertFalse(inactive.contains("concealPresentation()"), "StoreKit and authentication pauses are the same foreground session")
+        let background = try sourceBlock(in: bridge,
+            startingAt: "NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)",
+            endingBefore: "NotificationCenter.default.publisher(for: UIApplication.protectedDataWillBecomeUnavailableNotification)")
+        XCTAssertTrue(background.contains("concealPresentation()"))
+        XCTAssertTrue(background.contains("publishPrivacyBoundary()"))
+        XCTAssertEqual(bridge.components(separatedBy: "\"appPrivacyCoverRequired\": isPresentationRevealPending").count - 1, 3,
+                       "Full, withheld and background snapshots must carry the same native cover owner")
+        XCTAssertTrue(bridge.contains("security.backgroundPrivacyCoverRequired && presentationReveal.appCoverRequired"))
+        let reveal = try sourceBlock(in: bridge, startingAt: "private func updatePresentationReveal", endingBefore: "var isPresentationRevealPending")
+        XCTAssertTrue(reveal.contains("self?.publish()"), "Completing a reveal must retire its flag in every renderer")
     }
 
     func testProtectedDataLossRevokesAccessAndUsesTheSharedConcealmentChoiceBeforeTheBitChanges() throws {

@@ -21,17 +21,10 @@ public enum SecurityPrivacyPolicy {
         !isRevealed || (!applicationIsActive && backgroundCoverRequired)
     }
 
-    /// Keeps uncertain security state covered; a configured credential alone does not opt in.
-    /// Protected-data loss revokes access, not the confirmed display choice. Keep its
-    /// argument label for callers that evaluate access and concealment together.
-    public static func requiresBackgroundCover(
-        authenticationAvailability: SecurityAuthenticationAvailability,
-        protectedSurfaces: Set<SecurityProtectedSurface>,
-        gatesAreAvailable: Bool,
-        protectedDataIsAvailable _: Bool
-    ) -> Bool {
-        guard gatesAreAvailable,
-              authenticationAvailability != .unavailable else { return true }
-        return authenticationAvailability == .available && !protectedSurfaces.isEmpty
+    /// Only Open Lava App opts into the global cover. Scoped action gates and
+    /// temporary credential/data failures cannot turn a confirmed OFF into ON.
+    /// An unreadable choice at cold launch stays conservative until classified.
+    public static func requiresBackgroundCover(appUnlockIsSelected: Bool?) -> Bool {
+        appUnlockIsSelected != false
     }
 }

@@ -107,4 +107,26 @@ final class PresentationRevealGateTests: XCTestCase {
         gate.acknowledge("root", token: gate.token, authorized: true)
         XCTAssertTrue(gate.required)
     }
+
+    func testEnablingAppUnlockDuringAnOffHandoffCannotCreateAnActiveSessionCover() {
+        var gate = PresentationRevealGate(appCoverRequired: false)
+        gate.mount("root")
+        XCTAssertTrue(gate.required, "Readiness and app cover ownership are independent")
+        XCTAssertFalse(gate.appCoverRequired)
+        gate.conceal(appCoverRequired: false)
+        let old = gate.token
+        // The user enables Open Lava before this OFF frame's delayed ACK.
+        // Only the next actual boundary may capture that new choice.
+        XCTAssertFalse(gate.appCoverRequired)
+        gate.mount("plus")
+        XCTAssertFalse(gate.appCoverRequired, "Mounting a Plus renderer is not a privacy boundary")
+        gate.conceal(appCoverRequired: true)
+        XCTAssertTrue(gate.appCoverRequired)
+        gate.acknowledge("root", token: old, authorized: true)
+        XCTAssertTrue(gate.appCoverRequired)
+        gate.acknowledge("root", token: gate.token, authorized: true)
+        XCTAssertTrue(gate.appCoverRequired)
+        gate.acknowledge("plus", token: gate.token, authorized: true)
+        XCTAssertFalse(gate.appCoverRequired)
+    }
 }

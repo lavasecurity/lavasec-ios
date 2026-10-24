@@ -26,6 +26,7 @@ public enum SecurityProtectedSurfaceStorage {
     private static let migrationKey = "securitySurfacesMigratedVersion"
     private static let noticeKey = "securitySurfaceDefaultsNoticePending"
     private static let optInMigrationVersion = 2
+    private static let appUnlockCoverChoiceKey = "securityAppUnlockCoverChoice"
     /// Security choices are explicitly opt-in; credential setup never selects a surface.
     public static let defaultSurfaces: Set<SecurityProtectedSurface> = []
 
@@ -98,6 +99,16 @@ public enum SecurityProtectedSurfaceStorage {
         return state.effectiveSurfaces
     }
 
+    /// Reads the saved Open Lava choice, never a synthetic gate from repair.
+    /// Reading consent cannot grant or refresh authorization.
+    public static func appUnlockCoverChoice(projectionURL: URL?, defaults: UserDefaults? = nil) -> Bool? {
+        guard let projectionURL, let state = try? readProjection(at: projectionURL) else {
+            return defaults.flatMap(storedAppUnlockCoverChoice)
+        }
+        if let consent = state.coverConsent { return consent.choice }
+        return legacyAppUnlockCoverChoice(state, defaults: defaults)
+    }
+
     /// Gate used by production app, intent, widget and background entry points.
     public static func isProtected(_ surface: SecurityProtectedSurface, defaults: UserDefaults, projectionURL: URL?) -> Bool {
         loadProtectedSurfaces(from: defaults, projectionURL: projectionURL).contains(surface)
@@ -132,6 +143,7 @@ public enum SecurityProtectedSurfaceStorage {
                 state.migrated = true
             case .absent:
                 state.surfaces = []
+                state.coverConsent = .off
                 state.migrated = true
                 state.noticePending = false
             case .unavailable: break
@@ -143,7 +155,17 @@ public enum SecurityProtectedSurfaceStorage {
     @discardableResult
     public static func saveProtectedSurfaces(_ surfaces: Set<SecurityProtectedSurface>, to defaults: UserDefaults,
                                              projectionURL: URL?) -> Bool {
+        saveProtectedSurfaces(surfaces, to: defaults, projectionURL: projectionURL,
+                              appUnlockCoverChoice: surfaces.contains(.appUnlock))
+    }
+
+    /// The app supplies Open Lava's actual choice separately from conservative
+    /// access gates when editing a different protected action after recovery.
+    @discardableResult
+    public static func saveProtectedSurfaces(_ surfaces: Set<SecurityProtectedSurface>, to defaults: UserDefaults,
+                                             projectionURL: URL?, appUnlockCoverChoice: Bool?) -> Bool {
         updateProjection(in: defaults, at: projectionURL) { state in
+            state.coverConsent = CoverConsent(appUnlockCoverChoice)
             state.surfaces = surfaces
             state.migrated = true
             state.optInMigration = optInMigrationVersion
@@ -162,6 +184,12 @@ public enum SecurityProtectedSurfaceStorage {
         updateProjection(in: defaults, at: projectionURL) { $0.noticePending = false }
     }
 
+    private enum CoverConsent: String, Codable {
+        case off, on, unknown
+        init(_ choice: Bool?) { self = choice.map { $0 ? .on : .off } ?? .unknown }
+        var choice: Bool? { self == .unknown ? nil : self == .on }
+    }
+
     private struct Projection: Codable {
         var version = 1
         var availability: SecurityAuthenticationAvailability
@@ -169,11 +197,15 @@ public enum SecurityProtectedSurfaceStorage {
         var migrated: Bool
         var noticePending: Bool
         var optInMigration: Int?
+        var coverConsent: CoverConsent? = nil // Absent only in a legacy, valid record.
 
         var effectiveSurfaces: Set<SecurityProtectedSurface> {
             // Unreadable credentials are not consent to clear preferences. Temporary
             // fail-closed gates never persist as a user's selected protection choices.
-            availability == .unavailable ? Set(SecurityProtectedSurface.allCases) : surfaces
+            guard availability != .unavailable else { return Set(SecurityProtectedSurface.allCases) }
+            // A known OFF global choice is not an unknown access gate. Keeping
+            // a synthetic appUnlock here would strand entry with no unlock UI.
+            return coverConsent == .off ? surfaces.subtracting([.appUnlock]) : surfaces
         }
     }
 
@@ -219,13 +251,18 @@ public enum SecurityProtectedSurfaceStorage {
                     optInMigration: defaults.integer(forKey: migrationKey) >= optInMigrationVersion ? optInMigrationVersion : nil)
             } catch ProjectionError.malformed where repairsMalformedRecord {
                 // Only app credential reconciliation repairs corruption. Lost choices default
-                // to every gate; confirmed credential absence may then clear them below.
+                // to conservative gates, while independently saved Open Lava consent survives.
+                let coverChoice = storedAppUnlockCoverChoice(defaults)
                 state = Projection(availability: .unavailable,
                                    surfaces: Set(SecurityProtectedSurface.allCases),
-                                   migrated: true, noticePending: false, optInMigration: optInMigrationVersion)
+                                   migrated: true, noticePending: false, optInMigration: optInMigrationVersion,
+                                   coverConsent: CoverConsent(coverChoice))
             }
+            if state.coverConsent == nil { state.coverConsent = CoverConsent(legacyAppUnlockCoverChoice(state, defaults: defaults)) }
             update(&state)
+            if state.coverConsent == .off { state.surfaces.remove(.appUnlock) }
             try JSONEncoder().encode(state).write(to: url, options: SharedStateFileProtection.atomicControlPlaneWritingOptions)
+            if let choice = state.coverConsent?.choice { defaults.set(choice, forKey: appUnlockCoverChoiceKey) }
             defaults.set(state.surfaces.map(\.rawValue).sorted(), forKey: defaultsKeyName)
             defaults.set(state.optInMigration ?? (state.migrated ? 1 : 0), forKey: migrationKey)
             defaults.set(state.availability.rawValue, forKey: availabilityKey)
@@ -236,6 +273,20 @@ public enum SecurityProtectedSurfaceStorage {
 
     private static func storedSurfaces(from defaults: UserDefaults) -> Set<SecurityProtectedSurface> {
         Set((defaults.stringArray(forKey: defaultsKeyName) ?? []).compactMap(SecurityProtectedSurface.init(rawValue:)))
+    }
+
+    private static func legacyAppUnlockCoverChoice(_ state: Projection, defaults: UserDefaults?) -> Bool? {
+        guard state.surfaces.contains(.appUnlock) else { return false }
+        // Older repair writers persisted synthetic appUnlock gates, including
+        // subsets after later action edits. Only independent consent can prove ON.
+        return defaults?.object(forKey: appUnlockCoverChoiceKey) as? Bool
+    }
+
+    private static func storedAppUnlockCoverChoice(_ defaults: UserDefaults) -> Bool? {
+        if let choice = defaults.object(forKey: appUnlockCoverChoiceKey) as? Bool { return choice }
+        // A legacy OFF set cannot have come from the old all-gates repair.
+        if let saved = defaults.stringArray(forKey: defaultsKeyName), !saved.contains(SecurityProtectedSurface.appUnlock.rawValue) { return false }
+        return nil
     }
 }
 

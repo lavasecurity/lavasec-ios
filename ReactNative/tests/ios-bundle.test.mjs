@@ -20,6 +20,35 @@ function mapFor(source, sourcePath = 'entry.js') {
   return {version: 3, sources: [sourcePath], sourcesContent: [source], names: [], mappings: ''};
 }
 
+test('Metro preserves PNG dimensions for both buffer and file asset paths', async t => {
+  const {getAssetData, getAssetSize} = require('metro/private/Assets');
+  const root = fixture(t);
+  const imagePath = join(root, 'pixel.png');
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64');
+  writeFileSync(imagePath, png);
+  assert.deepEqual(getAssetSize('png', png, imagePath), {width: 1, height: 1});
+  const asset = await getAssetData(imagePath, 'pixel.png', [], 'ios', '/assets');
+  assert.equal(asset.width, 1);
+  assert.equal(asset.height, 1);
+  assert.deepEqual(asset.files, [imagePath]);
+});
+
+test('Metro rejects a zero-length ICNS entry disguised as a PNG without hanging', {timeout: 10000}, () => {
+  // Run the parser in a bounded child: the vulnerable parser never advances
+  // past this entry, so it must not be allowed to hang the test runner.
+  const result = spawnSync(process.execPath, ['-e', `
+    const assert = require('node:assert/strict');
+    const {getAssetSize} = require(${JSON.stringify(require.resolve('metro/private/Assets'))});
+    const content = Buffer.alloc(16);
+    content.write('icns');
+    content.writeUInt32BE(content.length, 4);
+    content.write('icp4', 8);
+    assert.throws(() => getAssetSize('png', content, 'malformed.png'));
+  `], {encoding: 'utf8', timeout: 3000});
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stderr);
+});
+
 test('real Metro keeps review and gallery source contents in private sidecars', {timeout: 60000}, async t => {
   const root = fixture(t);
   const source = `${sourceOnly}globalThis.lavaBundleFixture = 'ready';\n`;

@@ -139,7 +139,7 @@ function LavaRuntime({activityExample,reviewGallery,fullApp,onboardingPreview,in
     {initial:true}) : undefined);
   return <LavaPresentation presentationID={presentationID} initialPresentation={initialPresentation} app={app} onboardingPreview={onboardingPreview} fullApp={fullApp} activityExample={activityExample} reviewGallery={reviewGallery} plusContext={plusContext} foregroundContext={foregroundContext} preparationContext={preparationContext}/>;
 }
-const emptyLive = {snapshot: null, displaySnapshot:null, error: null,privacyCoverRequired:undefined};
+const emptyLive = {snapshot: null, displaySnapshot:null, error: null,privacyCoverRequired:undefined,appPrivacyCoverRequired:undefined};
 const emptyHydration={epoch:0,required:false};
 const noSubscribe = () => () => {};
 function LavaPresentation({app, onboardingPreview, fullApp, activityExample, reviewGallery,plusContext,foregroundContext,preparationContext,presentationID,initialPresentation}: {initialPresentation?:Presentation;presentationID?:string;app?: AppStore; onboardingPreview:boolean; fullApp: boolean; activityExample: boolean; reviewGallery: boolean;plusContext?:PlusReason;foregroundContext?:string;preparationContext?:string}) {
@@ -272,12 +272,12 @@ function LavaPresentation({app, onboardingPreview, fullApp, activityExample, rev
   const background = lavaTokens.colors.groupedBackground[dark ? 'dark' : 'light'];
   const rgb = (color: readonly number[]) => `rgb(${color.map(value => Math.round(value * 255)).join(',')})`;
   configurePresentation(presentation.current);
-  // Missing policy conceals by default. Confirmed all-off keeps its already
-  // painted frame through resume refresh; revoked authority still prevents input.
-  // Loading/readiness alone never selects a cover. Native's explicit all-off
-  // policy keeps the ordinary frame; protected or unknown policy conceals.
-  const unavailable = <RuntimeUnavailable concealed={appState.privacyCoverRequired!==false} background={rgb(background)}
-    error={appState.error ?? (!app ? 'The full Lava runtime is missing from this installation.' : null)} retry={() => void app?.refresh()} />;
+  // Only native launch/background ownership can select the branded app cover.
+  // Missing fields still conceal private content and revoke input, while an
+  // active read/navigation pause uses its ordinary scaffold or error surface.
+  const appCover=appState.appPrivacyCoverRequired===true;
+  const unavailable = <RuntimeUnavailable concealed={appCover} background={rgb(background)}
+    error={appState.error ?? (!app ? 'The full Lava runtime is missing from this installation.' : null)} retry={() => void app?.retryPresentation()} />;
   const onboardingActive=live?.onboardingSetup?.mock===onboardingPreview;
   return <ReviewContext.Provider value={{app, live, onboardingPreview, appearance, look, setLook, draft, setDraft, savedDraft, setSavedDraft, session, setSession, activityExample, reviewGallery}}>
     <LavaAppearanceContext.Provider value={dark?'dark':'light'}><PresentationContext.Provider value={presentation.current}><SafeAreaProvider><View style={{flex:1}}><View testID="lava-render-frame" collapsable={false} onLayout={event=>{if(event.nativeEvent.layout.width>0&&event.nativeEvent.layout.height>0)setNativeLayoutReady(true);}} style={{flex:1}} pointerEvents={presentationPaused?(retainedNativeCredentialDisplay?'box-only':'none'):'auto'} accessibilityElementsHidden={fullApp&&(!live||presentationPaused)} importantForAccessibility={fullApp&&(!live||presentationPaused)?'no-hide-descendants':'auto'}><OnboardingSurface enabled={fullApp&&!preparationContext&&!foregroundContext&&!plusContext}><NavigationContainer ref={navigation} onReady={()=>{setNavigationReady(true);recordNavigationTurn();}} onStateChange={()=>{acceptNativeNavigation();recordNavigationTurn();navigateNativeRequest();}} theme={{...base, colors: {...base.colors, primary: rgb(green), background: rgb(background), card: rgb(background)}}}>
@@ -312,7 +312,7 @@ function LavaPresentation({app, onboardingPreview, fullApp, activityExample, rev
               .finally(()=>{settingsEntryPending.current=false;});
           }})} />
       </Tabs.Navigator>}
-    </NavigationContainer></OnboardingSurface></View>{fullApp&&(!live||hydration.required&&appState.privacyCoverRequired!==false)&&<View style={{position:'absolute',top:0,bottom:0,left:0,right:0}}>{unavailable}</View>}</View></SafeAreaProvider></PresentationContext.Provider></LavaAppearanceContext.Provider>
+    </NavigationContainer></OnboardingSurface></View>{fullApp&&(!live||hydration.required&&appCover)&&<View style={{position:'absolute',top:0,bottom:0,left:0,right:0}}>{unavailable}</View>}</View></SafeAreaProvider></PresentationContext.Provider></LavaAppearanceContext.Provider>
   </ReviewContext.Provider>;
 }
 

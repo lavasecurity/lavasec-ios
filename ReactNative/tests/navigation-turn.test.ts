@@ -78,3 +78,17 @@ test('every domain-check link owns a fresh native visit, including an already-fo
   expect(nativeRedirectMatches(committed,'GuardTab','DomainCheck',8)).toBe(false);
   expect(nativeRedirectAction(before,'GuardTab','DomainCheck',8)).toMatchObject({payload:{params:{state:{routes:[{name:'Guard'},{name:'DomainCheck',key:'domain-check-link-8'}]}}}});
 });
+
+// Plus is a detour owned by the requesting page, including a swipe cancellation.
+// Popping it must not revoke the still-mounted parent or rebuild its scroll body.
+test('returning from Plus keeps the VPN visit grant; leaving that visit still retires it',()=>{
+  const turn=new NavigationTurn();
+  expect(turn.advance(state('SettingsTab',['Settings','VPNChaining']))).toBe(false);
+  expect(turn.advance(state('SettingsTab',['Settings','VPNChaining','Upgrade']))).toBe(false);
+  expect(turn.advance(state('SettingsTab',['Settings','VPNChaining']))).toBe(false);
+  expect(turn.advance(state('SettingsTab',['Settings','VPNChaining','Upgrade']))).toBe(false);
+  expect(turn.advance(state('SettingsTab',['Settings','VPNChaining','Upgrade']))).toBe(false);
+  expect(turn.advance(state('SettingsTab',['Settings','VPNChaining']))).toBe(false);
+  expect(turn.advance(state('SettingsTab',['Settings']))).toBe(true);
+  expect(turn.advance(state('GuardTab',['Guard']))).toBe(true);
+});

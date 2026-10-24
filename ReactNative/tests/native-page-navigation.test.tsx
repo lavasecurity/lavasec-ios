@@ -64,7 +64,7 @@ test('the real retained VPN parent keeps the same native draft through privacy r
   expect(command.mock.calls.map(([action])=>action.type)).toEqual(['vpn.begin']);
   view.rerender(content(undefined));await act(async()=>{});
   expect(screen.queryByRole('button',{name:'Add configuration'})).toBeNull();
-  expect(screen.getByTestId('lava-route-privacy-cover')).toBeTruthy();
+  expect(screen.queryByTestId('lava-route-privacy-cover')).toBeNull(); // Admission loss alone cannot create an app cover.
   expect(command.mock.calls.map(([action])=>action.type)).toEqual(['vpn.begin']);
   view.rerender(content({...live,security:{...live.security,readRevision:2}}));await act(async()=>{});
   fireEvent.press(screen.getByRole('button',{name:'Add configuration'}));await act(async()=>{});
