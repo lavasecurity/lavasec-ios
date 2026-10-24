@@ -78,7 +78,7 @@ jobs:
           node-version: '24'
           cache: npm
           cache-dependency-path: ReactNative/package-lock.json
-      - uses: ruby/setup-ruby@e81a8fa391b11a595c1b7ed84177cc0fe02faf83 # v1.328.0
+      - uses: ruby/setup-ruby@b1da4809b005e0178fe08a1d57317bffc00b7b4c # v1.332.0
         with:
           ruby-version: '3.3.12'
           bundler: '4.0.16'
