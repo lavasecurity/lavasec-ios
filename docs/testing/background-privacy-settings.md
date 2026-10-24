@@ -1,148 +1,123 @@
-# Background privacy follows Security choices
+# App protection follows the foreground session
 
-An inactive app with confirmed security OFF keeps its last accepted screen visible
-in the app switcher and through phone sleep/wake. Creating a passcode or enabling biometrics alone does not opt
-into background concealment: every protected action remains an explicit choice.
-Selecting any protected action enables concealment of the entire inactive window,
-including when App Unlock itself is OFF. This prevents a snapshot from exposing
-an already authorized Activity or Settings page after its page grant is revoked.
+**Security → Open Lava** alone opts into the app protection cover. A passcode,
+biometrics, or another protected action does not opt into a global lock. Scoped
+access gates remain enforced independently, including after backgrounding.
 
-Unreadable credentials or unavailable gate publication keep the window covered.
-Protected-data loss revokes read and action access, without changing a confirmed
-off display choice. The pre-lock callback conceals selected or unknown security
-before UIKit changes its bit. These temporary states do not change saved choices.
+The saved display choice is separate from conservative access gates. An unreadable
+credential may deny every read without turning a confirmed Open Lava OFF into ON.
+Keep the last classified choice if the projection temporarily becomes unreadable.
+A cold launch with no readable choice stays conservative until native can classify
+it; confirmed credential absence means OFF. The atomic record keeps explicit ON,
+OFF and unknown cover consent separately from repaired access gates. A durable
+last-known choice survives record corruption; a legacy OFF set can recover OFF.
+Repair never materializes unknown cover consent as an explicit ON, including after
+an unrelated protected-action edit. Legacy records containing an appUnlock gate
+remain unknown unless an independent saved choice verifies consent: an older repair
+could have created that gate, even if a later action edit changed the set. Other
+unknown gates still fail closed. Known OFF also retires a synthetic global
+app-unlock gate, so normal entry cannot be stranded without an unlock prompt;
+the remaining scoped gates stay protected.
 
-The display choice grants no background read access. Native queries still require
-an active app, protected data, and current authorization. React Native revokes its
-authoritative snapshot, reusable query caches and read epoch on inactivity. The
-separate display frame can retain only an already accepted snapshot carrying
-native-confirmed `backgroundPrivacyCoverRequired: false`; no inactive or blocked
-reply can replace it. Returning to the app retains that same display-only frame
-until a fresh authorized foreground snapshot arrives. Waiting for the refresh is
-not a reason to show a security cover. Reads, actions and accessibility remain
-revoked during this wait. Action rows retain their accepted colors while input is
-locked; the domain checker renews its proof before re-enabling actions. Every
-query-backed page can retain its already painted values in this same all-off frame;
-they are not reusable cache entries
-or authority to read again. After foreground authorization returns, the same
-page retains these values until its fresh query completes. This avoids emptying
-populated charts and numbers into loading placeholders on an ordinary resume.
-A missing flag, a concealment marker, or disconnect
-retires the frame immediately, and a later blocked all-off marker cannot revive
-it. Cover visibility follows the latest native security choice independently:
-an off marker can remove a cover but cannot restore discarded private fields.
-The existing native navigation stack remains mounted.
+Security read/publication failures publish a public recovery message even when
+Open Lava is OFF. Show the ordinary runtime error and Retry, without enabling a
+cover. Retry reclassifies native security before requesting a fresh snapshot;
+it admits no app mutation or private result, and retires earlier pending reads.
 
-All-off cold launches mount React with a native-authorized projection rather
-than an inactive marker. That initial handoff may paint before JS AppState is
-initialized; it grants display only until a fresh active snapshot restores input.
-There is no startup spinner or branded loading screen. Protected or unavailable
-security uses the branded privacy cover, including during bootstrap. Disabling
-the last protected choice also retires an outstanding hydration cover.
+## Lifecycle ownership
 
-Display retention uses the exact query and its data ownership/settings scope,
-including opaque account ownership, log choices and native destructive-source
-identity. Changing the Activity period, query, account, clearing logs or replacing
-filter-library content clears old values rather than relabeling them. Routine
-read/grant revisions, account-status messages and unrelated native mutations do
-not change the identity of the already painted all-off frame. An ordinary mounted-route blur pauses reads
-without discarding a same-scope all-off display; unmount still disposes it.
+- Cold launch, actual background, and protected-data loss are app privacy boundaries.
+  With Open Lava ON, conceal before the system snapshot, revoke the foreground
+  grant, and require one app unlock on return. Restore only the same suspended
+  visit after successful authentication. Cancellation leaves one usable Retry.
+- Transient inactivity is a pause in the current session. System sheets, StoreKit,
+  biometric prompts and ordinary navigation cannot start a branded app cover or
+  app unlock. Keep the accepted same-owner page inert through that pause so native
+  rows do not disappear and clamp the retained scroll position. A changed native
+  boundary token or explicit revocation retires this frame immediately, even before
+  JS receives its background event. UIKit may protect the switcher preview while inactive; activation
+  removes that shield without a new unlock when no background occurred.
+- Inactivity always revokes reads, pending query epochs, input and accessibility.
+  A display frame grants no read, cache or action authority. With Open Lava OFF,
+  an already accepted same-owner frame can remain inert through background/resume
+  while a fresh authorized projection is requested. A blocked reply cannot create
+  a frame or revive discarded fields.
+- Entering Security retains its separate credential authentication. Other selected
+  action gates retain their scoped authentication. Neither owns an app-wide lock.
+- A Plus detour belongs to its mounted requesting visit. Returning by Back, a
+  completed swipe, or a cancelled swipe retains the parent's grant and native
+  scroll view. Leaving the requesting visit or changing tabs still retires its turn.
 
-While focused, active and currently authorized, an explicitly scoped catalog or
-domain list keeps its existing rows as selection totals, search or pagination
-updates. The read remains pending until the replacement result or error settles.
-This foreground continuity does not widen the inactive display scope: leaving
-the route or app before the changed query succeeds discards the older rows, and
-a failed changed query cannot promote those rows into its background frame.
-Catalog errors leave the choices editable, show the error in the footer and keep
-Save/Upgrade blocked until the current selection has successfully refreshed totals.
-History and network result-count changes preserve expanded pages; an accepted
-empty result resets pagination for the next populated log.
+`SecurityController` owns the app lock. `PresentationRevealGate` is armed at launch
+and real privacy boundaries, never at `willResignActive`. Its renderer readiness
+handoff finishes an existing boundary; mounting a renderer cannot start another.
+Capture the Open Lava choice at that boundary. Enabling it during a pending OFF
+handoff applies on the next background, even if the previous frame's ACK is late.
+Native publishes two separate fields:
 
-## Shared procedure
-
-`AppStore`, `LavaPresentation`/`LiveRenderBoundary`, `useAppQuery` and the native
-`SecurityController` policy own this procedure for every page. Screens must not
-invent a separate background cache or make inactivity alone mean "locked".
-
-1. Native policy classifies the cover choice before any private snapshot fields
-   are composed. Only an explicit, healthy all-off result allows continuity.
-2. Inactivity revokes readers and pending epochs. Keep the last accepted display
-   under all-off; otherwise conceal and dispose it. Inactive events can retire a
-   frame, but cannot replace or recreate it with fresh fields.
-3. Resume requests an authorized native snapshot while the prior all-off frame
-   stays inert. Restore reads and interaction only after that snapshot arrives.
-   A delayed blocked all-off marker must not overwrite an already restored
-   authoritative snapshot from the same revision.
-4. Query hooks refresh after authority returns and keep their same-scope painted
-   values until replacement completes. Exact query/data-scope changes still
-   clear them immediately. No retained display is an input to a cache lookup.
-   If a real concealment boundary disposed the previous page, keep the cover
-   while the newly authorized visible queries prepare their first result or
-   explicit error. Reveal the completed page together. Cold first loads and a
-   deliberately changed period/query retain their normal pending presentation.
-   Automatic owner preparation may run under the authorized cover; user actions,
-   native toolbar callbacks and back gestures wait for presentation readiness.
-   Each UIKit-presented route has its own sibling cover; a root-only overlay
-   cannot conceal a native sheet. Native footer pixels follow the same cover
-   decision independently, while direct ScrollView geometry stays intact.
-   Disposing a body retires its native header/footer renderers and callbacks;
-   restoring authority cannot reactivate a former form or Share payload.
-5. Screens stop side effects on inactivity: playback, speech, camera capture,
-   contact tracking and pending presentation attempts. They retain ordinary
-   page/draft/selection content under all-off. A selected/unknown security choice
-   remains an immediate concealment boundary. Protected-data loss always revokes
-   reads and cache tickets; only the confirmed all-off display can survive it.
-
-This applies to Guard and its summaries, Activity and domain pages, diagnostics,
-Settings, account/backup, filter editing/sharing, DNS/VPN editors, Explore and
-Sudoku through their shared owners. Saved credentials are never loaded into
-visible editor drafts; retaining a user-entered draft does not change that rule.
-
-| Interface family | Shared owner and audit result |
+| Field | Meaning |
 | --- | --- |
-| Guard, summaries, Settings, account/backup and filter metadata | `AppStore` + `LavaPresentation` + `LiveRenderBoundary` keep the native navigator and existing all-off body mounted. Missing read authority alone must not choose the cover. |
-| Activity, Top Domains/History, Nerd Stats, Network Activity, catalog and sharing | `useAppQuery` + shared display scope keep only already painted same-scope values; polling pauses while inactive or blurred. Query/privacy scope changes and late replies remain fenced. |
-| Covered resume of a query page | `PresentationHydration` holds the cover while focused scoped reads settle and the new body completes layout. Offscreen reads cannot indefinitely hold the cover. |
-| Native sheets, headers and footers | Route-local cover and scaffold pixel/input/accessibility fences cover UIKit presentation layers; mounted-owner callbacks and renderer cleanup retire erased private bodies. |
-| Share reveal and copied state | The shared native all-off policy preserves the current code/QR state; a new code, lost frame or concealment boundary retires it. |
-| VPN chaining page | Ordinary settings route: `Screen` is the direct route root and `LiveRenderBoundary` alone chooses concealment. The page owns no cover or lifecycle wrapper; its native admission gates input and withholds rows without a current Settings grant. |
-| Native VPN editor | `SecurityPrivacyPolicy` preserves an explicitly revealed user-entered all-off draft through sleep. Imported/unrevealed drafts and selected/unknown security remain covered. Native input waits for protected-data recovery. |
-| Explore | Inactivity pauses clocks and speech without erasing the displayed lesson step. Route/routing changes and unmount retain their reset/cancellation ownership. |
-| Activity date picker, Sudoku, mascot and held chart/paging gestures | Cancel pending presentation or contact tracking and release scrolling. Keep accepted range/game/service content through the shared all-off frame. |
-| Embedded native pages and system-owned import/export/camera flows | Native authorization and interaction gates retain their current owner. Pause capture and retire native presentations where required; do not replace the underlying all-off page with empty data. |
+| `backgroundPrivacyCoverRequired` | Saved policy: cover actual background/launch when Open Lava is ON. Allows only accepted display continuity when OFF. |
+| `appPrivacyCoverRequired` | A native launch/background reveal handoff is currently pending. This is the only permission to select the branded app cover. |
+
+`LavaPresentation` and `LiveRenderBoundary` may hold that native-owned cover while
+focused layout and authorized reads prepare. Hydration, missing fields, an error,
+a policy edit or a navigation authorization turn cannot independently select it.
+Without current authority, conceal private fields and pause interaction using the
+existing scaffold/error surface. Missing metadata is never read authority.
+After the renderer acknowledges its current reveal token, native republishes the
+completed handoff so a later ordinary refresh cannot reuse an old cover flag.
+
+## Retained presentation
+
+Keep the native navigator and each mounted route's ScrollView identity. A cover
+is a sibling, never a wrapper inserted around the native scroll root; otherwise
+UIKit can lose the scroll view driving a collapsed large title. Route admission
+may withhold private rows and disable actions but must not push the route again.
+
+`AppStore`, `useAppQuery` and native authorization own read revocation. Reusable
+private query data remains native-owned; accepted JS display frames are not cache
+entries. Account/owner replacement, destructive clears, policy and exact data-scope
+changes retire incompatible values. Routine grant/read revisions do not turn an
+accepted Open Lava OFF frame into empty charts or loading placeholders. Native
+confidential inputs may retain only explicitly revealed, same-visit user-entered
+drafts; saved credentials are never copied into visible editor drafts.
+
+During a covered resume, wait for the focused authorized viewport and its reads
+or explicit errors before revealing. Offscreen or obsolete reads cannot hold the
+cover indefinitely. Native sheets need the same sibling cover above their retained
+body; the native security window owns authentication above all app presentation.
+All callbacks, toolbar items, side effects and gestures retain their current-owner,
+foreground, protected-data and authorization checks.
 
 ## Qualification
 
-Use the supported full-app RN workspace. Leave VPN/protection controls unchanged;
-these cases concern the Security settings, rather than filtering enablement.
+Use the supported full-app RN workspace and isolated simulator. Leave actual VPN
+and protection enablement unchanged.
 
-1. With Passcode and all six protected actions OFF, open Security, scroll the page,
-   then open the app switcher and return. The preview must show the page without
-   blur or the Lava Security cover. Return must keep the page visible throughout
-   the foreground refresh, without a transient cover. Repeat using Home and
-   Control Center, including rapid repeated transitions and a delayed refresh.
-   Repeat from a populated Activity chart and Nerd Stats: the current numbers
-   must remain visible in the preview, during resume and while their fresh query
-   is pending. There must be no intermediate dashes or loading placeholders.
-2. Configure a passcode while leaving all protected actions OFF. Repeat case 1.
-3. Enable each protected action in turn, including an action with App Unlock OFF.
-   The inactive preview must conceal the page. Return, complete any required
-   authentication, and check that the saved choice survives.
-4. Disable the last selected action, then immediately open the app switcher.
-   Concealment must stop. Repeat after removing the passcode and after relaunch.
-5. With protection selected, open an authorized Activity page or native sheet.
-   Background during an authentication prompt; real backgrounding must revoke its
-   grant and conceal the snapshot. Returning must require the appropriate current
-   authorization. Repeat a cancelled and successful biometric prompt.
-6. With all security options off, lock the phone with a populated page or an
-   explicitly revealed user-entered VPN draft. On wake, the accepted display must
-   remain visible without a cover or empty-number reload; input waits for protected
-   data and fresh native authority. Repeat with a protected action selected: the
-   pre-lock frame must conceal and the required authorization must return before
-   private content. No case may clear or auto-enable a saved security choice.
+1. With Open Lava OFF, repeat from populated Guard, Activity, Nerd Stats, Security
+   and a revealed user-entered VPN draft: Home/return, switcher, Control Center,
+   lock/wake, delayed reads and relaunch. No app protection cover or app unlock.
+   Repeat with a passcode and each other protected action selected individually.
+   A selected scoped action must still require its own authorization.
+2. On the free plan, open VPN chaining and toggle “I have a WireGuard configuration”.
+   Return from Plus repeatedly using Back and interactive swipes. No cover, duplicate
+   push, new app unlock, erased parent content or change in scroll/title geometry.
+   Repeat with Open Lava ON and with Change settings protection ON.
+3. With Open Lava ON, confirm launch and real background require one app unlock.
+   Repeat successful/cancelled biometrics and passcode, explicit Retry, a retained
+   Security visit, Activity period selection and a native sheet. No extra prompt
+   after a transient inactive/active event; real background during a prompt still
+   revokes the old ticket.
+4. With Open Lava ON and delayed queries, complete the one resume authentication.
+   Cover until the focused query and layout settle, then reveal current content
+   together. Query failure reveals its error and permits retry.
+5. Toggle Open Lava OFF/ON, remove the passcode, and simulate credential/protected-data
+   unavailability. Preserve saved choices; deny unavailable reads; never promote a
+   scoped gate into app-wide cover consent.
 
-Executable package tests cover the opt-in/availability matrix and platform wiring.
-RN tests cover all-off display retention, concealment/default policy, late replies,
-read revocation and navigation identity. Physical-device qualification is separate
-from those tests; no post-change phone capture is claimed by this document.
+Package tests cover saved choice vs access fallback, ticket retirement and scoped
+resume. RN tests cover explicit lifecycle cover ownership, transient pauses, late
+replies, display retention, navigation turns and stable route viewport identity.
+Simulator journeys cover native authentication, Plus return and title geometry.
+Physical-device qualification is separate; this document does not claim a phone run.

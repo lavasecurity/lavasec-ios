@@ -51,10 +51,12 @@ public struct PresentationRevealGate: Sendable {
     /// Changes at every privacy boundary so a retired frame cannot release a later cover.
     public private(set) var token = UUID().uuidString
     public private(set) var required = true
+    private var coverWasSelectedAtBoundary: Bool
+    public var appCoverRequired: Bool { required && coverWasSelectedAtBoundary }
     private var mounted = Set<String>()
     private var ready = Set<String>()
 
-    public init() {}
+    public init(appCoverRequired: Bool = true) { coverWasSelectedAtBoundary = appCoverRequired }
 
     public mutating func mount(_ id: String) { mounted.insert(id) }
 
@@ -64,10 +66,11 @@ public struct PresentationRevealGate: Sendable {
         settle()
     }
 
-    public mutating func conceal() {
+    public mutating func conceal(appCoverRequired: Bool = true) {
         token = UUID().uuidString
         ready.removeAll()
         required = true
+        coverWasSelectedAtBoundary = appCoverRequired
     }
 
     /// The caller must independently check current native foreground authorization.

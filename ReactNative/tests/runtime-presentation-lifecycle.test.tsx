@@ -153,7 +153,7 @@ const deferred=<T,>()=>{
   const promise=new Promise<T>((yes,no)=>{resolve=yes;reject=no;});
   return {promise,resolve,reject};
 };
-const snapshot=(revision:number,backgroundPrivacyCoverRequired?:boolean)=>JSON.stringify({schema:1,fullApp:true,revision,presentationToken:'frame-current',backgroundPrivacyCoverRequired,presentation:{locale:'en',textScales:null},
+const snapshot=(revision:number,backgroundPrivacyCoverRequired:boolean=true)=>JSON.stringify({schema:1,fullApp:true,revision,presentationToken:'frame-current',backgroundPrivacyCoverRequired,appPrivacyCoverRequired:backgroundPrivacyCoverRequired!==false,presentation:{locale:'en',textScales:null},
   session:{...initialSession(),filterID:'balanced',activeFilterID:'balanced'},look:'original',draft:{blocked:[],allowed:[]},savedDraft:{blocked:[],allowed:[]},qaTools:false});
 const foregroundSnapshot=(revision:number,options:{policy?:boolean;ownerID?:string;kind?:string;concealed?:boolean;omitEditor?:boolean}={})=>{
   const value=JSON.parse(snapshot(revision,'policy' in options?options.policy:false));
@@ -224,7 +224,7 @@ test('privacy content has a zero horizontal fallback without a safe-area provide
 });
 
 test.each([false,true])('runtime failure uses one horizontal content band without changing its privacy choice (%s)',async concealed=>{
-  const initial=JSON.stringify({schema:1,fullApp:true,revision:1,presentationBlocked:true,backgroundPrivacyCoverRequired:concealed});
+  const initial=JSON.stringify({schema:1,fullApp:true,revision:1,presentationBlocked:true,backgroundPrivacyCoverRequired:concealed,appPrivacyCoverRequired:concealed});
   const content=(left:number,right:number)=><SafeAreaInsetsContext.Provider value={{top:20,bottom:21,left,right}}><LavaUIReview fullApp initialSnapshot={initial}/></SafeAreaInsetsContext.Provider>;
   render(content(59,44));
   expect(screen.getByTestId('runtime-safe-area-provider')).toBeTruthy();
@@ -243,6 +243,7 @@ test.each([false,true])('runtime failure uses one horizontal content band withou
   expect(screen.getByLabelText('Retry runtime')).toBe(action);
   expect(StyleSheet.flatten(band.props.style)).toMatchObject({paddingLeft:0,paddingRight:0});
   fireEvent.press(action);
+  await act(async()=>{});
   expect(reads).toHaveLength(2);
   await act(async()=>reads[1]!.resolve(snapshot(2,false)));
   expect(screen.queryByText('Retryable runtime failure.')).toBeNull();
@@ -386,7 +387,7 @@ test('a native locked projection uses the same privacy cover and retains a retry
   await act(async()=>{});
   const navigator=screen.getByTestId('native-navigation-container');
   fireEvent.press(screen.getByLabelText('Keep a private draft'));
-  emitSnapshot(JSON.stringify({schema:1,fullApp:true,revision:2,presentationBlocked:true}));
+  emitSnapshot(JSON.stringify({schema:1,fullApp:true,revision:2,presentationBlocked:true,appPrivacyCoverRequired:true}));
   expectConcealed();
   await act(async()=>reads[0]!.resolve(snapshot(1)));
   expectConcealed();
@@ -399,6 +400,7 @@ test('a native locked projection uses the same privacy cover and retains a retry
   expectConcealed();
   expect(screen.getByText('Temporary runtime read failure.')).toBeTruthy();
   fireEvent.press(screen.getByLabelText('Retry runtime'));
+  await act(async()=>{});
   await act(async()=>reads.at(-1)!.resolve(snapshot(4)));
   expect(screen.getByText('Native private value 4')).toBeTruthy();
   expect(screen.queryByText('Temporary runtime read failure.')).toBeNull();
@@ -414,6 +416,7 @@ test('an unknown-policy cold launch conceals without a spinner and can retry a f
   expectStarting();
   expect(screen.getByText('Runtime is temporarily unavailable.')).toBeTruthy();
   fireEvent.press(screen.getByLabelText('Retry runtime'));
+  await act(async()=>{});
   await act(async()=>reads.at(-1)!.resolve(snapshot(1)));
   expect(screen.queryByLabelText('Loading Lava')).toBeNull();
   expect(screen.getByText('Native private value 1')).toBeTruthy();
@@ -503,11 +506,11 @@ test('a hard native boundary during owned authentication conceals Security immed
   render(<LavaUIReview fullApp initialSnapshot={JSON.stringify(initial)}/>);await act(async()=>{});
   emitState('inactive');expect(screen.queryByTestId('lava-privacy-cover')).toBeNull();
   emitSnapshot(JSON.stringify({schema:1,fullApp:true,revision:2,presentationBlocked:true,presentationRevoked:true,
-    authenticationInProgress:true,backgroundPrivacyCoverRequired:true,security:{ownerRevision:'security-owner'}}));
+    authenticationInProgress:true,backgroundPrivacyCoverRequired:true,appPrivacyCoverRequired:true,security:{ownerRevision:'security-owner'}}));
   expect(screen.getByTestId('lava-privacy-cover')).toBeTruthy();
   expect(screen.queryByText('Native private value 1',{includeHiddenElements:true})).toBeNull();
   emitSnapshot(JSON.stringify({schema:1,fullApp:true,revision:3,presentationBlocked:true,authenticationInProgress:true,
-    backgroundPrivacyCoverRequired:true,security:{ownerRevision:'security-owner'}}));
+    backgroundPrivacyCoverRequired:true,appPrivacyCoverRequired:true,security:{ownerRevision:'security-owner'}}));
   expect(screen.getByTestId('lava-privacy-cover')).toBeTruthy();
   expect(screen.queryByText('Native private value 1',{includeHiddenElements:true})).toBeNull();
 });
@@ -521,9 +524,37 @@ test('a failed owned-authentication refresh replaces the inert frame with a visi
   expect(screen.getByText('Refresh failed.')).toBeTruthy();expect(screen.getByLabelText('Retry runtime')).toBeTruthy();
   expect(screen.queryByText('Native private value 1',{includeHiddenElements:true})).toBeNull();
   fireEvent.press(screen.getByLabelText('Retry runtime'));
+  await act(async()=>{});
   await act(async()=>reads.at(-1)!.resolve(JSON.stringify({...initial,revision:2,authenticationInProgress:false})));
   expect(screen.getByText('Native private value 2')).toBeTruthy();
   expect(screen.queryByTestId('lava-privacy-cover')).toBeNull();expect(screen.queryByText('Refresh failed.')).toBeNull();
+});
+
+test.each(['cold','warm'])('an OFF security failure exposes Retry without a cover and recovers current reads (%s)',async phase=>{
+  const failure={schema:1,fullApp:true,revision:2,presentationToken:'failed-security',presentationBlocked:true,
+    presentationRevoked:true,backgroundPrivacyCoverRequired:false,appPrivacyCoverRequired:false,
+    presentationError:'Could not save security settings. Reopen Lava and try again.',
+    security:{ownerRevision:'security-owner',unavailable:true}};
+  const initial={...JSON.parse(snapshot(1,false)),security:{ownerRevision:'security-owner',unavailable:false}};
+  render(<LavaUIReview fullApp initialSnapshot={JSON.stringify(phase==='cold'?failure:initial)}/>);
+  await act(async()=>{});
+  if(phase==='warm')emitSnapshot(JSON.stringify(failure));
+  expect(screen.getByText(failure.presentationError)).toBeTruthy();
+  expect(screen.getByLabelText('Retry runtime')).toBeTruthy();
+  expect(screen.queryByTestId('lava-privacy-cover')).toBeNull();
+  expect(screen.queryByText('Native private value 1',{includeHiddenElements:true})).toBeNull();
+  const stale=reads[0]!;
+  mockCommand.mockResolvedValue(JSON.stringify({result:null}));
+  fireEvent.press(screen.getByLabelText('Retry runtime'));
+  await act(async()=>{});
+  expect(mockCommand.mock.calls.map(([request])=>JSON.parse(request).type)).toContain('presentation.retry');
+  expect(reads.length).toBeGreaterThan(1);
+  await act(async()=>stale.resolve(snapshot(99,false)));
+  expect(screen.queryByText('Native private value 99',{includeHiddenElements:true})).toBeNull();
+  await act(async()=>reads.at(-1)!.resolve(JSON.stringify({...initial,revision:3})));
+  expect(screen.getByText('Native private value 3')).toBeTruthy();
+  expect(screen.queryByText(failure.presentationError)).toBeNull();
+  expect(screen.queryByTestId('lava-privacy-cover')).toBeNull();
 });
 
 test('withheld private fields preserve only accepted locale and text-scale metadata until fresh presentation returns',async()=>{
@@ -743,7 +774,7 @@ test.each([true,undefined])('current %p privacy policy immediately revokes the a
   const edit=screen.getByTestId('foreground-retained-body').props.onRequestNativeEdit as ()=>Promise<unknown>;
   emitState('inactive');
   expect(screen.getByTestId('lava-render-frame',{includeHiddenElements:true}).props.pointerEvents).toBe('box-only');
-  emitSnapshot(JSON.stringify({schema:1,fullApp:true,revision:2,presentationBlocked:true,backgroundPrivacyCoverRequired:policy}));
+  emitSnapshot(JSON.stringify({schema:1,fullApp:true,revision:2,presentationBlocked:true,backgroundPrivacyCoverRequired:policy,appPrivacyCoverRequired:true}));
   expect(screen.getByTestId('lava-render-frame',{includeHiddenElements:true}).props.pointerEvents).toBe('none');
   expect(screen.getByTestId('lava-privacy-cover')).toBeTruthy();
   expect(screen.getByTestId('foreground-retained-body',{includeHiddenElements:true}).props.ownerID).toBeUndefined();
@@ -769,7 +800,7 @@ test.each([true,undefined])('an active privacy boundary conceals the retained al
   await act(async()=>{});
   emitState('inactive');emitState('active');
   expect(screen.queryByTestId('lava-privacy-cover')).toBeNull();
-  emitSnapshot(JSON.stringify({schema:1,fullApp:true,revision:2,presentationBlocked:true,backgroundPrivacyCoverRequired:policy}));
+  emitSnapshot(JSON.stringify({schema:1,fullApp:true,revision:2,presentationBlocked:true,backgroundPrivacyCoverRequired:policy,appPrivacyCoverRequired:true}));
   expectConcealed();
   emitSnapshot(JSON.stringify({schema:1,fullApp:true,revision:3,presentationBlocked:true,backgroundPrivacyCoverRequired:false}));
   expect(screen.queryByTestId('lava-privacy-cover')).toBeNull();
@@ -790,7 +821,7 @@ test('a native blocked off-policy retains the inactive frame until updated conce
   emitSnapshot(JSON.stringify({schema:1,fullApp:true,revision:2,presentationBlocked:true,backgroundPrivacyCoverRequired:false}));
   expect(screen.queryByTestId('lava-privacy-cover')).toBeNull();
   expect(screen.getByText('Native private value 1',{includeHiddenElements:true})).toBeTruthy();
-  emitSnapshot(JSON.stringify({schema:1,fullApp:true,revision:3,presentationBlocked:true,backgroundPrivacyCoverRequired:true}));
+  emitSnapshot(JSON.stringify({schema:1,fullApp:true,revision:3,presentationBlocked:true,backgroundPrivacyCoverRequired:true,appPrivacyCoverRequired:true}));
   expectConcealed();
   emitSnapshot(snapshot(4,false));
   expect(screen.queryByTestId('lava-privacy-cover')).toBeNull();
@@ -807,13 +838,13 @@ test('disabling then enabling the last protected surface controls the next rende
   expectConcealed();
 });
 
-function expectStarting() {
+function expectStarting(covered=false) {
   expect(screen.queryByLabelText('Loading Lava')).toBeNull();
   expect(screen.queryByTestId('lava-startup')).toBeNull();
   expect(screen.queryByTestId('lava-startup.symbol',{includeHiddenElements:true})).toBeNull();
-  expect(screen.getByText('Lava Security')).toBeTruthy();
+  expect(screen.queryByText('Lava Security')!==null).toBe(covered);
   expect(screen.UNSAFE_queryAllByType(ActivityIndicator)).toHaveLength(0);
-  expect(screen.getByTestId('lava-privacy-cover')).toBeTruthy();
+  expect(screen.queryByTestId('lava-privacy-cover')!==null).toBe(covered);
   expect(screen.queryByTestId('private-route-body')).toBeNull();
   expect(screen.getByTestId('private-route-body',{includeHiddenElements:true})).toBeTruthy();
 }
@@ -836,17 +867,17 @@ test.each<{name:string;state:AppStateStatus|null;initialSnapshot?:string}>([
   {name:'inactive',state:'inactive'},
   {name:'unknown',state:'unknown'},
   {name:'uninitialized',state:null},
-  {name:'inactive with a protected marker',state:'inactive',initialSnapshot:JSON.stringify({schema:1,fullApp:true,revision:1,presentationBlocked:true,backgroundPrivacyCoverRequired:true})},
+  {name:'inactive with a protected marker',state:'inactive',initialSnapshot:JSON.stringify({schema:1,fullApp:true,revision:1,presentationBlocked:true,backgroundPrivacyCoverRequired:true,appPrivacyCoverRequired:true})},
   {name:'inactive with unknown policy',state:'inactive',initialSnapshot:JSON.stringify({schema:1,fullApp:true,revision:1,presentationBlocked:true})},
 ])('a $name cold launch conceals protected or unknown policy until an active snapshot arrives',async({state,initialSnapshot})=>{
   Object.defineProperty(AppState,'currentState',{configurable:true,value:state});
   render(<LavaUIReview fullApp initialSnapshot={initialSnapshot}/>);
-  expectStarting();
+  expectStarting(!!initialSnapshot&&JSON.parse(initialSnapshot).appPrivacyCoverRequired===true);
   expect(mockNavigationMount).toHaveBeenCalledTimes(1);
   expect(mockBodyMount).toHaveBeenCalledTimes(1);
   expect(mockCommand).not.toHaveBeenCalled();
   emitState('active');
-  expectStarting();
+  expectStarting(!!initialSnapshot&&JSON.parse(initialSnapshot).appPrivacyCoverRequired===true);
   expect(mockCommand).not.toHaveBeenCalled();
   await act(async()=>reads.at(-1)!.resolve(snapshot(2,false)));
   expect(screen.queryByLabelText('Loading Lava')).toBeNull();
@@ -1071,4 +1102,33 @@ test.each(['backupRestore','passcode'] as const)('accepted all-off native creden
     await act(async()=>{await expect(edit()).rejects.toThrow('Read access changed.');});
   }
   expect(mockCommand).not.toHaveBeenCalled();
+});
+
+
+test.each([false,true,undefined] as const)('active read pauses cannot create an app cover from policy alone (%p)',async policy=>{
+  mockRootState=redirectState('SettingsTab','Settings');
+  const active=(revision:number)=>JSON.stringify({...JSON.parse(snapshot(revision)),backgroundPrivacyCoverRequired:policy,
+    appPrivacyCoverRequired:false,security:{ownerRevision:'same-owner',readRevision:revision}});
+  render(<LavaUIReview fullApp initialSnapshot={active(1)}/>);
+  await act(async()=>{});
+  const viewport=screen.getByTestId('private-route-body');
+  const navigator=screen.getByTestId('native-navigation-container');
+  const assertNoAppCover=()=>{
+    expect(screen.queryByTestId('lava-privacy-cover',{includeHiddenElements:true})).toBeNull();
+    expect(screen.queryByTestId('lava-route-privacy-cover',{includeHiddenElements:true})).toBeNull();
+  };
+  emitState('inactive');assertNoAppCover();
+  expect(screen.getByText('Native private value 1',{includeHiddenElements:true})).toBeTruthy();
+  expect(screen.getByTestId('lava-render-frame',{includeHiddenElements:true}).props.pointerEvents).toBe('none');
+  emitState('active');assertNoAppCover();
+  await act(async()=>reads.at(-1)!.resolve(active(2)));assertNoAppCover();
+  // Scoped authorization/read revocation during a live visit is not a lifecycle lock.
+  emitSnapshot(JSON.stringify({schema:1,fullApp:true,revision:3,presentationBlocked:true,
+    backgroundPrivacyCoverRequired:policy,appPrivacyCoverRequired:false,security:{ownerRevision:'same-owner'}}));
+  assertNoAppCover();
+  expect(screen.queryByTestId('private-route-body')).toBeNull();
+  emitSnapshot(active(4));await act(async()=>{});assertNoAppCover();
+  expect(screen.getByTestId('private-route-body')).toBe(viewport);
+  expect(screen.getByTestId('native-navigation-container')).toBe(navigator);
+  expect(mockBodyUnmount).not.toHaveBeenCalled();
 });

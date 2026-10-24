@@ -49,7 +49,9 @@ final class PresentationCacheBoundarySourceTests: XCTestCase {
         }
         let blocked = try sourceBlock(in: bridge, startingAt: "guard canReadPresentation(.appUnlock) else", endingBefore: "let m = model, c = model.customization")
         XCTAssertTrue(blocked.contains("\"presentationRevoked\": UIApplication.shared.applicationState == .background || !security.hasCurrentAuthorization(for: .appUnlock)"))
-        XCTAssertTrue(blocked.contains("\"security\": [\"ownerRevision\": presentationOwnerRevision.revision("))
+        XCTAssertTrue(blocked.contains("\"ownerRevision\": presentationOwnerRevision.revision("))
+        XCTAssertTrue(blocked.contains("\"unavailable\": security.presentationAvailabilityError != nil"))
+        XCTAssertTrue(blocked.contains("\"presentationError\": security.presentationAvailabilityError"))
         XCTAssertFalse(blocked.contains("\"session\""))
         XCTAssertFalse(blocked.contains("\"filters\""))
     }

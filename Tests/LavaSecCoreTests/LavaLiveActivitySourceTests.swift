@@ -1126,7 +1126,7 @@ final class LavaLiveActivitySourceTests: XCTestCase {
         XCTAssertTrue(securityPolicy.contains("public static let defaultsKeyName = \"securityProtectedSurfaces\""))
         XCTAssertTrue(securityPolicy.contains("case protectionPause"))
         XCTAssertTrue(securityController.contains("SecurityProtectedSurfaceStorage.loadProtectedSurfaces(from: defaults, projectionURL: securityGateProjectionURL)"))
-        XCTAssertTrue(securityController.contains("SecurityProtectedSurfaceStorage.saveProtectedSurfaces(protectedSurfaces, to: defaults,\n            projectionURL: securityGateProjectionURL)"))
+        XCTAssertTrue(securityController.contains("SecurityProtectedSurfaceStorage.saveProtectedSurfaces(protectedSurfaces, to: defaults,\n            projectionURL: securityGateProjectionURL, appUnlockCoverChoice: appUnlockChoice ?? self.appUnlockCoverChoice)"))
 
         XCTAssertFalse(rootView.contains("handleLiveActivityActionURL"))
         XCTAssertFalse(rootView.contains("LavaLiveActivityActionRequest.pendingRequest(from: url)"))

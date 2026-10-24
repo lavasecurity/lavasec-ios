@@ -26,7 +26,7 @@ test.each([true,false])('the real filter route retains its native scroll visit w
   const live={session:{filterID:'saved',editing:true},filters:[{id:'saved',name:'Saved secret',frozen:false}],security:{ownerRevision:'owner',readRevision:1},backgroundPrivacyCoverRequired:true} as unknown as AppSnapshot;
   let native:AppSnapshot|null=live;
   const command=jest.fn().mockResolvedValue(null);
-  const app={command,getSnapshot:()=>({snapshot:native,privacyCoverRequired:true}),getPresentationHydration:()=>({required:false})};
+  const app={command,getSnapshot:()=>({snapshot:native,privacyCoverRequired:true,appPrivacyCoverRequired:AppState.currentState==='background'}),getPresentationHydration:()=>({required:false})};
   const content=(snapshot?:AppSnapshot)=><ReviewContext.Provider value={{app,live:snapshot,session:initialSession()} as unknown as ReviewState}><FilterRoute/></ReviewContext.Provider>;
   try{
     const view=render(content(live));await act(async()=>{});

@@ -16,10 +16,10 @@ def visit(path):
     texts = [file.read_text(errors='strict') for file in sorted(path.parent.iterdir()) if file.is_file() and re.match(r'^(license|licence|copying)([.\-_]|$)',file.name,re.I)]
     if not texts and data['name'].startswith("@react-native/") and data.get("license")=="MIT":
         texts = [(root/"node_modules/react-native/LICENSE").read_text()]
-    if not texts and key == 'metro-runtime@0.87.0' and data.get('license') == 'MIT':
+    if not texts and key == 'metro-runtime@0.87.1' and data.get('license') == 'MIT':
         # npm omits the monorepo license. Copy from the exact upstream tag:
-        # https://raw.githubusercontent.com/react/metro/v0.87.0/LICENSE
-        texts = [(root/'scripts/licenses/metro-0.87.0.txt').read_text()]
+        # https://raw.githubusercontent.com/react/metro/v0.87.1/LICENSE
+        texts = [(root/'scripts/licenses/metro-0.87.1.txt').read_text()]
     if not texts: raise ValueError(f'Missing license text: {key}')
     packages[key] = '\n\n'.join(texts)
 for source in sources(json.loads((root/'.artifacts/LavaUIReview.map').read_text())):

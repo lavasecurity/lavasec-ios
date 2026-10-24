@@ -5,7 +5,7 @@ import type {AppCommand, AppSnapshot} from './contract';
 import {PresentationHydration} from './presentation-hydration';
 
 export class AppStore {
-  private state: {snapshot: AppSnapshot | null; displaySnapshot: AppSnapshot | null; error: string | null; privacyCoverRequired?:boolean} = {snapshot: null, displaySnapshot: null, error: null};
+  private state: {snapshot: AppSnapshot | null; displaySnapshot: AppSnapshot | null; error: string | null; privacyCoverRequired?:boolean;appPrivacyCoverRequired?:boolean} = {snapshot: null, displaySnapshot: null, error: null};
   private listeners = new Set<() => void>();
   private generation = 0;
   private connected = false;
@@ -18,8 +18,8 @@ export class AppStore {
   private refreshing?:{generation:number;readEpoch:number;promise:Promise<void>};
   private pendingQueries=new Map<string,Promise<unknown>>();
   private hasAcceptedPresentation=false;
-  private retainingAuthenticationFrame=false;
-  private authenticationPauseEpoch=0;
+  private retainingSessionFrame=false;
+  private sessionPauseEpoch=0;
   private navigationAuthorizationEpoch=0;
   private hydration:PresentationHydration;
   constructor(private readonly native: Spec, initialSnapshot?: AppSnapshot, presentation?:{initial:boolean}) {
@@ -55,7 +55,7 @@ export class AppStore {
     // A minimal inactive reply can cross the bridge after the full active reply
     // for that same native revision. It grants no new fields and cannot revoke
     // authority already restored by the newer lifecycle observation.
-    if(snapshot.presentationBlocked&&!snapshot.presentationRevoked&&mayRetainPresentationFrame(snapshot)
+    if(snapshot.presentationBlocked&&!snapshot.presentationError&&!snapshot.presentationRevoked&&mayRetainPresentationFrame(snapshot)
       &&snapshot.revision===this.lastSnapshotRevision&&this.state.snapshot
       &&(snapshot.security?.ownerRevision===undefined||snapshot.security.ownerRevision===this.state.snapshot.security?.ownerRevision))return;
     this.traceEnabled=snapshot.tracePresentation??this.traceEnabled;
@@ -66,6 +66,8 @@ export class AppStore {
     if(snapshot.presentationRevoked||previousOwner!==undefined&&snapshot.security?.ownerRevision!==undefined
       &&previousOwner!==snapshot.security.ownerRevision)++this.navigationAuthorizationEpoch;
     const privacyCoverRequired=snapshot.backgroundPrivacyCoverRequired;
+    const appPrivacyCoverRequired=privacyCoverRequired!==false&&snapshot.appPrivacyCoverRequired===true;
+    const presentationError=snapshot.presentationBlocked&&snapshot.presentationError||null;
     if (snapshot.presentationBlocked || AppState.currentState !== 'active') {
       // Blocked/inactive events carry concealment metadata only. Confirmed off
       // preserves a trusted prior frame through active refresh as well; these
@@ -73,35 +75,38 @@ export class AppStore {
       const previous=this.state.snapshot??this.state.displaySnapshot;
       const ownerChanged=snapshot.security?.ownerRevision!==undefined
         &&snapshot.security.ownerRevision!==previous?.security?.ownerRevision;
-      // A system biometric prompt briefly makes UIKit inactive. Keep only an
-      // already-delivered same-owner frame, inert until a fresh active snapshot.
-      // Prompt completion can arrive before activation; it must not introduce
-      // an empty retry screen in that gap. Real lock/background events retire it.
-      const authenticationFrame=AppState.currentState!=='background'&&!snapshot.presentationRevoked
+      // Transient inactivity keeps the accepted same-session page inert. It
+      // must not clear native rows and clamp the retained scroll position.
+      // A new native boundary token or explicit revocation always retires it.
+      const sessionFrame=AppState.currentState!=='background'&&!snapshot.presentationRevoked
         &&!!previous?.security?.ownerRevision
         &&previous.security.ownerRevision===snapshot.security?.ownerRevision
-        &&(this.retainingAuthenticationFrame||previous.authenticationInProgress===true);
+        &&previous.presentationToken===snapshot.presentationToken
+        &&!snapshot.security?.unavailable
+        &&(this.retainingSessionFrame||previous.authenticationInProgress===true
+          ||previous.appPrivacyCoverRequired===false&&snapshot.appPrivacyCoverRequired===false);
       // Native composed the bootstrap fields under its own foreground/read
       // checks. JS AppState may not have caught up yet. An explicit all-off
       // bootstrap can paint immediately, without granting queries or actions.
       // Only this constructor handoff may seed a frame; later inactive events
       // still cannot create one after a privacy boundary.
       const bootstrap=initial&&!snapshot.presentationBlocked&&mayRetainPresentationFrame(snapshot);
-      const displaySnapshot=bootstrap?snapshot:(authenticationFrame||!ownerChanged&&mayRetainPresentationFrame(snapshot)
+      const displaySnapshot=presentationError?null:bootstrap?snapshot:(sessionFrame||!ownerChanged&&mayRetainPresentationFrame(snapshot)
         &&mayRetainPresentationFrame(previous))?previous:null;
-      if(authenticationFrame&&!this.retainingAuthenticationFrame)++this.authenticationPauseEpoch;
-      this.retainingAuthenticationFrame=!!displaySnapshot&&authenticationFrame;
+      if(sessionFrame&&!this.retainingSessionFrame)++this.sessionPauseEpoch;
+      this.retainingSessionFrame=!!displaySnapshot&&sessionFrame;
       if(bootstrap)this.hasAcceptedPresentation=true;
       const beginsBoundary=!!previous&&!displaySnapshot&&this.hasAcceptedPresentation;
       if (this.state.snapshot || this.state.displaySnapshot&&!displaySnapshot) this.revokeReads();
-      this.state={snapshot:null,displaySnapshot,error:null,privacyCoverRequired};
+      this.state={snapshot:null,displaySnapshot,error:presentationError,privacyCoverRequired,appPrivacyCoverRequired};
       if(beginsBoundary)this.hydration.beginBoundary();else this.notify();return;
     }
-    const sameAuthenticationOwner=this.retainingAuthenticationFrame
+    const sameSessionOwner=this.retainingSessionFrame
       &&this.state.displaySnapshot?.security?.ownerRevision===snapshot.security?.ownerRevision
+      &&this.state.displaySnapshot?.presentationToken===snapshot.presentationToken
       &&!snapshot.presentationRevoked&&!snapshot.security?.unavailable;
-    const beginsBoundary=!!this.state.displaySnapshot&&!mayRetainPresentationFrame(snapshot)&&!sameAuthenticationOwner;
-    this.retainingAuthenticationFrame=false;
+    const beginsBoundary=!!this.state.displaySnapshot&&!mayRetainPresentationFrame(snapshot)&&!sameSessionOwner;
+    this.retainingSessionFrame=false;
     if (this.state.displaySnapshot||this.state.snapshot && (readPrivacyScope(this.state.snapshot) !== readPrivacyScope(snapshot)
       ||this.state.snapshot.backgroundPrivacyCoverRequired!==snapshot.backgroundPrivacyCoverRequired)) {
       const previous=this.state.snapshot;
@@ -110,7 +115,7 @@ export class AppStore {
         &&previous.backgroundPrivacyCoverRequired===snapshot.backgroundPrivacyCoverRequired);
     }
     this.hasAcceptedPresentation=true;
-    this.state = {snapshot, displaySnapshot:null, error: null,privacyCoverRequired};
+    this.state = {snapshot, displaySnapshot:null, error: null,privacyCoverRequired,appPrivacyCoverRequired};
     if(mayRetainPresentationFrame(snapshot)&&this.hydration.getSnapshot().required&&!this.hydration.isInitialPresentation())this.hydration.reset();
     else if(beginsBoundary)this.hydration.beginBoundary();else this.notify();
   }
@@ -130,41 +135,42 @@ export class AppStore {
       if(state==='background')++this.navigationAuthorizationEpoch;
       if (state !== 'active') {
         const previous=this.state.snapshot??this.state.displaySnapshot;
-        const authenticationFrame=state==='inactive'&&!!previous?.security?.ownerRevision
+        const sessionFrame=state==='inactive'&&!!previous?.security?.ownerRevision
           &&!previous.security.unavailable
-          &&(this.retainingAuthenticationFrame||previous.authenticationInProgress===true);
-        const displaySnapshot=authenticationFrame||mayRetainPresentationFrame(previous)?previous:null;
-        if(authenticationFrame&&!this.retainingAuthenticationFrame)++this.authenticationPauseEpoch;
-        this.retainingAuthenticationFrame=!!displaySnapshot&&authenticationFrame;
+          &&(this.retainingSessionFrame||previous.authenticationInProgress===true||previous.appPrivacyCoverRequired===false);
+        const displaySnapshot=sessionFrame||mayRetainPresentationFrame(previous)?previous:null;
+        if(sessionFrame&&!this.retainingSessionFrame)++this.sessionPauseEpoch;
+        this.retainingSessionFrame=!!displaySnapshot&&sessionFrame;
         const beginsBoundary=!!previous&&!displaySnapshot&&this.hasAcceptedPresentation;
         // Confirmed all-off preserves only the existing visual frame; pending
         // reads, cache authority and every active snapshot still lose their epoch.
-        this.revokeReads(); this.state = {snapshot:null,displaySnapshot,error:null,privacyCoverRequired:this.state.privacyCoverRequired};
+        this.revokeReads(); this.state = {snapshot:null,displaySnapshot,error:null,privacyCoverRequired:this.state.privacyCoverRequired,
+          appPrivacyCoverRequired:state==='background'?this.state.privacyCoverRequired===true:this.state.appPrivacyCoverRequired};
         if(beginsBoundary)this.hydration.beginBoundary();else this.notify();
       } else {
         void this.refresh();
       }
     });
     void this.refresh();
-    return () => {if (generation === this.generation) {++this.generation; this.connected = false;this.retainingAuthenticationFrame=false;this.pendingQueries.clear();clearAppReadCache(this);this.state={snapshot:null,displaySnapshot:null,error:null};this.hydration.reset();this.notify();} subscription.remove(); lifecycle.remove();};
+    return () => {if (generation === this.generation) {++this.generation; this.connected = false;this.retainingSessionFrame=false;this.pendingQueries.clear();clearAppReadCache(this);this.state={snapshot:null,displaySnapshot:null,error:null};this.hydration.reset();this.notify();} subscription.remove(); lifecycle.remove();};
   }
   private fail(error: unknown) {
     const message=error instanceof Error?error.message:String(error);
-    if(this.retainingAuthenticationFrame){
+    if(this.retainingSessionFrame){
       // A failed activation read must release successful pending settings and
       // expose the existing retry surface, rather than strand an inert frame.
-      this.retainingAuthenticationFrame=false;this.revokeReads();
+      this.retainingSessionFrame=false;this.revokeReads();
       this.state={...this.state,snapshot:null,displaySnapshot:null,error:message};
       this.hydration.beginBoundary();
     }else{this.state={...this.state,error:message};this.notify();}
   }
-  private settleAuthenticationPresentation(generation:number) {
-    if(!this.retainingAuthenticationFrame)return Promise.resolve();
+  private settleSessionPresentation(generation:number) {
+    if(!this.retainingSessionFrame)return Promise.resolve();
     // A successful settings write can finish before UIKit/JS activation. Keep
     // its existing pending control until the fresh projection acknowledges it,
     // or a hard boundary retires the display. Never publish its stale response.
     return new Promise<void>(resolve=>{
-      const finish=()=>{if(generation!==this.generation||!this.retainingAuthenticationFrame){unsubscribe();resolve();}};
+      const finish=()=>{if(generation!==this.generation||!this.retainingSessionFrame){unsubscribe();resolve();}};
       const unsubscribe=this.subscribe(finish);finish();
     });
   }
@@ -210,6 +216,16 @@ export class AppStore {
     })();
     return pending.promise;
   }
+  async retryPresentation():Promise<void> {
+    if(!this.connected||AppState.currentState!=='active')return;
+    const generation=this.generation;
+    // An old pending read cannot satisfy a user-requested security recovery.
+    this.revokeReads();this.notify();
+    try {
+      await this.native.command(JSON.stringify({type:'presentation.retry'}));
+      if(generation===this.generation&&AppState.currentState==='active')await this.refresh();
+    }catch(error){if(generation===this.generation)this.fail(error);}
+  }
   command<T = unknown>(command: AppCommand): Promise<T> {
     const generation = this.generation;
     const retiresQAOwner=command.type==='qa.command'&&['leave','close','detail.close','detail.back'].includes(command.action);
@@ -236,7 +252,7 @@ export class AppStore {
         ||command.type==='accountBackup.command'&&['account.signOut','account.delete'].includes(command.command.action);
       if (revokesReads) {this.revokeReads(); this.notify();}
       const readEpoch = this.readEpoch;
-      const authenticationPauseEpoch=this.authenticationPauseEpoch;
+      const sessionPauseEpoch=this.sessionPauseEpoch;
       const domainReviewEpoch = this.domainReviewEpoch;
       const response = JSON.parse(await this.native.command(JSON.stringify(command))) as {snapshot?: AppSnapshot; result: T};
       if (generation !== this.generation) {
@@ -272,8 +288,8 @@ export class AppStore {
       if(command.type==='settings.set'){
         // Activation may beat the mutation reply. Read today's projection
         // instead of accepting that reply under an already-revoked read epoch.
-        if(!mayPublish&&authenticationPauseEpoch!==this.authenticationPauseEpoch&&AppState.currentState==='active')await this.refresh();
-        await this.settleAuthenticationPresentation(generation);
+        if(!mayPublish&&sessionPauseEpoch!==this.sessionPauseEpoch&&AppState.currentState==='active')await this.refresh();
+        await this.settleSessionPresentation(generation);
       }
       if(navigationOwner!==undefined){
         if(navigationEpoch!==this.navigationAuthorizationEpoch)throw new Error('Authentication cancelled.');

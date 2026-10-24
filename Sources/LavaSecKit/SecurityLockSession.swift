@@ -32,10 +32,15 @@ public struct SecurityLockSession: Sendable {
     }
 
     /// Idempotent: UIKit, the scene and protected-data callbacks can report the same boundary.
-    public mutating func suspend() {
+    public mutating func suspend(preservingVisitForAppUnlock: Bool = true) {
         guard isForeground else { return }
-        suspendedSurfaces.formUnion(surfaces.intersection([.filterEditing, .activityViewing, .appSettings]))
-        suspendedCredential = suspendedCredential || credentialAuthorized
+        if preservingVisitForAppUnlock {
+            suspendedSurfaces.formUnion(surfaces.intersection([.filterEditing, .activityViewing, .appSettings]))
+            suspendedCredential = suspendedCredential || credentialAuthorized
+        } else {
+            suspendedSurfaces = []
+            suspendedCredential = false
+        }
         revokeForeground()
         isForeground = false
     }

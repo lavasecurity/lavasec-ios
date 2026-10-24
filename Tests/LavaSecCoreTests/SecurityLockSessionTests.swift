@@ -10,6 +10,24 @@ final class SecurityLockSessionTests: XCTestCase {
         XCTAssertFalse(session.hasSuspendedVisit)
     }
 
+    func testAppUnlockOffNeverPromotesAScopedVisitIntoAGlobalResumeLock() {
+        var session = SecurityLockSession()
+        session.authorize(.appSettings, ticket: session.ticket())
+        session.authorize(nil, ticket: session.ticket())
+        let old = session.ticket()
+        session.suspend(preservingVisitForAppUnlock: false)
+        XCTAssertFalse(session.hasSuspendedVisit)
+        XCTAssertFalse(session.contains(old))
+        session.enterForeground()
+        XCTAssertFalse(session.appUnlocked)
+        XCTAssertTrue(session.surfaces.isEmpty)
+        XCTAssertFalse(session.credentialAuthorized)
+        // A scoped page can authenticate independently, without an app unlock.
+        XCTAssertTrue(session.authorize(.appSettings, ticket: session.ticket()))
+        XCTAssertFalse(session.appUnlocked)
+        XCTAssertFalse(session.credentialAuthorized)
+    }
+
     func testOneUnlockRestoresOnlyThePreviouslyAuthorizedVisit() {
         var session = SecurityLockSession()
         XCTAssertTrue(session.authorize(.activityViewing, ticket: session.ticket()))

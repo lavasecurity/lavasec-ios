@@ -14,6 +14,144 @@ final class SecurityGateProjectionTests: XCTestCase {
         try body(defaults, SecurityProtectedSurfaceStorage.projectionURL(containerURL: dir))
     }
 
+    func testScopedGatesAndUnreadableCredentialsCannotOptIntoTheAppCover() throws {
+        try withStore { defaults, url in
+            XCTAssertTrue(SecurityProtectedSurfaceStorage.reconcileAuthentication(.available, in: defaults, projectionURL: url))
+            for surface in SecurityProtectedSurface.allCases {
+                XCTAssertTrue(SecurityProtectedSurfaceStorage.saveProtectedSurfaces([surface], to: defaults, projectionURL: url))
+                for availability: SecurityAuthenticationAvailability in [.available, .unavailable, .available] {
+                    XCTAssertTrue(SecurityProtectedSurfaceStorage.reconcileAuthentication(availability, in: defaults, projectionURL: url))
+                    let selected = SecurityProtectedSurfaceStorage.appUnlockCoverChoice(projectionURL: url)
+                    XCTAssertEqual(selected, surface == .appUnlock)
+                    XCTAssertEqual(SecurityPrivacyPolicy.requiresBackgroundCover(appUnlockIsSelected: selected), surface == .appUnlock)
+                    if availability == .unavailable {
+                        XCTAssertEqual(SecurityProtectedSurfaceStorage.loadProtectedSurfaces(from: defaults, projectionURL: url),
+                                       Set(SecurityProtectedSurface.allCases), "Access must still fail closed")
+                    }
+                }
+            }
+            XCTAssertTrue(SecurityProtectedSurfaceStorage.reconcileAuthentication(.absent, in: defaults, projectionURL: url))
+            XCTAssertEqual(SecurityProtectedSurfaceStorage.appUnlockCoverChoice(projectionURL: url), false)
+            try FileManager.default.removeItem(at: url)
+            XCTAssertNil(SecurityProtectedSurfaceStorage.appUnlockCoverChoice(projectionURL: url))
+        }
+    }
+
+    func testMalformedRepairPreservesTheSavedAppUnlockChoiceAcrossRefreshAndRelaunch() throws {
+        for chosen in [false, true] {
+            try withStore { defaults, url in
+                XCTAssertTrue(SecurityProtectedSurfaceStorage.reconcileAuthentication(.available, in: defaults, projectionURL: url))
+                let selected: Set<SecurityProtectedSurface> = chosen ? [.appUnlock, .appSettings] : [.appSettings]
+                XCTAssertTrue(SecurityProtectedSurfaceStorage.saveProtectedSurfaces(selected, to: defaults, projectionURL: url))
+                try Data("truncated".utf8).write(to: url)
+                let conservative = Set(SecurityProtectedSurface.allCases)
+                let repaired = chosen ? conservative : conservative.subtracting([.appUnlock])
+                for availability: SecurityAuthenticationAvailability in [.available, .unavailable, .available] {
+                    XCTAssertTrue(SecurityProtectedSurfaceStorage.reconcileAuthentication(availability, in: defaults, projectionURL: url))
+                    // This reader has no controller cache, as on a fresh launch.
+                    XCTAssertEqual(SecurityProtectedSurfaceStorage.appUnlockCoverChoice(projectionURL: url), chosen)
+                    XCTAssertEqual(SecurityProtectedSurfaceStorage.loadProtectedSurfaces(from: defaults, projectionURL: url),
+                                   availability == .unavailable ? conservative : repaired,
+                                   "Unknown scoped gates stay closed; known OFF must not leave a synthetic global gate")
+                }
+                // Editing a different repaired gate cannot change Open Lava.
+                XCTAssertTrue(SecurityProtectedSurfaceStorage.saveProtectedSurfaces(repaired.subtracting([.filterEditing]), to: defaults, projectionURL: url, appUnlockCoverChoice: chosen))
+                XCTAssertEqual(SecurityProtectedSurfaceStorage.appUnlockCoverChoice(projectionURL: url), chosen)
+            }
+        }
+    }
+
+    func testRepairWithoutKnownConsentCannotManufactureAnExplicitOnChoice() throws {
+        try withStore { defaults, url in
+            try Data("truncated".utf8).write(to: url)
+            for _ in 0..<3 {
+                XCTAssertTrue(SecurityProtectedSurfaceStorage.reconcileAuthentication(.available, in: defaults, projectionURL: url))
+                XCTAssertNil(SecurityProtectedSurfaceStorage.appUnlockCoverChoice(projectionURL: url))
+                XCTAssertEqual(SecurityProtectedSurfaceStorage.loadProtectedSurfaces(from: defaults, projectionURL: url), Set(SecurityProtectedSurface.allCases))
+            }
+            XCTAssertTrue(SecurityProtectedSurfaceStorage.saveProtectedSurfaces(Set(SecurityProtectedSurface.allCases).subtracting([.filterEditing]), to: defaults, projectionURL: url, appUnlockCoverChoice: nil))
+            XCTAssertNil(SecurityProtectedSurfaceStorage.appUnlockCoverChoice(projectionURL: url))
+            XCTAssertTrue(SecurityProtectedSurfaceStorage.saveProtectedSurfaces([], to: defaults, projectionURL: url))
+            XCTAssertEqual(SecurityProtectedSurfaceStorage.appUnlockCoverChoice(projectionURL: url), false)
+        }
+    }
+
+    func testLegacyOffChoiceSurvivesRepairBeforeTheFirstClassifiedLaunch() throws {
+        try withStore { defaults, url in
+            SecurityProtectedSurfaceStorage.saveProtectedSurfaces([.appSettings], to: defaults)
+            try Data("truncated".utf8).write(to: url)
+            XCTAssertTrue(SecurityProtectedSurfaceStorage.reconcileAuthentication(.available, in: defaults, projectionURL: url))
+            XCTAssertEqual(SecurityProtectedSurfaceStorage.appUnlockCoverChoice(projectionURL: url), false)
+            XCTAssertFalse(SecurityProtectedSurfaceStorage.loadProtectedSurfaces(from: defaults, projectionURL: url).contains(.appUnlock),
+                           "Known OFF must leave normal app entry usable without a global unlock prompt")
+            XCTAssertTrue(SecurityProtectedSurfaceStorage.isProtected(.activityViewing, defaults: defaults, projectionURL: url))
+        }
+    }
+
+    func testLegacyRepairedProjectionCannotPublishAnExplicitAppCoverChoice() throws {
+        try withStore { defaults, url in
+            let gates = Set(SecurityProtectedSurface.allCases)
+            let record: [String: Any] = [
+                "version": 1, "availability": "available", "surfaces": gates.map(\.rawValue),
+                "migrated": true, "noticePending": false, "optInMigration": 2
+            ]
+            try JSONSerialization.data(withJSONObject: record).write(to: url)
+            defaults.set(gates.map(\.rawValue), forKey: SecurityProtectedSurfaceStorage.defaultsKeyName)
+            XCTAssertNil(SecurityProtectedSurfaceStorage.appUnlockCoverChoice(projectionURL: url, defaults: defaults))
+            for availability: SecurityAuthenticationAvailability in [.available, .unavailable, .available] {
+                XCTAssertTrue(SecurityProtectedSurfaceStorage.reconcileAuthentication(availability, in: defaults, projectionURL: url))
+                XCTAssertNil(SecurityProtectedSurfaceStorage.appUnlockCoverChoice(projectionURL: url, defaults: defaults))
+                XCTAssertNil(defaults.object(forKey: "securityAppUnlockCoverChoice"))
+                XCTAssertEqual(SecurityProtectedSurfaceStorage.loadProtectedSurfaces(from: defaults, projectionURL: url), gates)
+            }
+            XCTAssertTrue(SecurityProtectedSurfaceStorage.saveProtectedSurfaces(gates.subtracting([.filterEditing]), to: defaults,
+                projectionURL: url, appUnlockCoverChoice: nil))
+            XCTAssertNil(SecurityProtectedSurfaceStorage.appUnlockCoverChoice(projectionURL: url, defaults: defaults))
+        }
+    }
+
+    func testLegacyAppUnlockGateNeedsIndependentConsentBeforeItCanBecomeExplicitOn() throws {
+        for choice: Bool? in [nil, false, true] {
+            try withStore { defaults, url in
+                // An older app can also edit a repaired record's unrelated gate;
+                // even a subset containing appUnlock is not proof of cover consent.
+                let record: [String: Any] = [
+                    "version": 1, "availability": "available", "surfaces": ["appUnlock", "activityViewing"],
+                    "migrated": true, "noticePending": false, "optInMigration": 2
+                ]
+                try JSONSerialization.data(withJSONObject: record).write(to: url)
+                if let choice { defaults.set(choice, forKey: "securityAppUnlockCoverChoice") }
+                XCTAssertEqual(SecurityProtectedSurfaceStorage.appUnlockCoverChoice(projectionURL: url, defaults: defaults), choice)
+                XCTAssertTrue(SecurityProtectedSurfaceStorage.reconcileAuthentication(.available, in: defaults, projectionURL: url))
+                XCTAssertEqual(SecurityProtectedSurfaceStorage.appUnlockCoverChoice(projectionURL: url), choice)
+                XCTAssertEqual(SecurityProtectedSurfaceStorage.loadProtectedSurfaces(from: defaults, projectionURL: url),
+                               choice == false ? [.activityViewing] : [.appUnlock, .activityViewing])
+            }
+        }
+    }
+
+    func testKnownOffRecordCannotStrandAppEntryBehindASyntheticUnlockGate() throws {
+        try withStore { defaults, url in
+            let scoped = Set(SecurityProtectedSurface.allCases).subtracting([.appUnlock])
+            let record: [String: Any] = [
+                "version": 1, "availability": "available", "surfaces": SecurityProtectedSurface.allCases.map(\.rawValue),
+                "migrated": true, "noticePending": false, "optInMigration": 2, "coverConsent": "off"
+            ]
+            let data = try JSONSerialization.data(withJSONObject: record)
+            try data.write(to: url)
+            XCTAssertEqual(SecurityProtectedSurfaceStorage.appUnlockCoverChoice(projectionURL: url), false)
+            XCTAssertFalse(SecurityProtectedSurfaceStorage.isProtected(.appUnlock, defaults: defaults, projectionURL: url))
+            XCTAssertEqual(SecurityProtectedSurfaceStorage.loadProtectedSurfaces(from: defaults, projectionURL: url), scoped)
+            XCTAssertEqual(try Data(contentsOf: url), data, "A reader must not repair or rewrite the record")
+            XCTAssertTrue(SecurityProtectedSurfaceStorage.reconcileAuthentication(.available, in: defaults, projectionURL: url))
+            XCTAssertEqual(SecurityProtectedSurfaceStorage.loadProtectedSurfaces(from: defaults), scoped,
+                           "The writer must retire the contradictory gate in both persisted representations")
+            for gate in scoped {
+                XCTAssertTrue(SecurityProtectedSurfaceStorage.isProtected(gate, defaults: defaults, projectionURL: url))
+            }
+        }
+    }
+
     func testCredentialPreparationClosesPreviouslyAbsentGatesBeforeTheWrite() throws {
         try withStore { defaults, url in
             SecurityProtectedSurfaceStorage.reconcileAuthentication(.absent, in: defaults)

@@ -40,7 +40,7 @@ function expectRowsWithheld(){
 function setup(authorized=true){
   const listeners=new Set<()=>void>();let authoritative=true;let hydrated=true;let fieldsAvailable=true;let privacyCoverRequired:boolean|undefined=false;
   const command=jest.fn(async(_command:AppCommand):Promise<unknown>=>null);
-  const app={command,getSnapshot:()=>({snapshot:authoritative?live:null,privacyCoverRequired}),getPresentationHydration:()=>({epoch:1,required:!hydrated}),
+  const app={command,getSnapshot:()=>({snapshot:authoritative?live:null,privacyCoverRequired,appPrivacyCoverRequired:AppState.currentState==='background'&&privacyCoverRequired===true}),getPresentationHydration:()=>({epoch:1,required:!hydrated}),
     subscribe:(listener:()=>void)=>{listeners.add(listener);return()=>{listeners.delete(listener);};},
     registerPresentationRead:jest.fn(()=>({epoch:1,id:1})),settlePresentationRead:jest.fn()};
   let live={foregroundFlow:undefined as ForegroundFlow|null|undefined,vpn:{authorized,setup:true,enabled:false,canEdit:true,canChangeFallback:true,needsPlus:false,rows:[] as {name:string;mode:string;isEnabled?:boolean}[],generation:'saved'},plus:{enabled:true},security:{ownerRevision:'native-owner',readRevision:1}};

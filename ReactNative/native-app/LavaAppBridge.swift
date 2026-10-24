@@ -88,21 +88,26 @@ final class LavaAppBridge: NSObject, ObservableObject {
     private var observers: [UUID: (String) -> Void] = [:]
     private var runtimeOwnership = PresentationRuntimeOwnership()
     private var runtimeObjectIdentities: [String: LavaAppRuntimeObjectIdentity] = [:]
-    private(set) var presentationReveal = PresentationRevealGate()
+    private(set) lazy var presentationReveal = PresentationRevealGate(appCoverRequired: security.backgroundPrivacyCoverRequired)
     func mountPresentation(_ id: String) { presentationReveal.mount(id) }
     func unmountPresentation(_ id: String) { updatePresentationReveal { $0.unmount(id) } }
-    private func concealPresentation() { updatePresentationReveal { $0.conceal() } }
+    private func concealPresentation() {
+        updatePresentationReveal { $0.conceal(appCoverRequired: security.backgroundPrivacyCoverRequired) }
+    }
     private func updatePresentationReveal(_ update: (inout PresentationRevealGate) -> Void) {
         let wasRequired = presentationReveal.required
+        let wasCoverRequired = presentationReveal.appCoverRequired
         update(&presentationReveal)
-        guard wasRequired != presentationReveal.required else { return }
+        guard wasRequired != presentationReveal.required || wasCoverRequired != presentationReveal.appCoverRequired else { return }
         // Representable teardown can retire a renderer inside SwiftUI's graph
         // mutation. Keep the gate synchronous, but publish the visual change
         // after that transaction exits. Renderer membership alone is not UI state.
-        Task { @MainActor [weak self] in self?.objectWillChange.send() }
+        Task { @MainActor [weak self] in self?.publish() }
     }
     var isPresentationRevealPending: Bool {
-        security.backgroundPrivacyCoverRequired && presentationReveal.required
+        // Enabling Open Lava during an active visit applies at the next boundary,
+        // even if an earlier OFF renderer is still waiting to acknowledge layout.
+        security.backgroundPrivacyCoverRequired && presentationReveal.appCoverRequired
     }
     private var revision = 0
     private var navigationSerial = 0
@@ -259,7 +264,8 @@ final class LavaAppBridge: NSObject, ObservableObject {
         NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification).sink { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.presentationCache.invalidate()
-                if self?.security.isBiometricAuthenticationInProgress != true { self?.concealPresentation() }
+                // Read authority pauses, but an interruption (including StoreKit
+                // or authentication) does not start a new app-lock session.
             }
         }.store(in: &subscriptions)
         NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification).sink { [weak self] _ in
@@ -369,6 +375,7 @@ final class LavaAppBridge: NSObject, ObservableObject {
         revision += 1
         let value = json(["schema": 1, "fullApp": true, "domainCheckAvailable": true, "revision": revision,
                           "presentationBlocked": true, "presentationToken": presentationReveal.token, "backgroundPrivacyCoverRequired": security.backgroundPrivacyCoverRequired,
+                          "appPrivacyCoverRequired": isPresentationRevealPending,
                           "authenticationInProgress": false, "presentationRevoked": true,
                           "passcode": passcodeProjection().map { $0 as Any } ?? NSNull(), "presentation": presentationSnapshot(),
                          "security": ["ownerRevision": presentationOwnerRevision.revision(for: model.account.accountAuthState.connections.all.map { $0.session.userID })]])
@@ -468,10 +475,13 @@ final class LavaAppBridge: NSObject, ObservableObject {
         guard canReadPresentation(.appUnlock) else {
             return json(["schema": 1, "fullApp": true, "domainCheckAvailable": true, "revision": revision, "presentationBlocked": true, "presentationToken": presentationReveal.token,
                          "backgroundPrivacyCoverRequired": security.backgroundPrivacyCoverRequired,
+                         "appPrivacyCoverRequired": isPresentationRevealPending,
+                         "presentationError": security.presentationAvailabilityError.map { $0 as Any } ?? NSNull(),
                          "authenticationInProgress": authenticationInProgressForPresentation,
                          "presentationRevoked": UIApplication.shared.applicationState == .background || !security.hasCurrentAuthorization(for: .appUnlock),
                          "passcode": passcodeProjection().map { $0 as Any } ?? NSNull(), "presentation": presentationSnapshot(),
-                         "security": ["ownerRevision": presentationOwnerRevision.revision(for: model.account.accountAuthState.connections.all.map { $0.session.userID })]])
+                         "security": ["unavailable": security.presentationAvailabilityError != nil,
+                                      "ownerRevision": presentationOwnerRevision.revision(for: model.account.accountAuthState.connections.all.map { $0.session.userID })]])
         }
         let m = model, c = model.customization
         let primary = m.configuration.resolverPreset
@@ -495,6 +505,7 @@ final class LavaAppBridge: NSObject, ObservableObject {
         var value: [String: Any] = [
             "schema": 1, "revision": revision, "fullApp": true, "domainCheckAvailable": true,
             "backgroundPrivacyCoverRequired": security.backgroundPrivacyCoverRequired,
+            "appPrivacyCoverRequired": isPresentationRevealPending,
             "authenticationInProgress": authenticationInProgressForPresentation,
             "onboardingSetup": onboardingVisit?.snapshot as Any? ?? NSNull(),
             "version": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "",
@@ -807,6 +818,16 @@ final class LavaAppBridge: NSObject, ObservableObject {
                     updatePresentationReveal { $0.acknowledge(id, token: token, authorized: authorized) }
                 }
                 completion(json(["result": NSNull()]), nil)
+                return
+            }
+            // Recovery is available before read authorization. It reclassifies
+            // native security only; no app action or private result is admitted.
+            if name == "presentation.retry" {
+                guard UIApplication.shared.applicationState == .active else { throw CommandError("Read access changed.") }
+                await security.retryPresentationAvailability()
+                try requireCurrentRuntime()
+                completion(json(["result": NSNull()]), nil)
+                queuePublish()
                 return
             }
             if name == "navigation.authorize" { SecurityController.tracePresentation("navigation.requested") }

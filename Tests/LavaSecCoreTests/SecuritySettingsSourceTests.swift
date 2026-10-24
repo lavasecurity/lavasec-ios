@@ -1,6 +1,28 @@
 import XCTest
 
 final class SecuritySettingsSourceTests: XCTestCase {
+    func testSecurityReadFailuresExposePublicRecoveryWithoutEnablingTheCover() throws {
+        let controller = try readSource(.securityController)
+        let metadata = try sourceBlock(in: controller, startingAt: "var presentationAvailabilityError:",
+                                       endingBefore: "/// A pre-lock announcement")
+        XCTAssertTrue(metadata.contains("if isAuthenticationUnavailable"))
+        XCTAssertTrue(metadata.contains("if didFailGatePublication"))
+        XCTAssertTrue(metadata.contains("SecuritySettingsError.publicationUnavailable.localizedDescription"))
+        XCTAssertTrue(metadata.contains("guard UIApplication.shared.applicationState == .active, protectedDataIsAvailableForPresentation"))
+        XCTAssertFalse(metadata.contains("isAppUnlockBlockingUI = true"))
+        let bridge = try readSource(.reactNativeAppBridge)
+        let blocked = try sourceBlock(in: bridge, startingAt: "guard canReadPresentation(.appUnlock) else {",
+                                      endingBefore: "let m = model, c = model.customization")
+        XCTAssertTrue(blocked.contains("\"presentationError\": security.presentationAvailabilityError"))
+        let retry = try sourceBlock(in: bridge, startingAt: "if name == \"presentation.retry\"",
+                                    endingBefore: "if name == \"navigation.authorize\"")
+        XCTAssertTrue(retry.contains("await security.retryPresentationAvailability()"))
+        XCTAssertTrue(retry.contains("try requireCurrentRuntime()"))
+        XCTAssertTrue(retry.contains("completion(json([\"result\": NSNull()]), nil)"))
+        XCTAssertFalse(retry.contains("perform("))
+        XCTAssertFalse(retry.contains("\"snapshot\":"))
+    }
+
     func testDisablingBiometricsKeepsPasscodeProtectedSurfacesAndAppLock() throws {
         let controller = try readSource(.securityController)
         let biometric = try sourceBlock(in: controller, startingAt: "func setBiometricEnabled(",
@@ -24,8 +46,8 @@ final class SecuritySettingsSourceTests: XCTestCase {
         XCTAssertFalse(source.contains("markAuthenticated"))
         let native = try readSource(.reactNativeAppSettings)
         XCTAssertTrue(native.contains("try await authorize(.appSettings, \"Open VPN chaining settings\")"))
-        let background = try sourceBlock(in: readSource(.securityController), startingAt: "func lockForBackgroundIfNeeded()", endingBefore: "func showAppUnlockPrivacyMaskIfNeeded()")
-        XCTAssertTrue(background.contains("lockSession.suspend()"))
+        let background = try sourceBlock(in: readSource(.securityController), startingAt: "func lockForBackgroundIfNeeded()", endingBefore: "func sceneDidBecomeActive()")
+        XCTAssertTrue(background.contains("lockSession.suspend(preservingVisitForAppUnlock: backgroundPrivacyCoverRequired)"))
     }
 
     func testCredentialReadAndRemovalErrorsCannotEraseSecurityPreferences() throws {
@@ -373,7 +395,7 @@ final class SecuritySettingsSourceTests: XCTestCase {
         XCTAssertTrue(authenticateAppUnlockBlock.contains("if lockSession.appUnlocked"))
     }
 
-    func testAppUnlockMasksInactiveSnapshotsWithoutForegroundPrompt() throws {
+    func testAppUnlockOnlyLocksAfterARealBackgroundBoundary() throws {
         let controller = try readSource(.securityController)
         let root = try readSource(.rootView)
         let scenePhaseBlock = try sourceBlock(
@@ -384,13 +406,12 @@ final class SecuritySettingsSourceTests: XCTestCase {
 
         XCTAssertTrue(controller.contains("@Published private(set) var isAppUnlockPrivacyMaskVisible"))
         XCTAssertTrue(controller.contains("@Published private(set) var isBiometricAuthenticationInProgress = false"))
-        XCTAssertTrue(controller.contains("func showAppUnlockPrivacyMaskIfNeeded()"))
+        XCTAssertFalse(controller.contains("func showAppUnlockPrivacyMaskIfNeeded()"))
         XCTAssertTrue(controller.contains("func sceneDidBecomeActive()"))
-        XCTAssertTrue(controller.contains("guard !isBiometricAuthenticationInProgress else"))
         XCTAssertFalse(root.contains("SecurityPrivacyMaskOverlay"))
         XCTAssertTrue((try readSource(.reactNativeAppHost)).contains("SecurityPrivacyMaskOverlay"))
         XCTAssertTrue(scenePhaseBlock.contains("case .inactive:"))
-        XCTAssertTrue(scenePhaseBlock.contains("security.showAppUnlockPrivacyMaskIfNeeded()"))
+        XCTAssertFalse(scenePhaseBlock.contains("security.showAppUnlockPrivacyMaskIfNeeded()"))
         XCTAssertFalse(try sourceBlock(in: scenePhaseBlock, startingAt: "case .inactive:", endingBefore: "case .background:").contains("authenticateAppUnlockIfNeeded()"))
         XCTAssertTrue(scenePhaseBlock.contains("security.sceneDidBecomeActive()"))
     }

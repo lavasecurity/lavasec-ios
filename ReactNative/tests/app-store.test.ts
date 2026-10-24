@@ -978,3 +978,38 @@ test('domain checks accept result-only replies and cancelled visits retire while
     expect(native.command).toHaveBeenCalledTimes(2);
   } finally {Object.defineProperty(AppState,'currentState',{configurable:true,value:'active'});disconnect();}
 });
+
+
+test('a confirmed app-cover opt-out overrides a stale reveal flag without granting reads',async()=>{
+  const {store,emit,disconnect}=setup();
+  try {
+    emit(JSON.stringify({schema:1,fullApp:true,revision:5,presentationBlocked:true,
+      backgroundPrivacyCoverRequired:false,appPrivacyCoverRequired:true}));
+    expect(store.getSnapshot().appPrivacyCoverRequired).toBe(false);
+    expect(store.getSnapshot().snapshot).toBeNull();
+    await expect(store.command({type:'stats.query'})).rejects.toThrow('Read access changed.');
+  } finally {disconnect();}
+});
+
+
+test('a new native boundary token retires an inactive session frame before JS sees background',async()=>{
+  const events=lifecycle();const {store,emit,disconnect}=setup();
+  try {
+    emit(JSON.stringify({schema:1,fullApp:true,revision:2,presentationToken:'active-session',
+      backgroundPrivacyCoverRequired:true,appPrivacyCoverRequired:false,security:{ownerRevision:'owner',unavailable:false}}));
+    const accepted=store.getSnapshot().snapshot;
+    events.emit('inactive');
+    expect(store.getSnapshot().snapshot).toBeNull();
+    expect(store.getSnapshot().displaySnapshot).toBe(accepted);
+    expect(store.getSnapshot().appPrivacyCoverRequired).toBe(false);
+    await expect(store.command({type:'stats.query'})).rejects.toThrow('Read access changed.');
+    emit(JSON.stringify({schema:1,fullApp:true,revision:3,presentationToken:'real-background',presentationBlocked:true,
+      backgroundPrivacyCoverRequired:true,appPrivacyCoverRequired:true,security:{ownerRevision:'owner'}}));
+    expect(store.getSnapshot().displaySnapshot).toBeNull();
+    expect(store.getSnapshot().appPrivacyCoverRequired).toBe(true);
+    expect(store.getPresentationHydration().required).toBe(true);
+    emit(JSON.stringify({schema:1,fullApp:true,revision:4,presentationToken:'real-background',presentationBlocked:true,
+      backgroundPrivacyCoverRequired:true,appPrivacyCoverRequired:false,security:{ownerRevision:'owner'}}));
+    expect(store.getSnapshot().displaySnapshot).toBeNull();
+  } finally {disconnect();events.restore();}
+});

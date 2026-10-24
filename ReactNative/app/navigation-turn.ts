@@ -40,7 +40,9 @@ export class NavigationTurn {
     let child=root.state;
     while(child){
       const routes=child.routes.slice(0,(child.index??0)+1);
-      next.path.push(...routes.map(route=>route.key??route.name));
+      // A Plus detour belongs to its still-mounted requesting visit. Closing it
+      // does not leave that visit or retire its page grant/scroll contents.
+      next.path.push(...routes.filter(route=>route.name!=='Upgrade').map(route=>route.key??route.name));
       child=routes[routes.length-1]?.state;
     }
     const old=this.previous, external=this.external;

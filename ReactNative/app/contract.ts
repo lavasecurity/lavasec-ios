@@ -38,9 +38,13 @@ export type AppSnapshot = {
   customEntry?:{id:string;kind:'dns'|'blocklist';name:string;primary:string;secondary:string;allowed:boolean;overBudget:boolean}|null;
   onboardingSetup?:OnboardingSetup|null;
   presentationBlocked?: boolean;
+  /** Public security recovery message; never a protected app projection. */
+  presentationError?: string | null;
   presentationToken?: string;
   /** Native concealment policy for background/lock boundaries. */
   backgroundPrivacyCoverRequired?: boolean;
+  /** Native launch/background handoff. Readiness alone must never start an app cover. */
+  appPrivacyCoverRequired?: boolean;
   /** Display continuity for a native-owned biometric prompt; never read/action authority. */
   authenticationInProgress?: boolean;
   /** A hard native lock/background boundary overrides authentication display continuity. */

@@ -87,7 +87,7 @@ test('an explicitly retained parent draft stays inaccessible through revocation 
   const view=render(content(live));act(()=>setPrivate('Retained private draft'));
   view.rerender(content());
   expect(view.queryByText('Retained private draft')).toBeNull();
-  expect(view.getByTestId('lava-route-privacy-cover')).toBeTruthy();
+  expect(view.queryByTestId('lava-route-privacy-cover')).toBeNull(); // Missing fields alone are not an app-lock boundary.
   expect(destroyed).not.toHaveBeenCalled();
   view.rerender(content({...live,security:{...live.security,readRevision:2}}));
   expect(view.getByText('Retained private draft')).toBeTruthy();expect(mounts).toBe(1);
@@ -114,7 +114,7 @@ test.each(['owner','unavailable'])('ordinary Security scaffolds keep their nativ
   expect(view.queryByTestId('security-scroll')).toBeNull();
   expect(view.getByTestId('security-scroll',{includeHiddenElements:true})).toBe(scroll);
   expect(scroll.props.pointerEvents).toBe('none');expect(destroyed).not.toHaveBeenCalled();
-  expect(view.getByTestId('lava-route-privacy-cover')).toBeTruthy();
+  expect(view.queryByTestId('lava-route-privacy-cover')).toBeNull(); // Missing fields alone are not an app-lock boundary.
   view.rerender(content({...policy,security:{...policy.security,readRevision:3}}));
   expect(view.getByTestId('security-scroll')).toBe(scroll);expect(scroll.props.pointerEvents).toBe('auto');
   view.rerender(content({...policy,security:{...policy.security,...(change==='owner'?{ownerRevision:'owner-2'}:{unavailable:true})}}));

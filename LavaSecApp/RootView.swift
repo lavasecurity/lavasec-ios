@@ -151,7 +151,9 @@ struct RootView: View {
                     await viewModel.reconcilePendingFilterSwitch()
                 }
             case .inactive:
-                security.showAppUnlockPrivacyMaskIfNeeded()
+                // System sheets and in-app transitions are still this session.
+                // UIKit protects the switcher snapshot; only background locks.
+                break
             case .background:
                 security.lockForBackgroundIfNeeded()
                 // Clear the foreground flag so a Focus or automation switch while suspended/closed posts
