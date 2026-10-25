@@ -9,9 +9,9 @@ export function onboardingPageMotion(previousPage:number|undefined,page:number,r
 }
 export function onboardingTravelProgress(elapsed:number,duration=onboardingTravelDuration){if(duration<=0)return 1;const t=Math.min(1,Math.max(0,elapsed/duration));return 1-Math.pow(1-t,3);}
 export function lavaWavePhase(elapsed:number){return ((elapsed%18)+18)%18/18*Math.PI*2;}
-export function lavaWavePath(width:number,height:number,phase:number,amplitude:number,baseline:number){
-  const base=height*baseline,step=Math.max(width/96,1);let path=`M0 ${height} L0 ${base}`;
-  for(let x=0;x<=width;x+=step){const p=x/Math.max(width,1),y=base+Math.sin(p*Math.PI*2+phase)*amplitude+Math.sin(p*Math.PI*4-phase)*amplitude*.34+Math.sin(p*Math.PI*6+phase*2)*amplitude*.16;path+=` L${x} ${y}`;}
+export function lavaWavePath(width:number,height:number,phase:number,amplitude:number,baseline:number,period=width){
+  const base=height*baseline,segments=Math.max(1,Math.ceil(width/Math.max(period/96,1)));let path=`M0 ${height} L0 ${base}`;
+  for(let index=0;index<=segments;index++){const x=width*index/segments,p=x/Math.max(period,1),y=base+Math.sin(p*Math.PI*2+phase)*amplitude+Math.sin(p*Math.PI*4-phase)*amplitude*.34+Math.sin(p*Math.PI*6+phase*2)*amplitude*.16;path+=` L${x} ${y}`;}
   return path+` L${width} ${height} Z`;
 }
 export type OnboardingDestination={panel:OnboardingFrame;mascot:OnboardingFrame;action:OnboardingFrame};

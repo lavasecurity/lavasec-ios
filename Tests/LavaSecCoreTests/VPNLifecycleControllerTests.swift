@@ -6,6 +6,42 @@ import XCTest
 final class VPNLifecycleControllerTests: XCTestCase {
     private static let providerBundleID = "com.lavasec.app.tunnel"
 
+    func testBackgroundExpirationEndsConnectAndStopWaitsWithoutAnotherPreferenceLoad() async throws {
+        for connecting in [true, false] {
+            let fixture = Fixture()
+            let manager = FakeVPNManager(displayName: "Lava Security", bundleID: Self.providerBundleID,
+                                         status: connecting ? .connecting : .disconnecting)
+            fixture.repository.managers = [manager]
+            var loads = 0
+            var ended = false
+            fixture.repository.onLoadAll = { loads += 1 }
+            do {
+                try await ProtectionLifecycleExecution.run(begin: { expire in
+                    fixture.waiter.onWait = { seconds in
+                        fixture.clock.advance(seconds: seconds)
+                        expire()
+                        return false
+                    }
+                    return { ended = true }
+                }) {
+                    let confirmed: Bool
+                    if connecting {
+                        confirmed = await fixture.controller.waitForConnect(
+                            timeout: 15, initialManager: manager, onObservation: { _ in })
+                    } else {
+                        confirmed = await fixture.controller.waitForStop(
+                            timeout: 15, initialManager: manager, onObservation: { _ in })
+                    }
+                    XCTAssertFalse(confirmed, "Expiration is not a successful lifecycle transition.")
+                }
+                XCTFail("The expired execution must return cancellation.")
+            } catch is CancellationError {}
+            XCTAssertEqual(fixture.waiter.waitCount, 1)
+            XCTAssertEqual(loads, 0, "Expiration must not begin another NetworkExtension callback.")
+            XCTAssertTrue(ended)
+        }
+    }
+
     func testLoadExistingPrefersActiveManagerThenCanonicalDisplayName() async throws {
         let fixture = Fixture()
         let legacyIdle = FakeVPNManager(displayName: "Lava Sec", bundleID: Self.providerBundleID, status: .disconnected)

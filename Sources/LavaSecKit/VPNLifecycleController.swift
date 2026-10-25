@@ -196,6 +196,7 @@ public final class VPNLifecycleController<Repository: VPNManagerRepositoryProtoc
 
         var attempt = 0
         while true {
+            try Task.checkCancellation()
             if let found = try await loadExistingManager() {
                 if attempt > 0 {
                     emitEvent("load-existing-manager-recovered-after-empty", ["attempts": "\(attempt + 1)"])
@@ -289,6 +290,7 @@ public final class VPNLifecycleController<Repository: VPNManagerRepositoryProtoc
         initialManager: Manager?,
         onObservation: (Manager?) -> Void
     ) async -> Bool {
+        guard !Task.isCancelled else { return false }
         var current = initialManager
         onObservation(current)
         var status = current?.lifecycleStatus ?? .invalid
@@ -318,10 +320,12 @@ public final class VPNLifecycleController<Repository: VPNManagerRepositoryProtoc
             }
 
             _ = await statusWaiter.waitForStatusChange(timeout: min(waitPolicy.statusPollInterval, remaining))
+            guard !Task.isCancelled else { return false }
             onObservation(current)
             status = current?.lifecycleStatus ?? .invalid
             if status != .connected, ProtectionLifecyclePolicy.isStartPending(status) {
                 current = try? await loadExistingManager()
+                guard !Task.isCancelled else { return false }
                 onObservation(current)
                 status = current?.lifecycleStatus ?? .invalid
             }
@@ -344,6 +348,7 @@ public final class VPNLifecycleController<Repository: VPNManagerRepositoryProtoc
         initialManager: Manager?,
         onObservation: (Manager?) -> Void
     ) async -> Bool {
+        guard !Task.isCancelled else { return false }
         var current = initialManager
         onObservation(current)
         var status = current?.lifecycleStatus ?? .invalid
@@ -366,10 +371,12 @@ public final class VPNLifecycleController<Repository: VPNManagerRepositoryProtoc
             let observedStatusChange = await statusWaiter.waitForStatusChange(
                 timeout: min(waitPolicy.statusPollInterval, remaining)
             )
+            guard !Task.isCancelled else { return false }
             onObservation(current)
             status = current?.lifecycleStatus ?? .invalid
             if ProtectionLifecyclePolicy.isStopPending(status) {
                 current = try? await loadExistingManager()
+                guard !Task.isCancelled else { return false }
                 onObservation(current)
                 status = current?.lifecycleStatus ?? .invalid
             }
@@ -378,8 +385,10 @@ public final class VPNLifecycleController<Repository: VPNManagerRepositoryProtoc
             }
         }
 
+        guard !Task.isCancelled else { return false }
         if ProtectionLifecyclePolicy.isStopPending(status) {
             current = try? await loadExistingManager()
+            guard !Task.isCancelled else { return false }
             onObservation(current)
             status = current?.lifecycleStatus ?? .invalid
             emitEvent("wait-for-stop-timeout-manager-reloaded", [

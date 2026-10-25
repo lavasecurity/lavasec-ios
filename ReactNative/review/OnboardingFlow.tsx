@@ -18,7 +18,7 @@ import {useReview} from './ReviewContext';
 import {useOnboardingDestination} from './onboarding-geometry';
 import {OnboardingTravel,OnboardingPhaseCommands,onboardingPageMotion} from './onboarding-motion';
 import {useCrossFadePreference,useReducedMotionPreference} from './navigation-scaffold';
-import {OnboardingChoice,OnboardingSetupAction,OnboardingCurtain,OnboardingFeature,OnboardingFooter,OnboardingPageScroll,OnboardingProgress,OnboardingStageLayout,OnboardingStep,OnboardingWelcome,onboardingPageTitle} from './onboarding-scaffold';
+import {OnboardingChoice,OnboardingSetupAction,OnboardingCurtain,OnboardingFeature,OnboardingFooter,OnboardingPageContent,OnboardingProgress,OnboardingStageLayout,OnboardingStep,OnboardingWelcome,onboardingPageTitle} from './onboarding-scaffold';
 import {Copy} from './primitives';
 import {toolbarAction,useToolbar} from './scaffold';
 
@@ -153,11 +153,9 @@ export function OnboardingFlow(){
     return()=>{active=false;cancelAnimationFrame(request);lifecycle.remove();};
   },[setup?.id,setup?.page,setup?.phase,frames,retry,live?.security.readRevision]);
   const close=()=>{if(setup?.mock)void command({type:'onboarding.dismiss',id:setup.id});};
-  const landscape=size.width>size.height;
-  const sourceInset=landscape?128*windowScale:0;
-  useToolbar({title:setup&&landscape?onboardingPageTitle(setup.page):'',headerTitleStyle:landscape&&setup?.page===0?{color:'white'}:undefined,headerBackVisible:false,
+  useToolbar({title:'',headerBackVisible:false,
     unstable_headerLeftItems:()=>setup?.history.length&&!['opening','released'].includes(setup.phase)?[toolbarAction('Back','back',()=>void command({type:'onboarding.back',id:setup.id}),!!setup.busy)]:[],
-    unstable_headerRightItems:()=>setup?.mock?[toolbarAction('Close','close',close,!!setup.busy)]:[]},[setup?.id,setup?.page,setup?.history.length,setup?.busy,setup?.phase,landscape]);
+    unstable_headerRightItems:()=>setup?.mock?[toolbarAction('Close','close',close,!!setup.busy)]:[]},[setup?.id,setup?.page,setup?.history.length,setup?.busy,setup?.phase]);
   if(!setup)return null;
   const busy=!!setup.busy||['opening','released'].includes(setup.phase);const opening=setup.phase==='opening'||setup.phase==='released';
   const position=setup.page===5&&travel.current?travel.current.position(animationNow()):sourceFrame?{x:sourceFrame.x+sourceFrame.width/2,y:sourceFrame.y+sourceFrame.height/2}:undefined;
@@ -167,24 +165,25 @@ export function OnboardingFlow(){
   const reveal=setup.page===5&&travel.current?easeInOut(Math.min(1,Math.max(0,(elapsed-1.19)/.55))):0;
   const surroundings=opening?1-easeInOut(Math.min(1,openingElapsed/.7)):1;
   const navigate=(page:number,revisit=false)=>void command({type:'onboarding.navigate',id:setup.id,page,revisit});
+  const mascot=<Animated.View pointerEvents="none" style={{width:mascotSize,height:mascotSize,opacity:setup.phase==='released'?0:returningWelcome?backdrop.interpolate({inputRange:[0,1],outputRange:[1,0]}):mascotOpacity,transform:returnOffset.getTranslateTransform()}}>
+    <GuardianDrawing active={setup.page!==0} size={mascotSize} look={look} mood={mascotState} blinkTrigger={blink.current} finishTrigger={opening?1:0} keepsColorWhenSleeping={!opening}/>
+    <View accessible={false} testID="onboarding.mascot" style={StyleSheet.absoluteFill}/>
+  </Animated.View>;
   return <View testID="onboarding.flow.viewport" onLayout={onLayout} style={{flex:1}}><View pointerEvents="none" style={[StyleSheet.absoluteFill,{opacity:surroundings}]}><OnboardingBackground width={size.width} height={size.height} frames={frames} reveal={reveal}/></View>
     <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill,{opacity:backdrop}]}><OnboardingLavaDrawing width={size.width} height={size.height} active={setup.page===0}/></Animated.View>
     <OnboardingCurtain key={setup.id} welcome={setup.page===0} width={size.width} height={size.height} reduced={reduced} crossFade={crossFade} opacity={reduced||crossFade?backdrop:1} returnProgress={returningWelcome?backdrop:undefined} wavesActive={!returningWelcome||returnSettled} onReturnReady={()=>{if(paintVisit.current.generation===returnGeneration)setReadyReturn(returnGeneration);}}/>
-    <OnboardingControls setup={setup} busy={busy} bottom={insets.bottom} left={insets.left} right={insets.right} compact={sourceInset>0} reduced={reduced} crossFade={crossFade} welcomeReturn={returningWelcome?backdrop:undefined} returnSettled={returnSettled} onPage={page=>navigate(page,true)} onNext={()=>navigate(setup.page+1)}>
-      {(progress,footer)=><View style={{flex:1,paddingTop:header}}><OnboardingStageLayout source={source} progress={progress} width={size.width} height={size.height} left={insets.left} right={insets.right} welcome={setup.page===0}>
-        <OnboardingPages setup={setup} command={command} height={contentHeight} reduced={reduced} crossFade={crossFade} landscape={landscape} sourceInset={sourceInset} welcomeReturn={returningWelcome?backdrop:undefined} returnSettled={returnSettled}/>
+    <OnboardingControls setup={setup} busy={busy} bottom={insets.bottom} left={insets.left} right={insets.right} reduced={reduced} crossFade={crossFade} onPage={page=>navigate(page,true)} onNext={()=>navigate(setup.page+1)}>
+      {footer=><View style={{flex:1,paddingTop:header}}><OnboardingStageLayout source={source} mascot={setup.page===5?null:mascot} width={size.width} height={size.height} left={insets.left} right={insets.right} welcome={setup.page===0}>
+        <OnboardingPages setup={setup} command={command} height={contentHeight} reduced={reduced} crossFade={crossFade} welcomeReturn={returningWelcome?backdrop:undefined} returnSettled={returnSettled}/>
         {failed&&<View style={[StyleSheet.absoluteFill,{padding:24,gap:16}]}><Copy role="supporting">Guard is still loading. Please try again.</Copy><LavaActionButton title="Try again" role="secondary" onPress={()=>setRetry(value=>value+1)}/></View>}
       </OnboardingStageLayout>{footer}</View>}
     </OnboardingControls>
-    {position&&<Animated.View pointerEvents="none" style={{position:'absolute',left:position.x-mascotSize/2,top:position.y-mascotSize/2,width:mascotSize,height:mascotSize,opacity:setup.phase==='released'?0:returningWelcome?backdrop.interpolate({inputRange:[0,1],outputRange:[1,0]}):mascotOpacity,transform:returnOffset.getTranslateTransform()}}>
-      <GuardianDrawing size={mascotSize} look={look} mood={mascotState} blinkTrigger={blink.current} finishTrigger={opening?1:0} keepsColorWhenSleeping={!opening}/>
-      <View accessible={false} testID="onboarding.mascot" style={StyleSheet.absoluteFill}/>
-    </Animated.View>}
+    {setup.page===5&&position&&<View pointerEvents="none" style={{position:'absolute',left:position.x-mascotSize/2,top:position.y-mascotSize/2,width:mascotSize,height:mascotSize}}>{mascot}</View>}
     {setup.page===5&&reveal>=1&&frames&&<><View pointerEvents="none" accessible accessibilityLabel={localized('Ready')} accessibilityValue={{text:localized('Your next step to a safer internet.')}} testID="onboarding.ready" style={{position:'absolute',left:frames.panel.x,top:frames.panel.y,width:frames.panel.width,height:frames.panel.height}}/>
       <Pressable accessibilityRole="button" accessibilityLabel={localized('Open Guard')} testID="onboarding.primary" disabled={busy||setup.phase!=='ready'} onPress={()=>void command({type:'onboarding.open',id:setup.id})} style={{position:'absolute',left:frames.action.x,top:frames.action.y,width:frames.action.width,height:frames.action.height}}/></>}
   </View>;
 }
-function OnboardingControls({setup,busy,bottom,left,right,compact,reduced,crossFade,welcomeReturn,returnSettled,onPage,onNext,children}:{setup:OnboardingSetup;busy:boolean;bottom:number;left:number;right:number;compact:boolean;reduced:boolean;crossFade:boolean;welcomeReturn?:Animated.Value;returnSettled:boolean;onPage:(page:number)=>void;onNext:()=>void;children:(progress:ReactNode,footer:ReactNode)=>ReactNode}){
+function OnboardingControls({setup,busy,bottom,left,right,reduced,crossFade,onPage,onNext,children}:{setup:OnboardingSetup;busy:boolean;bottom:number;left:number;right:number;reduced:boolean;crossFade:boolean;onPage:(page:number)=>void;onNext:()=>void;children:(footer:ReactNode)=>ReactNode}){
   const retained=useRef(setup);if(setup.page<5)retained.current=setup;
   const done=setup.page===5;const [removed,setRemoved]=useState(done);const [height,setHeight]=useState(0);
   const opacity=useRef(new Animated.Value(done?0:1)).current;
@@ -196,20 +195,17 @@ function OnboardingControls({setup,busy,bottom,left,right,compact,reduced,crossF
     const motion=Animated.timing(opacity,{toValue:done?0:1,duration:reduced||crossFade?200:320,easing:reduced||crossFade?easeInOut:Easing.bezier(0,0,.58,1),useNativeDriver:true});
     motion.start(({finished})=>{if(finished&&done)setRemoved(true);});return()=>motion.stop();
   },[done,reduced,crossFade]);
-  if(done&&removed)return children(null,<View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{height}}/>);
-  // One interactive progress group belongs to either scaffold slot. On Back,
-  // the retired slot fades as inaccessible paint on the same return clock.
-  const belowSource=compact&&visible.page>0;
+  if(done&&removed)return children(<View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{height}}/>);
+  // Progress and the primary action share one footer in every orientation.
   const progress=<OnboardingProgress page={visible.page} visited={visible.visited} busy={busy||done} vpnInstalled={visible.vpnInstalled} onPage={onPage} duration={welcomeTransition?(reduced?250:1100):reduced||crossFade?200:320} smooth={welcomeTransition||reduced||crossFade}/>;
-  const sourceProgress=belowSource?<Animated.View pointerEvents={done?'none':'auto'} accessibilityElementsHidden={done} importantForAccessibility={done?'no-hide-descendants':'auto'} style={{opacity}}>{progress}</Animated.View>
-    :compact&&welcomeReturn&&!returnSettled?<Animated.View pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{opacity:welcomeReturn.interpolate({inputRange:[0,1],outputRange:[1,0]})}}><OnboardingProgress page={transition.current.previous??1} visited={visible.visited} busy vpnInstalled={visible.vpnInstalled} onPage={onPage} duration={0} smooth={false}/></Animated.View>:null;
   const footer=<Animated.View onLayout={event=>setHeight(event.nativeEvent.layout.height)} pointerEvents={done?'none':'auto'} accessibilityElementsHidden={done} importantForAccessibility={done?'no-hide-descendants':'auto'} style={{opacity}}>
-    <OnboardingFooter page={visible.page} busy={busy||done} vpnInstalled={visible.vpnInstalled} bottom={bottom} left={left} right={right} progress={belowSource?null:welcomeReturn?<Animated.View style={{opacity:welcomeReturn}}>{progress}</Animated.View>:progress} outlineTransitionDuration={welcomeTransition?(reduced?250:1100):reduced||crossFade?200:320} onNext={onNext}/>
+    <OnboardingFooter page={visible.page} busy={busy||done} vpnInstalled={visible.vpnInstalled} bottom={bottom} left={left} right={right} progress={progress} outlineTransitionDuration={welcomeTransition?(reduced?250:1100):reduced||crossFade?200:320} onNext={onNext}/>
   </Animated.View>;
-  return children(sourceProgress,footer);
+  return children(footer);
 }
-export function OnboardingPages({setup,command,height,reduced,crossFade,landscape=false,sourceInset=0,welcomeReturn,returnSettled=false}:{setup:OnboardingSetup;command:(action:AppCommand,quiet?:boolean)=>Promise<unknown>;height:number;reduced:boolean;crossFade:boolean;landscape?:boolean;sourceInset?:number;welcomeReturn?:Animated.Value;returnSettled?:boolean}){
-  const current=useRef(setup);const [outgoing,setOutgoing]=useState<OnboardingSetup>();
+export function OnboardingPages({setup,command,height,reduced,crossFade,welcomeReturn,returnSettled=false}:{setup:OnboardingSetup;command:(action:AppCommand,quiet?:boolean)=>Promise<unknown>;height:number;reduced:boolean;crossFade:boolean;welcomeReturn?:Animated.Value;returnSettled?:boolean}){
+  const current=useRef(setup);const retained=useRef(setup);if(setup.page<5)retained.current=setup;
+  const [outgoing,setOutgoing]=useState<OnboardingSetup>();
   if(current.current.page!==setup.page){setOutgoing(current.current);current.current=setup;}
   else current.current=setup;
   const movement=useRef(new Animated.Value(0)).current;
@@ -221,17 +217,17 @@ export function OnboardingPages({setup,command,height,reduced,crossFade,landscap
     const motion=Animated.timing(movement,{toValue:1,duration:transition.exitDuration,easing:transition.exitSmooth?easeInOut:Easing.bezier(0,0,.58,1),useNativeDriver:true});
     motion.start(({finished})=>{if(active&&finished)setOutgoing(previous=>previous===outgoing?undefined:previous);});return()=>{active=false;motion.stop();};
   },[outgoing,reduced,crossFade,welcomeReturn,returnSettled]);
-  return <View style={{flex:1}}><OnboardingStage key={setup.page} page={setup.page} previousPage={outgoing?.page} reduced={reduced} crossFade={crossFade} inset={setup.page===0?0:sourceInset} welcomeReturn={setup.page===0?welcomeReturn:undefined}>
-    <OnboardingPageScroll welcome={setup.page===0} landscape={landscape}><OnboardingPageBody setup={setup} command={command} showTitle={!landscape}/></OnboardingPageScroll>
+  return <View><OnboardingStage key={setup.page} page={setup.page} previousPage={outgoing?.page} reduced={reduced} crossFade={crossFade} welcomeReturn={setup.page===0?welcomeReturn:undefined}>
+    <OnboardingPageContent><View pointerEvents={setup.page===5?'none':'auto'} accessibilityElementsHidden={setup.page===5} importantForAccessibility={setup.page===5?'no-hide-descendants':'auto'} style={{opacity:setup.page===5?0:1}}><OnboardingPageBody setup={retained.current} command={command} showTitle/></View></OnboardingPageContent>
   </OnboardingStage>{outgoing&&<Animated.View testID="onboarding.page.outgoing" pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={[StyleSheet.absoluteFill,
-    {marginLeft:outgoing.page===0?0:sourceInset},outgoing.page===0&&!reduced?{transform:[{translateY:movement.interpolate({inputRange:[0,1],outputRange:[0,height*1.1]})}]}:{opacity:(setup.page===0&&welcomeReturn?welcomeReturn:movement).interpolate({inputRange:[0,1],outputRange:[1,0]})}]}>
-    <OnboardingPageScroll welcome={outgoing.page===0} landscape={landscape}><OnboardingPageBody setup={outgoing} command={command} showTitle={!landscape}/></OnboardingPageScroll>
+    outgoing.page===0&&!reduced?{transform:[{translateY:movement.interpolate({inputRange:[0,1],outputRange:[0,height*1.1]})}]}:{opacity:(setup.page===0&&welcomeReturn?welcomeReturn:movement).interpolate({inputRange:[0,1],outputRange:[1,0]})}]}>
+    <OnboardingPageContent><OnboardingPageBody setup={outgoing} command={command} showTitle/></OnboardingPageContent>
   </Animated.View>}</View>;
 }
-function OnboardingStage({page,previousPage,reduced,crossFade,inset,welcomeReturn,children}:{page:number;previousPage?:number;reduced:boolean;crossFade:boolean;inset:number;welcomeReturn?:Animated.Value;children:ReactNode}){
+function OnboardingStage({page,previousPage,reduced,crossFade,welcomeReturn,children}:{page:number;previousPage?:number;reduced:boolean;crossFade:boolean;welcomeReturn?:Animated.Value;children:ReactNode}){
   const opacity=useRef(new Animated.Value(page===0?1:0)).current;
   useLayoutEffect(()=>{if(page===0)return;const transition=onboardingPageMotion(previousPage,page,reduced,crossFade);const motion=Animated.timing(opacity,{toValue:1,duration:transition.entryDuration,delay:transition.entryDelay,easing:transition.entrySmooth?easeInOut:Easing.bezier(0,0,.58,1),useNativeDriver:true});motion.start();return()=>motion.stop();},[]);
-  return <Animated.View style={{flex:1,marginLeft:inset,opacity:welcomeReturn??opacity}}>{children}</Animated.View>;
+  return <Animated.View style={{opacity:welcomeReturn??opacity}}>{children}</Animated.View>;
 }
 function OnboardingPageBody({setup,command,showTitle}:{setup:OnboardingSetup;command:(action:AppCommand,quiet?:boolean)=>Promise<unknown>;showTitle:boolean}){
   const busy=!!setup.busy;const change=(choice:Omit<Extract<AppCommand,{type:'onboarding.choice'}>,'type'|'id'>)=>void command({type:'onboarding.choice',id:setup.id,...choice});

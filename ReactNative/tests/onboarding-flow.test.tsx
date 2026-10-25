@@ -163,16 +163,18 @@ test.each([[false,false,320],[true,false,200],[false,true,200]])('Features to We
   const clock=motions.find(m=>m.value===progress)!;
   expect(clock.config).toMatchObject({duration,toValue:1,useNativeDriver:true});expect(clock.config.delay).toBeUndefined();
   expect(motions.filter(m=>m.value===progress)).toHaveLength(1);
-  expect(motions.every(m=>m.config.useNativeDriver)).toBe(true);
-  const incoming=screen.UNSAFE_getAllByType(Animated.View).find(node=>{const style=StyleSheet.flatten(node.props.style);return style?.flex===1&&style?.opacity===progress;});
-  expect(incoming).toBeDefined();expect(StyleSheet.flatten(incoming!.props.style).marginLeft).toBe(0);
-  expect(screen.getByTestId('onboarding.page.outgoing',{includeHiddenElements:true})).toHaveStyle({marginLeft:128});
+  // The retained footer animates two dot widths on JS; the shared welcome
+  // clock and its background/mascot motion remain on the native driver.
+  expect(motions.filter(m=>!m.config.useNativeDriver)).toHaveLength(2);
+  const incoming=screen.UNSAFE_getAllByType(Animated.View).find(node=>{const style=StyleSheet.flatten(node.props.style);return style?.opacity===progress;});
+  expect(incoming).toBeDefined();expect(StyleSheet.flatten(incoming!.props.style).marginLeft).toBeUndefined();
+  expect(StyleSheet.flatten(screen.getByTestId('onboarding.page.outgoing',{includeHiddenElements:true}).props.style).marginLeft).toBeUndefined();
   const floor=()=>screen.UNSAFE_getAllByType(View).find(node=>node.props.floor)!;
   expect(floor().props.active).toBe(false);
   act(()=>clock.finish?.({finished:true}));
   expect(floor().props.active).toBe(true);expect(screen.queryByTestId('onboarding.page.outgoing',{includeHiddenElements:true})).toBeNull();
   expect(within(screen.getByTestId('onboarding.footer')).getByTestId('onboarding.steps')).toBeTruthy();
-  expect(within(screen.getByTestId('onboarding.source.column')).queryByTestId('onboarding.steps',{includeHiddenElements:true})).toBeNull();
+  expect(within(screen.getByTestId('onboarding.source.column',{includeHiddenElements:true})).queryByTestId('onboarding.steps',{includeHiddenElements:true})).toBeNull();
 });
 test('a cancelled Welcome return cannot start waves or retire the next page transition',()=>{
   render(flow(1));screen.rerender(flow(0));const oldProgress=screen.UNSAFE_getByType(OnboardingPages).props.welcomeReturn;
@@ -194,7 +196,7 @@ test('Welcome Back waits for a usable committed canvas before starting the share
 });
 test('portrait Features to Welcome retains the original body layout while fading its incoming copy',()=>{
   render(flow(1,402,874));screen.rerender(flow(0,402,874));
-  expect(screen.UNSAFE_getByType(OnboardingPages).props.sourceInset).toBe(0);
+  expect(screen.getByTestId('onboarding.composition')).toHaveStyle({flexDirection:'column',alignItems:'center'});
   expect(screen.getByRole('header',{name:onboardingPageTitle(0)})).toBeTruthy();
   expect(jest.mocked(useToolbar).mock.calls.at(-1)?.[0].title).toBe('');
 });
@@ -228,28 +230,28 @@ test('returning to Welcome brings its curtain back with ordinary timing and igno
   act(()=>oldExit.finish?.({finished:true}));expect(screen.getByTestId('onboarding.floor',{includeHiddenElements:true})).toBeTruthy();
   expect(onboardingPageMotion(1,0,false,false).entryDuration).toBe(320);
 });
-test.each([0,1,2,4])('landscape page %s delegates its single title to the native bar and restores portrait body title on rotation',page=>{
+test.each([0,1,2,4])('page %s keeps its single title in the centered body across rotation',page=>{
   const anchor:Anchor={current:null};const value=(width:number,height:number)=>({panel:anchor,mascot:anchor,action:anchor,source:anchor,root:anchor,origin:{x:0,y:0},size:{width,height},setup:setup(page)});
   const content=(width:number,height:number)=><OnboardingGeometryContext.Provider value={value(width,height)}><OnboardingFlow/></OnboardingGeometryContext.Provider>;
   render(content(874,402));
-  expect(jest.mocked(useToolbar).mock.calls.at(-1)?.[0]).toMatchObject({title:onboardingPageTitle(page),headerBackVisible:false});
-  expect(screen.queryByRole('header',{name:onboardingPageTitle(page)})).toBeNull();
-  if(page>0)expect(within(screen.getByTestId('onboarding.source.column')).getByTestId('onboarding.steps')).toBeTruthy();
+  expect(jest.mocked(useToolbar).mock.calls.at(-1)?.[0]).toMatchObject({title:'',headerBackVisible:false});
+  expect(screen.getByRole('header',{name:onboardingPageTitle(page)})).toBeTruthy();
+  expect(within(screen.getByTestId('onboarding.footer')).getByTestId('onboarding.steps')).toBeTruthy();
   screen.rerender(content(402,874));
   expect(jest.mocked(useToolbar).mock.calls.at(-1)?.[0].title).toBe('');
   expect(screen.getByRole('header',{name:onboardingPageTitle(page)})).toBeTruthy();
   expect(within(screen.getByTestId('onboarding.footer')).getByTestId('onboarding.steps')).toBeTruthy();
 });
-test.each([[700,600,140.8],[1024,768,158.72],[1080,810,163.2],[1366,1024,179.2],[874,500,130.13333333333333]])('landscape %s×%s reserves the source lane and retains one progress group through Welcome return',(width,height,sourceSize)=>{
+test.each([[700,600,140.8],[1024,768,158.72],[1080,810,163.2],[1366,1024,179.2],[874,500,130.13333333333333]])('landscape %s×%s aligns its source in the scene and retains one progress group through Welcome return',(width,height,sourceSize)=>{
   render(flow(1,width,height));
-  expect(screen.UNSAFE_getByType(OnboardingPages).props.sourceInset).toBeCloseTo(sourceSize);
-  expect(screen.getByTestId('onboarding.source.column')).toHaveStyle({position:'absolute'});
+  expect(screen.getByTestId('onboarding.composition')).toHaveStyle({flexDirection:'row',alignItems:'center'});
+  expect(screen.getByTestId('onboarding.source.column')).not.toHaveStyle({position:'absolute'});
   expect(StyleSheet.flatten(screen.getByTestId('onboarding.source.column').props.style).width).toBeCloseTo(sourceSize);
-  expect(within(screen.getByTestId('onboarding.source.column')).getByTestId('onboarding.steps')).toBeTruthy();
-  expect(within(screen.getByTestId('onboarding.footer')).queryByTestId('onboarding.steps',{includeHiddenElements:true})).toBeNull();
+  expect(within(screen.getByTestId('onboarding.footer')).getByTestId('onboarding.steps')).toBeTruthy();
+  expect(screen.getAllByTestId('onboarding.steps')).toHaveLength(1);
   screen.rerender(flow(0,width,height));
   expect(screen.getAllByTestId('onboarding.steps')).toHaveLength(1);
-  expect(within(screen.getByTestId('onboarding.source.column')).queryByTestId('onboarding.steps')).toBeNull();
+  expect(within(screen.getByTestId('onboarding.source.column',{includeHiddenElements:true})).queryByTestId('onboarding.steps')).toBeNull();
 });
 test('tablet onboarding mascot uses the same baseline as its Guard destination',()=>{
   render(flow(2,1032,1376));
@@ -335,7 +337,7 @@ test.each([0,2])('retiring landscape page %s clears its native title and control
   const anchor:Anchor={current:null};
   const content=(state:OnboardingSetup|undefined)=><OnboardingGeometryContext.Provider value={{panel:anchor,mascot:anchor,action:anchor,source:anchor,root:anchor,origin:{x:0,y:0},size:{width:874,height:402},setup:state}}><OnboardingFlow/></OnboardingGeometryContext.Provider>;
   render(content(setup(page)));
-  expect(jest.mocked(useToolbar).mock.calls.at(-1)?.[0].title).toBe(onboardingPageTitle(page));
+  expect(jest.mocked(useToolbar).mock.calls.at(-1)?.[0].title).toBe('');
   screen.rerender(content(undefined));
   const toolbar=jest.mocked(useToolbar).mock.calls.at(-1)![0];
   expect(toolbar.title).toBe('');expect(toolbar.headerTitleStyle).toBeUndefined();
@@ -348,7 +350,7 @@ test('the onboarding CTA respects asymmetric landscape safe edges and retains it
   const content=(width:number,height:number)=><OnboardingGeometryContext.Provider value={{panel:anchor,mascot:anchor,action:anchor,source:anchor,root:anchor,origin:{x:0,y:0},size:{width,height},setup:setup(2)}}><OnboardingFlow/></OnboardingGeometryContext.Provider>;
   render(content(874,402));const action=screen.getByTestId('onboarding.primary');
   expect(screen.getByTestId('onboarding.footer')).toHaveStyle({paddingLeft:79,paddingRight:64,paddingBottom:39});
-  expect(within(screen.getByTestId('onboarding.source.column')).getByTestId('onboarding.steps')).toBeTruthy();
+  expect(within(screen.getByTestId('onboarding.footer')).getByTestId('onboarding.steps')).toBeTruthy();
   insets.mockReturnValue({top:62,bottom:34,left:0,right:0});screen.rerender(content(402,874));
   expect(screen.getByTestId('onboarding.footer')).toHaveStyle({paddingHorizontal:20,paddingBottom:52});
   expect(screen.getByTestId('onboarding.primary')).toBe(action);

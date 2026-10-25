@@ -304,7 +304,7 @@ final class ProtectionOnDemandSourceTests: XCTestCase {
             reconnect.range(of: "            do {\n                if protectionTeardownIsOwned {")?
                 .lowerBound)
         let suspendedScopeEnd = try XCTUnwrap(
-            reconnect.range(of: "\n            }\n            guard continueIfCurrent?() ?? true else { return }")?.lowerBound)
+            reconnect.range(of: "\n            }\n            guard !Task.isCancelled, continueIfCurrent?() ?? true else { return }")?.lowerBound)
         let reconnectEnable = try XCTUnwrap(
             reconnect.range(of: "await enableProtection(", range: suspendedScopeEnd..<reconnect.endIndex)?
                 .lowerBound)

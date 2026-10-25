@@ -96,11 +96,11 @@ final class ProtectionSettingsApplySourceTests: XCTestCase {
             "if requiresActiveSession", "try await loadExistingTunnelManager()",
             "isProtectionEnabledStatus(manager.connection.status)", "continueIfCurrent?() ?? true",
             "manager?.connection.stopVPNTunnel()", "waitForProtectionToStop",
-            "guard continueIfCurrent?() ?? true", "await enableProtection("
+            "guard !Task.isCancelled, continueIfCurrent?() ?? true", "await enableProtection("
         ], in: reconnect))
         XCTAssertTrue(sourceContainsInOrder([
             "var inheritedTeardownIsActive = protectionTeardownIsOwned", "defer {",
-            "if inheritedTeardownIsActive { endProtectionTeardown() }", "guard continueIfCurrent?() ?? true"
+            "if inheritedTeardownIsActive { endProtectionTeardown() }", "guard !Task.isCancelled, continueIfCurrent?() ?? true"
         ], in: reconnect), "Early refusal must release an already-transferred teardown edge.")
     }
 }

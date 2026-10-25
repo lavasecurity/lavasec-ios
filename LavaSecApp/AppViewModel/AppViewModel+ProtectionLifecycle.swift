@@ -116,7 +116,7 @@ extension AppViewModel {
         }
 
         func shouldContinueProtectionLifecycle() -> Bool {
-            continueIfLifecycleLeaseOwned?() ?? true
+            !Task.isCancelled && (continueIfLifecycleLeaseOwned?() ?? true)
         }
 
         func performWhileProtectionLifecycleOwned(
@@ -527,6 +527,8 @@ extension AppViewModel {
                 manager = try await loadExistingTunnelManager()
             }
 
+            try Task.checkCancellation()
+
             if manager != nil {
                 endProtectionVPNSession()
             }
@@ -556,10 +558,13 @@ extension AppViewModel {
             // ``drainChainedOnDemandArm()``.
             //
             await drainChainedOnDemandArm()
+            try Task.checkCancellation()
             var onDemandDisabled = true
             if let manager {
                 onDemandDisabled = await disableOnDemandWithRetry(on: manager, clearsStrictRouting: persistsExplicitIntent)
             }
+
+            try Task.checkCancellation()
 
             manager?.connection.stopVPNTunnel()
             updateProtectionStatus(from: manager)
@@ -588,6 +593,7 @@ extension AppViewModel {
                 if !mustForceRemoveProfile {
                     mustForceRemoveProfile = await waitForProtectionToStop() == false
                 }
+                try Task.checkCancellation()
                 if mustForceRemoveProfile {
                     guard await forceRemoveStuckProtectionProfile() else {
                         throw LavaSecAppError.vpnStillStopping
@@ -633,7 +639,7 @@ extension AppViewModel {
         defer {
             if inheritedTeardownIsActive { endProtectionTeardown() }
         }
-        guard continueIfCurrent?() ?? true else { return }
+        guard !Task.isCancelled, continueIfCurrent?() ?? true else { return }
         if !lifecycleMutationFenceIsOwned {
             // Cancel and transitively drain a delayed arm before waiting for the outer fence. This
             // lets a callback already suspended in saveToPreferences finish under its fence, then
@@ -754,19 +760,19 @@ extension AppViewModel {
                 }
                 if requiresActiveSession {
                     guard let manager, isProtectionEnabledStatus(manager.connection.status),
-                          continueIfCurrent?() ?? true else { return }
+                          !Task.isCancelled, continueIfCurrent?() ?? true else { return }
                     tunnelManager = manager
                 }
                 vpnMessage = "Reconnecting local protection..."
                 vpnMessageIsError = false
                 await drainChainedOnDemandArm()
-                guard continueIfCurrent?() ?? true else { return }
+                guard !Task.isCancelled, continueIfCurrent?() ?? true else { return }
                 // Disable on-demand before the reset-stop so iOS does not reconnect mid-wait.
                 // After the new tunnel reports connected, the lifecycle reducer emits the new arm.
                 if let manager {
                     await disableOnDemandWithRetry(on: manager)
                 }
-                guard continueIfCurrent?() ?? true else { return }
+                guard !Task.isCancelled, continueIfCurrent?() ?? true else { return }
                 manager?.connection.stopVPNTunnel()
                 updateProtectionStatus(from: manager)
                 guard await waitForProtectionToStop(timeout: Self.protectionRestartStopWaitTimeout)
@@ -774,7 +780,7 @@ extension AppViewModel {
                     throw LavaSecAppError.vpnStillStopping
                 }
             }
-            guard continueIfCurrent?() ?? true else { return }
+            guard !Task.isCancelled, continueIfCurrent?() ?? true else { return }
             await enableProtection(
                 logUserAction: false,
                 playsOutcomeHaptic: playsOutcomeHaptic,
@@ -1120,6 +1126,7 @@ extension AppViewModel {
         attempts: Int = 3
     ) async -> Bool {
         for attempt in 1...max(1, attempts) {
+            guard !Task.isCancelled else { return false }
             do {
                 if clearsStrictRouting {
                     // An explicit OFF authorizes releasing strict routing as well as stopping
@@ -1154,6 +1161,7 @@ extension AppViewModel {
                 #endif
                 if attempt < attempts {
                     try? await Task.sleep(nanoseconds: Self.onDemandDisableRetryDelayNanoseconds)
+                    guard !Task.isCancelled else { return false }
                     // The common transient failure is a stale in-memory
                     // configuration: saveToPreferences rejects an out-of-date
                     // manager (NEVPNError.configurationStale). Reload it from

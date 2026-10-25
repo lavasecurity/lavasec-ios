@@ -1,5 +1,5 @@
 {
-  "normalSimulatorMinimumTests": 86,
+  "normalSimulatorMinimumTests": 87,
   "separateMotionTests": ["testExplicitCrossFadeNavigation"],
   "installedQAFixtureTests": [
     "testRound8EntitledVPNEditorSavesSyntheticSplitConfigurationWithGuardOff",

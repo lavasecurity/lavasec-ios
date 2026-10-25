@@ -191,6 +191,7 @@ if [ "$mode" = --journeys ]; then
     -only-testing:LavaSecUITests/RNFullAppUITests/testStoryJourneyDarkPreservesConnectionAlignmentAcrossRotation \
     -only-testing:LavaSecUITests/RNFullAppUITests/testNativeOnboardingPersistsFallbackChoiceThroughNavigationAndRelaunch \
     -only-testing:LavaSecUITests/RNFullAppUITests/testNativeOnboardingKeepsGuardGeometryInLandscape \
+    -only-testing:LavaSecUITests/RNFullAppUITests/testOnboardingCentersWelcomeAndStepsAcrossRotation \
     test-without-building > "$evidence/ipad/xcodebuild.log" 2>&1 || {
       if [ -d "$build_root/ipad.xcresult" ]; then
         xcrun xcresulttool get test-results summary --path "$build_root/ipad.xcresult" > "$evidence/ipad/test-summary.json" || true
@@ -201,7 +202,7 @@ if [ "$mode" = --journeys ]; then
     }
   xcrun xcresulttool get test-results summary --path "$build_root/ipad.xcresult" > "$evidence/ipad/test-summary.json"
   xcrun xcresulttool export attachments --path "$build_root/ipad.xcresult" --output-path "$evidence/ipad/screenshots"
-  node -e 'const fs=require("fs");const s=JSON.parse(fs.readFileSync(process.argv[1]));if(s.result!=="Passed"||s.passedTests!==4||s.failedTests!==0||s.skippedTests!==0)throw Error("All iPad layout and onboarding journeys must execute and pass, with no skipped tests");' "$evidence/ipad/test-summary.json"
+  node -e 'const fs=require("fs");const s=JSON.parse(fs.readFileSync(process.argv[1]));if(s.result!=="Passed"||s.passedTests!==5||s.failedTests!==0||s.skippedTests!==0)throw Error("All iPad layout and onboarding journeys must execute and pass, with no skipped tests");' "$evidence/ipad/test-summary.json"
   ipad_finished=$(date +%s)
   echo "Tablet test-without-building elapsed seconds: $((ipad_finished - ipad_started))" > "$evidence/ipad/build-cost.txt"
   ditto -c -k --sequesterRsrc --keepParent "$app" "$evidence/Lava-RN-Full-Simulator.zip"

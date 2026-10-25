@@ -375,6 +375,16 @@ enum LavaProtectionCommandService {
     }
 
     private static func performReconnect() async throws {
+        // App-hosted Live Activity intents can be suspended too. Obtain execution time before
+        // claimRestartInFlight takes the raw fence; extension-hosted calls retain their host's
+        // execution lifetime. Cleanup below still owns the fence through non-cancellable callbacks.
+        // pinned: ProtectionLifecycleExecutionSourceTests.testDirectRestartAlsoObtainsExecutionTimeBeforeTakingItsRawFence
+        try await ProtectionLifecycleExecution.run {
+            try await performReconnectWithExecutionTime()
+        }
+    }
+
+    private static func performReconnectWithExecutionTime() async throws {
         // Claim the in-flight slot. This rejects a second concurrent / re-delivered
         // Restart, and (load-bearing) lets the app's status reconcile report
         // `.restarting` for the duration: the restart's own stop→start emits

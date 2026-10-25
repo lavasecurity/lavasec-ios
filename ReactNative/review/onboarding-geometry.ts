@@ -37,7 +37,9 @@ export function useOnboardingMeasurements(visit:string|undefined,{root,source,pa
         const relative=(f:OnboardingFrame)=>({...f,x:f.x-r.x,y:f.y-r.y});
         const withinRoot=(f:OnboardingFrame)=>f.x>=-1&&f.y>=-1&&f.x+f.width<=r.width+1&&f.y+f.height<=r.height+1;
         const nextSource=finite(s)?relative(s):undefined;
-        setSourceFrame(old=>nextSource&&withinRoot(nextSource)?JSON.stringify(old)===JSON.stringify(nextSource)?old:nextSource:undefined);
+        // Setup content can scroll the mascot outside the viewport. Its current
+        // position still starts the flight; only the destination must be visible.
+        setSourceFrame(old=>nextSource?JSON.stringify(old)===JSON.stringify(nextSource)?old:nextSource:undefined);
         const [p,m,a]=await Promise.all([measure(panel),measure(mascot),measure(action)]);
         if(!active||generation!==epoch)return;
         if(finite(p)&&finite(m)&&finite(a)){

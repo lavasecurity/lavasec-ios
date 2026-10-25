@@ -1049,6 +1049,48 @@ final class RNFullAppUITests: XCTestCase {
         #endif
     }
 
+    private func assertOnboardingCentered(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
+        let stage = app.scrollViews["onboarding.stage"]
+        let scene = app.otherElements["onboarding.composition"]
+        XCTAssertTrue(stage.waitForExistence(timeout: 10), file: file, line: line)
+        XCTAssertTrue(scene.waitForExistence(timeout: 10), file: file, line: line)
+        waitForSettledFrame(scene)
+        XCTAssertEqual(scene.frame.midX, stage.frame.midX, accuracy: 1, file: file, line: line)
+        if scene.frame.height <= stage.frame.height - 48 {
+            XCTAssertEqual(scene.frame.midY, stage.frame.midY, accuracy: 1, file: file, line: line)
+        } else {
+            XCTAssertGreaterThanOrEqual(scene.frame.minY, stage.frame.minY, file: file, line: line)
+        }
+    }
+
+    func testOnboardingCentersWelcomeAndStepsAcrossRotation() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launchEnvironment["LAVA_UI_TEST_REPLAY_ONBOARDING"] = "1"
+        for orientation in [UIDeviceOrientation.portrait, .landscapeLeft] {
+            app.launch()
+            XCUIDevice.shared.orientation = orientation
+            assertWindowOrientation(app, landscape: orientation == .landscapeLeft)
+            let primary = app.buttons["onboarding.primary"]
+            XCTAssertTrue(primary.waitForExistence(timeout: 30))
+            assertOnboardingCentered(app)
+            for title in ["Lava stands guard here", "First, let’s get Lava ready to help."] {
+                XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND enabled == true"), object: primary)], timeout: 10), .completed)
+                primary.tap()
+                XCTAssertTrue(app.staticTexts[title].waitForExistence(timeout: 10))
+                assertOnboardingCentered(app)
+                if orientation == .landscapeLeft {
+                    let source = app.otherElements["onboarding.source"]
+                    let page = app.otherElements["onboarding.pages.viewport"]
+                    XCTAssertEqual(source.frame.midY, page.frame.midY, accuracy: 1)
+                }
+            }
+            capture(app, "Centered onboarding \(orientation == .portrait ? "portrait" : "landscape")")
+            app.terminate()
+        }
+        XCUIDevice.shared.orientation = .portrait
+    }
+
     func testMockOnboardingRehearsesFreshSetupWithoutChangingGuard() throws {
         #if !targetEnvironment(simulator)
         throw XCTSkip("Use an isolated simulator for the mock onboarding journey.")
@@ -1073,20 +1115,20 @@ final class RNFullAppUITests: XCTestCase {
         // after its accessibility element appears. Compare settled page frames.
         waitForSettledFrame(primary)
         let welcomeButtonFrame = primary.frame
+        assertOnboardingCentered(app)
         capture(app, "Onboarding welcome")
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND enabled == true"), object: primary)], timeout: 10), .completed)
         primary.tap()
         XCTAssertTrue(app.staticTexts["Lava stands guard here"].waitForExistence(timeout: 10))
         waitForSettledFrame(primary)
         capture(app, "Benefits with Settings outline glyphs")
-        let featureTitleTop = try renderedStaticText(app, "Lava stands guard here").frame.minY
+        assertOnboardingCentered(app)
         XCTAssertEqual(primary.frame, welcomeButtonFrame, "The inward welcome border must preserve the filled button's geometry.")
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND enabled == true"), object: primary)], timeout: 10), .completed)
         primary.tap()
         let vpn = app.descendants(matching: .any).matching(identifier: "onboarding.install-vpn").firstMatch
         XCTAssertTrue(vpn.waitForExistence(timeout: 10))
-        XCTAssertEqual(try renderedStaticText(app, "First, let’s get Lava ready to help.").frame.minY,
-                       featureTitleTop, accuracy: 1, "Page 2 and page 3 headings share the same top position.")
+        assertOnboardingCentered(app)
         XCTAssertFalse(primary.isEnabled)
         XCTAssertEqual(primary.label, "Install VPN first")
         XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label MATCHES %@", "Step [0-9]+" )).count, 0)
