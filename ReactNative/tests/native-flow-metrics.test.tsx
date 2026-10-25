@@ -5,7 +5,7 @@ import {PresentationContext,Text,localized,type Presentation} from '../app/prese
 import type {AppSnapshot} from '../app/contract';
 import type {AppStore} from '../app/store';
 import {useTextScale} from '../app/text-metrics';
-import {useWindowLayout} from '../src/window-layout';
+import {windowLayout,useWindowLayout} from '../src/window-layout';
 import {NativeFlowMetrics} from '../review/NativeFlowMetrics.ios';
 import {AccountBackupFlowAdapter} from '../review/AccountBackupFlowAdapter.ios';
 import {AccountBackupFlow} from '../src/flows/account-backup/AccountBackupFlow';
@@ -19,7 +19,7 @@ import {DNSHelpScreen} from '../src/flows/dns-help/DNSHelpScreen';
 import {ImportFlowAdapter} from '../review/ImportFlowAdapter.ios';
 import {PasscodeFlowAdapter} from '../review/PasscodeFlowAdapter.ios';
 import {QAFlowAdapter} from '../review/QAFlowAdapter.ios';
-import {DNSPatchScreen} from '../review/NativePageScreen';
+import {AutoSwitchScreen,DNSPatchScreen} from '../review/NativePageScreen';
 import {Copy,Screen,Symbol} from '../review/primitives';
 import {FlowSheet,FormParagraph} from '../review/form-scaffold';
 import {Group,Panel as OrdinaryPanel,Search} from '../review/scaffold';
@@ -379,23 +379,14 @@ test('shared QA and ordinary searches retain their existing platform defaults wi
   expect(send).toHaveBeenCalledWith({action:'search',value:'network'});
 });
 
-test('real DNS help exposes the ordinary page scroll owner with its measured native content metrics',()=>{
+test('real DNS help keeps native scrolling and the shared tablet reading band',()=>{
   render(fixture(<DNSPatchScreen/>));
   expect(screen.UNSAFE_getByType(Screen)).toBeTruthy();
   expect(screen.UNSAFE_queryByType(KeyboardAvoidingView)).toBeNull();
   const scroll=screen.UNSAFE_getByType(ScrollView);
-  expect(scroll.props.testID).toBe('screen.scroll');
   expect(scroll.props.contentInsetAdjustmentBehavior).toBe('automatic');
-  expect(StyleSheet.flatten(scroll.props.contentContainerStyle)).toMatchObject({width:'100%',maxWidth:960,paddingHorizontal:18,paddingTop:28,paddingBottom:44});
-  expect(StyleSheet.flatten(screen.getByTestId('dns-patch-page').props.style)).toEqual({gap:20});
-  // ec1b LavaSetupSection uses the shared information-panel 16x12 insets.
-  for(const section of screen.getAllByTestId('dns.instructions'))expect(StyleSheet.flatten(section.props.style)).toMatchObject({paddingHorizontal:16,paddingVertical:12,gap:12});
-  expect(font('To keep Lava effective, choose one of these options.')).toBe(15);
-  for(const text of ['To keep Lava effective, choose one of these options.','Open DNS settings and configure System DNS.']){
-    const label=screen.getByText(text);expect(StyleSheet.flatten(label.props.style)).toMatchObject({fontSize:15,lineHeight:20,marginVertical:-1});
-    expect(label.props.lineBreakStrategyIOS).toBe('standard');
-  }
-  expect(screen.UNSAFE_getAllByType(Decoration).find(node=>node.props.symbol==='checkmark.circle.fill')!.props.fontPointSize).toBe(20);
+  expect(StyleSheet.flatten(scroll.props.contentContainerStyle)).toMatchObject({width:'100%',maxWidth:880,paddingHorizontal:18*1.4,paddingTop:28,paddingBottom:44});
+  expect(screen.UNSAFE_getAllByType(Decoration).find(node=>node.props.symbol==='checkmark.circle.fill')!.props.fontPointSize).toBe(20*1.4);
   sibling();
 });
 
@@ -572,24 +563,19 @@ const measuredText={
     footnote:{fontSize:44,lineHeight:52.5078125,leading:-.5078125},
   },
 };
-test.each(['normal','accessibility5'] as const)('DNS instruction rows retain the original first-baseline envelope at %s',category=>{
-  const pixelRatio=jest.spyOn(PixelRatio,'get').mockReturnValue(3);
-  try{
-    const metrics=measuredText[category],natural=Math.ceil(metrics.subheadline.lineHeight*3)/3;
-    render(fixture(<DNSPatchScreen/>,null,undefined,metrics));
-    for(const row of screen.getAllByTestId('dns.instruction.row'))expect(StyleSheet.flatten(row.props.style)).toEqual({flexDirection:'row',alignItems:'flex-start',gap:12});
-    const badgeTop=category==='normal'?0:55/3,bodyTop=category==='normal'?2:0;
-    for(const badge of screen.getAllByTestId('dns.instruction.badge'))expect(StyleSheet.flatten(badge.props.style).paddingTop).toBeCloseTo(badgeTop);
-    for(const body of screen.getAllByTestId('dns.instruction.body'))expect(StyleSheet.flatten(body.props.style).paddingTop).toBeCloseTo(bodyTop);
-    const text=screen.getByText('Open DNS settings and configure System DNS.'),style=StyleSheet.flatten(text.props.style);
-    // Native probe at334/4000pt: normal1/2/3line rows22/40/60;
-    // AX5 rows58⅔/116⅔/174⅔, with the badge shifted18⅓pt down.
-    for(const lines of [1,2,3]){
-      const bodyHeight=style.lineHeight*lines+2*style.marginVertical;
-      expect(bodyHeight).toBeCloseTo(natural+(metrics.subheadline.lineHeight+metrics.subheadline.leading)*(lines-1));
-      expect(Math.max(22+badgeTop,bodyHeight+bodyTop)).toBeCloseTo(category==='normal'?lines===1?22:lines===2?40:60:lines===1?176/3:lines===2?350/3:524/3);
-    }
-  }finally{pixelRatio.mockRestore();}
+test.each([[390,844],[1194,834],[834,1194],[420,1032]])('DNS and Auto-switch share typography at %i by %i, including accessibility text',(width,height)=>{
+  mockWindow={...mockWindow,width,height};
+  const scale=windowLayout(mockWindow).scale;
+  const content=(textScale:number)=>fixture(<><DNSPatchScreen/><AutoSwitchScreen/></>,{body:textScale,subheadline:textScale,headline:textScale},undefined,measuredText.normal);
+  render(content(1));
+  for(const textScale of [1,1.6,3]){
+    screen.rerender(content(textScale));
+    const dns=font('Open DNS settings and configure System DNS.');
+    const auto=font('In Shortcuts, create an automation for a time, place, or event.');
+    expect(dns).toBeCloseTo(15*scale*textScale);
+    expect(dns).toBe(auto);
+    expect(font('To keep Lava effective, choose one of these options.')).toBe(dns);
+  }
 });
 test.each(['normal','accessibility5'] as const)('migrated iOS semantic text keeps measured first/last boxes and multiline advances at %s',category=>{
   const pixelRatio=jest.spyOn(PixelRatio,'get').mockReturnValue(3);

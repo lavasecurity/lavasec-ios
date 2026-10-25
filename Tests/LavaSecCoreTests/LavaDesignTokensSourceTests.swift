@@ -31,7 +31,7 @@ final class LavaDesignTokensSourceTests: XCTestCase {
 
         let components = try readSource(.lavaComponents)
         XCTAssertTrue(components.contains("HStack(spacing: LavaSpacing.md)"))
-        XCTAssertTrue(scaffold.contains("rowSpacing: LavaSpacing.md"))
+        XCTAssertTrue(components.contains("rowSpacing: LavaSpacing.md"))
 
         let condensedList = try readSource(.lavaCondensedList)
         XCTAssertTrue(condensedList.contains("HStack(alignment: .center, spacing: LavaSpacing.md)"))

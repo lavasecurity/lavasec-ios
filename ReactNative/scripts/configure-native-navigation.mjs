@@ -9,13 +9,13 @@ import assert from 'node:assert/strict';
 import {restoreSimplePushAnimator} from './native-navigation/simple-push-patch.mjs';
 import {renderToolbarAdapter} from './native-navigation/toolbar-adapter.mjs';
 import {parseTokens,sourceURL as tokenSourceURL} from './generate-tokens.mjs';
-import {patchInlineTabs} from './native-navigation/inline-tabs.mjs';
+import {patchNativeBottomTabs} from './native-navigation/bottom-tabs.mjs';
 const root=new URL('../',import.meta.url);
 const url=new URL('node_modules/react-native-screens/ios/tabs/host/RNSTabBarController.mm',root);
 const source=readFileSync(url,'utf8');
-// UIKit owns peer-tab animation as well as selection and lifecycle. The legacy
-// frame-based slide is retained only as a migration fixture for existing installs.
-const updated=patchInlineTabs(source,readFileSync(new URL('native-navigation/inline-tab-control.inc',import.meta.url),'utf8'));
+// UIKit owns the bar, peer-tab animation, selection and lifecycle. Migrate
+// existing installs away from the legacy slide and custom iPad top control.
+const updated=patchNativeBottomTabs(source,readFileSync(new URL('native-navigation/bottom-tab-placement.inc',import.meta.url),'utf8'));
 if(updated!==source)writeFileSync(url,updated);
 
 const toolbarURL=new URL('node_modules/react-native-screens/ios/RNSBarButtonItem.mm',root);

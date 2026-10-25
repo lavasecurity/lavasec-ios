@@ -703,3 +703,85 @@ struct LavaPrivateContentCover: View {
         .clipped()
     }
 }
+
+/// Setup actions are rows inside the section's panel, below its instructions.
+struct LavaSetupAction: View {
+    let title: String
+    var badge: LavaNavigationCardBadge? = nil
+    var accessory: LavaNavigationCardAccessory = .externalLink
+    var accessibilityHint: String? = nil
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            LavaNavigationCardLabel(badge: badge, badgeSize: LavaNavigationRowMetrics.glyphPointSize,
+                rowSpacing: LavaSpacing.md, title: title, summary: .none, accessory: accessory)
+        }
+        .buttonStyle(LavaCondensedRowButtonStyle())
+        .accessibilityHint((accessibilityHint ?? "").lavaLocalized)
+    }
+}
+
+/// Shared custom-source form: grouped input fields, validation, then one full-width action.
+/// Blocklist and DNS editors provide fields and draft submission without duplicating anatomy.
+struct LavaCustomEntryForm<Fields: View, Notice: View>: View {
+    let actionTitle: String
+    let actionSymbol: String
+    let enabled: Bool
+    let submit: () -> Void
+    @ViewBuilder let fields: () -> Fields
+    @ViewBuilder let notice: () -> Notice
+
+    var body: some View {
+        VStack(spacing: 12) {
+            LavaTextInputPanel { fields() }
+            notice()
+            Button(action: submit) { FilterActionLabel(title: actionTitle, systemImage: actionSymbol) }
+                .buttonStyle(LavaStandaloneActionButtonStyle())
+                .disabled(!enabled)
+        }
+    }
+}
+
+/// Shared setup anatomy for Auto-switch and the DNS patch. Instructions and
+/// their destination row share one panel, as on Explore.
+struct LavaSetupSection<Actions: View>: View {
+    let title: String
+    var summary: String? = nil
+    let steps: [String]
+    var footer: String? = nil
+    @ViewBuilder var actions: () -> Actions
+
+    var body: some View {
+        LavaSectionGroup(title, footer: footer) {
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: LavaSpacing.md) {
+                    if let summary {
+                        Text(summary.lavaLocalized)
+                            .font(LavaTypography.rowMetadata)
+                            .foregroundStyle(LavaStyle.primaryText)
+                    }
+                    ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
+                        HStack(alignment: .firstTextBaseline, spacing: LavaSpacing.md) {
+                            Text("\(index + 1)")
+                                .lavaRowTitleText()
+                                .foregroundStyle(LavaStyle.safeGreen)
+                                .frame(width: 22, height: 22)
+                                .background(LavaStyle.softGreen, in: Circle())
+                            Text(step.lavaLocalized)
+                                .font(LavaTypography.rowMetadata)
+                                .foregroundStyle(LavaStyle.primaryText)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                }
+                .padding(.horizontal, LavaSpacing.infoPanelHorizontalInset)
+                .padding(.vertical, LavaSpacing.infoPanelVerticalInset)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                LavaCondensedDivider(leadingInset: 16)
+                actions()
+            }
+            .lavaPanelBackground()
+        }
+    }
+}
