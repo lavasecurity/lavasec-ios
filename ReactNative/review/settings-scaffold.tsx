@@ -1,3 +1,4 @@
+import {SetupSection as SharedSetupSection} from '../src/flows/SetupSection';
 import {useScaffoldStyles} from '../src/window-layout';
 import {useMascotTapInteraction,useMascotDownwardScroll} from './mascot-interaction';
 import type {PropsWithChildren} from 'react';
@@ -58,12 +59,9 @@ export function SettingsIntro({summary,action}: {summary:string;action?:{title:s
   return <Group tone="green"><View style={{padding:foundation.space.lg}}><Copy role="supporting">{summary}</Copy></View>{action&&<Row title={action.title} intent="page" onPress={action.onPress}/>}</Group>;
 }
 export function SetupSection({title,steps,action,note}: {title:string;steps:readonly string[];action:{title:string;onPress:()=>void};note?:string}){
-  return <Section title={title} footer={note}><Group><View style={{paddingHorizontal:18,paddingVertical:16,gap:foundation.space.md}}>
-    {steps.map((step,index)=><View key={step} style={{flexDirection:'row',alignItems:'baseline',gap:foundation.space.md}}>
-      <View style={{width:22,height:22,borderRadius:11,backgroundColor:colors.softGreen,alignItems:'center',justifyContent:'center'}}><Copy role="row" color={colors.safeGreen} verbatim>{String(index+1)}</Copy></View>
-      <View style={{flex:1}}><Copy role="supporting">{step}</Copy></View>
-    </View>)}
-  </View><ListRow title={action.title} trailingRole="disclosure" trailing={<RowAccessory intent="external"/>} onPress={action.onPress}/></Group></Section>;
+  return <SharedSetupSection title={title} steps={steps} footer={note}>
+    <ListRow title={action.title} trailingRole="disclosure" trailing={<RowAccessory intent="external"/>} onPress={action.onPress}/>
+  </SharedSetupSection>;
 }
 export function SettingsStatus({title,description,icon,leading,busy=false}: {title:string;description?:string;icon:string;leading?:React.ReactNode;busy?:boolean}) {
   return <ListRow title={title} subtitle={description!==title?description:undefined}

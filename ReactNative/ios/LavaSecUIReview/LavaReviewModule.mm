@@ -1,11 +1,10 @@
 #import "LavaReviewModule.h"
 #import <UIKit/UIKit.h>
-#import <AVFoundation/AVFoundation.h>
 #if LAVA_REACT_NATIVE
 #import <AuthenticationServices/AuthenticationServices.h>
 #import <UserNotifications/UserNotifications.h>
-#import <AVFoundation/AVFoundation.h>
 #endif
+#import <AVFoundation/AVFoundation.h>
 #import "LavaSecUIReview-Swift.h"
 
 @interface LavaReviewModule () <AVSpeechSynthesizerDelegate>

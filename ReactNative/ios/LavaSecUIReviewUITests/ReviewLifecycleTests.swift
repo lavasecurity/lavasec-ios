@@ -1,7 +1,50 @@
 import XCTest
+import UIKit
 
 @MainActor
 final class ReviewLifecycleTests: XCTestCase {
+    func testIPadUsesNativeBottomTabsAcrossRotation() throws {
+        try XCTSkipUnless(UIDevice.current.userInterfaceIdiom == .pad, "This regression exercises iPad size-class adaptation.")
+        defer { XCUIDevice.shared.orientation = .portrait }
+        for appearance in ["dark", "light"] {
+            XCUIDevice.shared.orientation = .landscapeLeft
+            let app = XCUIApplication()
+            app.launchArguments = ["--reset-review-appearance", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+            app.launch()
+            XCTAssertTrue(app.buttons["Open React Native"].waitForExistence(timeout: 15))
+            app.segmentedControls.buttons[appearance].tap()
+            app.buttons["Open React Native"].tap()
+            let guardTab = app.tabBars.buttons["Guard"]
+            let settingsTab = app.tabBars.buttons["Settings"]
+            XCTAssertTrue(guardTab.waitForExistence(timeout: 30))
+            XCTAssertTrue(settingsTab.exists)
+            XCTAssertFalse(app.descendants(matching: .any)["lava.inline-tab-control"].exists)
+            let atBottom = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                app.frame.width > app.frame.height && guardTab.frame.midY > app.frame.minY + app.frame.height * 0.8
+            }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [atBottom], timeout: 10), .completed)
+            let panel = app.descendants(matching: .any)["guard.panel"].firstMatch
+            let tools = app.descendants(matching: .any)["guard.tools"].firstMatch
+            XCTAssertTrue(panel.waitForExistence(timeout: 10))
+            XCTAssertTrue(tools.exists)
+            XCTAssertLessThanOrEqual(panel.frame.maxX, tools.frame.minX, "Wide Guard content must retain its two-column layout.")
+            attachDisplay(name: "iPad landscape native bottom tabs Guard \(appearance)")
+            settingsTab.tap()
+            XCTAssertTrue(app.buttons["row.Customization"].waitForExistence(timeout: 10))
+            XCTAssertTrue(settingsTab.isSelected)
+            XCTAssertGreaterThan(settingsTab.frame.midY, app.frame.minY + app.frame.height * 0.8)
+            attachDisplay(name: "iPad landscape native bottom tabs Settings \(appearance)")
+            guardTab.tap()
+            XCUIDevice.shared.orientation = .portrait
+            let portraitBottom = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                app.frame.height > app.frame.width && guardTab.frame.midY > app.frame.minY + app.frame.height * 0.8
+            }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [portraitBottom], timeout: 10), .completed)
+            attachDisplay(name: "iPad portrait native bottom tabs Guard \(appearance)")
+            app.terminate()
+        }
+    }
+
     func testNativeRoundTripRecreationForegroundAndPersistentRelaunch() {
         let app = XCUIApplication()
         app.launchArguments = ["--reset-review-appearance", "--seed-native-qa-appearance", "--inspect-native-qa-appearance"]
@@ -569,6 +612,13 @@ final class ReviewLifecycleTests: XCTestCase {
         let confirmed = XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "exists == true AND selected == true"), object: segment)
         XCTAssertEqual(XCTWaiter.wait(for: [confirmed], timeout: 20), .completed, file: file, line: line)
+    }
+
+    private func attachDisplay(name: String) {
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 
     private func attach(_ app: XCUIApplication, name: String) {

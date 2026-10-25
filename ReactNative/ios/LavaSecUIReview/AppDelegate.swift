@@ -5,9 +5,6 @@ import LavaSecAppServices
 @main
 @MainActor
 final class AppDelegate: UIResponder, UIApplicationDelegate {
-    var window: UIWindow?
-    private var appearanceObserver: UUID?
-
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--seed-native-qa-appearance") {
@@ -17,7 +14,24 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         if ProcessInfo.processInfo.arguments.contains("--reset-review-appearance") {
             AppearanceBridge.shared.service.setPreference(.system)
         }
-        let window = UIWindow(frame: UIScreen.main.bounds)
+        return true
+    }
+
+    func application(_ application: UIApplication, configurationForConnecting session: UISceneSession, options: UIScene.ConnectionOptions) -> UISceneConfiguration {
+        let configuration = UISceneConfiguration(name: "Review", sessionRole: session.role)
+        configuration.delegateClass = ReviewSceneDelegate.self
+        return configuration
+    }
+}
+
+@MainActor
+final class ReviewSceneDelegate: NSObject, UIWindowSceneDelegate {
+    var window: UIWindow?
+    private var appearanceObserver: UUID?
+
+    func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
+        guard let scene = scene as? UIWindowScene else { return }
+        let window = UIWindow(windowScene: scene)
         let root = NativeReviewViewController()
         window.rootViewController = UINavigationController(rootViewController: root)
         self.window = window
@@ -29,11 +43,15 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
             }
         }
         window.makeKeyAndVisible()
-        return true
     }
 
-    func applicationDidBecomeActive(_ application: UIApplication) {
+    func sceneDidBecomeActive(_ scene: UIScene) {
         AppearanceBridge.shared.service.refresh()
+    }
+
+    func sceneDidDisconnect(_ scene: UIScene) {
+        if let appearanceObserver { AppearanceBridge.shared.service.removeObserver(appearanceObserver) }
+        appearanceObserver = nil
     }
 }
 

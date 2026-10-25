@@ -196,10 +196,11 @@ struct RootView: View {
         // UIKit owns keyboard avoidance inside the embedded app. SwiftUI must
         // not shrink the React Native tab controller when a descendant field focuses.
         LavaAppHost().ignoresSafeArea(.all, edges: .bottom)
-            // The native navigation bar paints across the physical landscape
-            // viewport; UIKit and the shared RN page own their content insets.
+            // UIKit owns the navigation bar's window-control and status-bar
+            // clearance. Let it fill the window so SwiftUI does not add a
+            // second top inset before the native bar lays out its controls.
             // pinned: RNOnlyAppSourceTests.testNativeNavigationHostUsesThePhysicalHorizontalViewport
-            .ignoresSafeArea(.container, edges: .horizontal)
+            .ignoresSafeArea(.container, edges: [.top, .horizontal])
             .statusBarHidden(false)
             .onAppear { forwardReactExternalFlows() }
             .onReceive(LavaAppBridge.shared.$flow) { flow in

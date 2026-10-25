@@ -3,6 +3,7 @@ import {readFileSync} from 'node:fs';
 import test from 'node:test';
 import {restoreNativeTabTransition} from '../scripts/native-navigation/native-tab-baseline.mjs';
 import {patchInlineTabs} from '../scripts/native-navigation/inline-tabs.mjs';
+import {patchNativeBottomTabs} from '../scripts/native-navigation/bottom-tabs.mjs';
 const read=name=>readFileSync(new URL('./fixtures/native-navigation/'+name,import.meta.url),'utf8');
 const pristine=read('RNSTabBarController-4.27.0.mm');
 const legacy=read('RNSTabBarController-legacy-slide.mm');
@@ -17,7 +18,7 @@ test('unknown edits inside or outside the legacy transition fail closed',()=>{
   }
 });
 test('inline iPad controls preserve the native selection gates and migrate the known legacy owner',()=>{
-  const adapter=readFileSync(new URL('../scripts/native-navigation/inline-tab-control.inc',import.meta.url),'utf8');
+  const adapter=readFileSync(new URL('./fixtures/native-navigation/LavaInlineTabControl-legacy.inc',import.meta.url),'utf8');
   const patched=patchInlineTabs(pristine,adapter);
   assert.equal(patchInlineTabs(patched,adapter),patched);
   assert.equal(patchInlineTabs(legacy,adapter),patched);
@@ -33,4 +34,18 @@ test('inline iPad controls preserve the native selection gates and migrate the k
   for(const source of [patched+'\n// dependency change\n',patched.replace('[super viewDidLayoutSubviews];','[super viewDidAppear:NO];')]){
     assert.throws(()=>patchInlineTabs(source,adapter),/changed or is partially patched/);
   }
+});
+test('native bottom tabs replace the inline control without changing native navigation',()=>{
+  const adapter=readFileSync(new URL('../scripts/native-navigation/bottom-tab-placement.inc',import.meta.url),'utf8');
+  const inlineAdapter=readFileSync(new URL('./fixtures/native-navigation/LavaInlineTabControl-legacy.inc',import.meta.url),'utf8');
+  const patched=patchNativeBottomTabs(pristine,adapter);
+  for(const source of [pristine,legacy,patchInlineTabs(pristine,inlineAdapter),patched]){
+    assert.equal(patchNativeBottomTabs(source,adapter),patched);
+  }
+  assert.doesNotMatch(patched,/LavaInlineTab|additionalSafeAreaInsets|setTabBarHidden:/);
+  for(const method of ['- (BOOL)tabBarController:', '- (void)userDidRepeatViewControllerSelection:', '- (void)userDidSelectViewController:']){
+    const body=source=>source.slice(source.indexOf(method),source.indexOf('\n}',source.indexOf(method))+2);
+    assert.equal(body(patched),body(pristine));
+  }
+  assert.throws(()=>patchNativeBottomTabs(patched+'\n// dependency change\n',adapter),/changed or is partially patched/);
 });

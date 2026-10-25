@@ -36,7 +36,7 @@ final class LavaSurfaceSourceTests: XCTestCase {
         let plainCardBlock = try sourceBlock(
             in: rootSource,
             startingAt: "struct LavaPlainCard<Content: View>: View",
-            endingBefore: "struct LavaSetupSection<Actions: View>: View"
+            endingBefore: "struct LavaSuccessGlyph: View"
         )
         let listSource = try readSource(.lavaCondensedList)
         let condensedListBlock = try sourceBlock(

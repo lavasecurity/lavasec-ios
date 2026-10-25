@@ -20,13 +20,17 @@ const hooks = [
    '                                             imageLoader:[self.tabsHostComponentView reactImageLoader]];\n  LavaUpdateInlineTabControl(self);\n}'],
 ];
 
-export function patchInlineTabs(source, adapter) {
+export function restoreInlineTabs(source) {
   let original = source.replace(/\/\/ Lava: inline iPad tab control\.[\s\S]*?\/\/ Lava: end inline iPad tab control\.\n\n?/, '')
     .replace(layout, '');
   for (const [before, after] of hooks) original = original.replaceAll(after, before);
+  return restoreNativeTabTransition(original);
+}
+
+export function patchInlineTabs(source, adapter) {
   // Keep the complete pinned owner check, including its native selection gates,
   // stack retention and reselection behavior. Only presentation hooks are added.
-  let result = restoreNativeTabTransition(original)
+  let result = restoreInlineTabs(source)
     .replace('@implementation RNSTabBarController {', adapter.trimEnd() + '\n\n@implementation RNSTabBarController {')
     .replace('- (void)traitCollectionDidChange:', layout + '- (void)traitCollectionDidChange:');
   for (const [before, after] of hooks) result = result.replaceAll(before, after);
