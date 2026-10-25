@@ -14,7 +14,7 @@
     "typecheck": "tsc --noEmit",
     "test:tokens": "node --test tests/token-generator.test.mjs",
     "test:components": "jest --runInBand",
-    "test:layout": "node scripts/test-story-columns-layout.mjs",
+    "test:layout": "node scripts/test-story-columns-layout.mjs && node scripts/test-onboarding-layout.mjs",
     "test": "npm run i18n:check && npm run test:i18n && node scripts/configure-native-tabs.mjs && npm run tokens:check && npm run test:tokens && npm run test:host-policy && npm run host:check && npm run design:check && npm run test:design && npm run typecheck && npm run test:layout && npm run test:components",
     "bundle:ios": "node scripts/bundle-gallery.mjs",
     "bundle:review": "node scripts/bundle-gallery.mjs --review && node scripts/verify-review-bundle.mjs",

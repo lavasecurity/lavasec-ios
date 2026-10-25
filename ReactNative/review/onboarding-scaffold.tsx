@@ -33,29 +33,29 @@ export function OnboardingCurtain({welcome,width,height,reduced,crossFade=false,
   </Animated.View>;
 }
 
-/** Keep the source anchor and scrolling page in one flexible stage. A
- * landscape window uses the source slot beside the page, above the same footer.
- * Each page owns its horizontal inset, so an outgoing page keeps its geometry
- * while Welcome uses the full width. The decorative anchor stays in place. */
-export function OnboardingStageLayout({source,progress,width,height,left=0,right=0,welcome=false,children}:PropsWithChildren<{source:Anchor;progress?:ReactNode;width:number;height:number;left?:number;right?:number;welcome?:boolean}>){
-  const compact=width>height;const sourceSize=128*windowLayout({width,height}).scale;
-  return <View testID="onboarding.stage" style={{flex:1,flexDirection:compact?'row':'column',paddingLeft:compact?left:0,paddingRight:compact?right:0}}>
-    <View testID="onboarding.source.column" style={compact?{position:'absolute' as const,left,width:sourceSize}:{}}>
-      <View ref={source} testID="onboarding.source" collapsable={false} style={compact?{width:sourceSize,height:sourceSize}:{height:sourceSize}}/>
-      {progress}
+/** One scroll owner centers the complete composition when it fits and grows
+ * naturally when text or a short window needs scrolling. The retained source
+ * is measured only for the mascot's journey; flex alignment places the scene. */
+export function OnboardingStageLayout({source,mascot,width,height,left=0,right=0,welcome=false,children}:PropsWithChildren<{source:Anchor;mascot?:ReactNode;width:number;height:number;left?:number;right?:number;welcome?:boolean}>){
+  const layout=windowLayout({width,height});const sourceSize=128*layout.scale;
+  return <ScrollView testID="onboarding.stage" removeClippedSubviews={false} showsVerticalScrollIndicator={false} contentInsetAdjustmentBehavior="never" style={{flex:1}} contentContainerStyle={{flexGrow:1,justifyContent:'center',paddingLeft:24+left,paddingRight:24+right,paddingVertical:24}}>
+    <View collapsable={false} testID="onboarding.composition" style={{width:'100%',maxWidth:layout.readingWidth+(layout.landscape&&!welcome?sourceSize+24:0),alignSelf:'center',flexDirection:layout.landscape?'row':'column',alignItems:'center',gap:welcome?0:24}}>
+      <View testID="onboarding.source.column" pointerEvents={welcome?'none':'auto'} accessibilityElementsHidden={welcome} importantForAccessibility={welcome?'no-hide-descendants':'auto'} style={{width:sourceSize,flexShrink:0,...(welcome?{position:'absolute' as const,opacity:0}:{})}}>
+        <View ref={source} testID="onboarding.source" collapsable={false} style={{width:sourceSize,height:sourceSize,alignItems:'center',justifyContent:'center'}}>{mascot}</View>
+      </View>
+      <View collapsable={false} testID="onboarding.pages.viewport" style={{width:'100%',flexShrink:1,minWidth:0}}>{children}</View>
     </View>
-    <View testID="onboarding.pages.viewport" style={{flex:1,minWidth:0,overflow:'hidden'}}>{children}</View>
-  </View>;
+  </ScrollView>;
 }
 
 const pageTitles=['The internet is lava','Lava stands guard here','First, let’s get Lava ready to help.','Pick how much Lava blocks','Lastly, let’s keep your connection running smoothly.'];
 export const onboardingPageTitle=(page:number)=>pageTitles[page]??'';
 export function OnboardingStep({title,description,showTitle=true,children}:PropsWithChildren<{title:string;description?:string;showTitle?:boolean}>){
-  return <View style={{paddingTop:showTitle?foundation.space.lg:0,gap:foundation.space.xl}}>{(showTitle||description)&&<View style={{gap:foundation.space.md}}>{showTitle&&<Copy role="setupHeading" accessibilityRole="header">{title}</Copy>}{description&&<Copy role="body" color={colors.secondaryText}>{description}</Copy>}</View>}{children}</View>;
+  return <View style={{gap:foundation.space.xl}}>{(showTitle||description)&&<View style={{gap:foundation.space.md}}>{showTitle&&<Copy role="setupHeading" center accessibilityRole="header">{title}</Copy>}{description&&<Copy role="body" center color={colors.secondaryText}>{description}</Copy>}</View>}{children}</View>;
 }
 export function OnboardingWelcome({showTitle=true}:{showTitle?:boolean}){return <View style={{gap:24,paddingHorizontal:4}}>
-  {showTitle&&<Text allowFontScaling dynamicTypeRamp="title1" accessibilityRole="header" style={{fontSize:28,fontWeight:'700',color:'white',textAlign:'center',textShadowColor:'rgba(0,0,0,.22)',textShadowRadius:12,textShadowOffset:{width:0,height:6}}}>{onboardingPageTitle(0)}</Text>}
-  <Text allowFontScaling dynamicTypeRamp="title3" style={{fontSize:20,fontWeight:'700',color:'rgba(255,255,255,.78)',textAlign:'center'}}>Malicious domains are the hot spots. Your device can step around them before apps and websites connect.</Text>
+  {showTitle&&<Text allowFontScaling dynamicTypeRamp="title1" accessibilityRole="header" style={{fontSize:34,fontWeight:'700',color:'white',textAlign:'center',textShadowColor:'rgba(0,0,0,.22)',textShadowRadius:12,textShadowOffset:{width:0,height:6}}}>{onboardingPageTitle(0)}</Text>}
+  <Text allowFontScaling dynamicTypeRamp="title3" style={{fontSize:22,fontWeight:'700',color:'rgba(255,255,255,.78)',textAlign:'center'}}>Malicious domains are the hot spots. Your device can step around them before apps and websites connect.</Text>
 </View>;}
 export function OnboardingFeature({title,symbol}:{title:string;symbol:string}){const scale=useTextScale('subheadline');return <View style={{paddingHorizontal:foundation.row.horizontalInset,paddingVertical:foundation.row.verticalInset,minHeight:foundation.row.standard,backgroundColor:colors.cardBackground,borderRadius:foundation.radius.control,borderCurve:'continuous',flexDirection:'row',alignItems:'center',gap:12}}>
   <Symbol name={symbol} tone="primary" size={24} pointSize={foundation.control.glyph}/><View style={{flex:1,marginVertical:-scale}}><Copy role="row" lineHeight={20}>{title}</Copy></View>
@@ -75,7 +75,7 @@ export function OnboardingSetupAction({title,symbol,completed,busy=false,disable
   const a11y={testID,accessibilityLabel:localized(title),accessibilityValue:{text:localized(completed?'On':'Off')},accessibilityState:{selected:completed,disabled,busy}};
   return onPress?<Pressable {...a11y} accessible accessibilityRole="button" disabled={disabled||busy} onPress={onPress} style={({pressed})=>[style,{opacity:pressed?.65:1}]}>{body}</Pressable>:<View {...a11y} accessible style={style}>{body}</View>;
 }
-export function OnboardingPageScroll({welcome,landscape=false,children}:PropsWithChildren<{welcome?:boolean;landscape?:boolean}>){return <ScrollView showsVerticalScrollIndicator={false} contentInsetAdjustmentBehavior="never" contentContainerStyle={{paddingHorizontal:24,paddingTop:welcome&&!landscape?72:8,paddingBottom:24,width:'100%',maxWidth:600,alignSelf:'center'}}>{children}</ScrollView>;}
+export function OnboardingPageContent({children}:PropsWithChildren){return <View style={{width:'100%'}}>{children}</View>;}
 export function OnboardingProgress({page,visited,busy,vpnInstalled,onPage,duration,smooth}: {page:number;visited:number[];busy:boolean;vpnInstalled:boolean;onPage:(page:number)=>void;duration:number;smooth:boolean}){
   return <View testID="onboarding.steps" style={{flexDirection:'row',alignSelf:'center'}}>{Array.from({length:6},(_,index)=><OnboardingDot key={index} index={index} page={page} disabled={busy||index===page||!visited.includes(index)||index>2&&!vpnInstalled} onPress={()=>onPage(index)} duration={duration} smooth={smooth}/>)}</View>;
 }

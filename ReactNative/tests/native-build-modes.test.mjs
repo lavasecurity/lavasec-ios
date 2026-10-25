@@ -75,7 +75,7 @@ if (tool==='xcrun' && args[0]==='xcresulttool' && args[1]==='export') mkdirSync(
     env: {...process.env, PATH: `${bin}:${process.env.PATH}`, TMPDIR: root,
       LAVA_CI_TEST_TRACE: trace,
       LAVA_CI_TEST_SUMMARY: JSON.stringify({result: 'Passed', passedTests: normalMinimum, failedTests: 0, skippedTests: 0}),
-      LAVA_CI_TEST_IPAD_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 4, failedTests: 0, skippedTests: 0}),
+      LAVA_CI_TEST_IPAD_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 5, failedTests: 0, skippedTests: 0}),
       LAVA_CI_TEST_PREFERENCES_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 1, failedTests: 0, skippedTests: 0}),
       LAVA_CI_TEST_MOTION_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 4, failedTests: 0, skippedTests: 0}),
       LAVA_CI_TEST_CROSSFADE_SUMMARY: JSON.stringify({result: 'Passed', passedTests: 5, failedTests: 0, skippedTests: 0}),
@@ -190,6 +190,7 @@ test('existing local default still runs journeys and retains review evidence', t
     '-only-testing:LavaSecUITests/RNFullAppUITests/testStoryJourneyDarkPreservesConnectionAlignmentAcrossRotation',
     '-only-testing:LavaSecUITests/RNFullAppUITests/testNativeOnboardingPersistsFallbackChoiceThroughNavigationAndRelaunch',
     '-only-testing:LavaSecUITests/RNFullAppUITests/testNativeOnboardingKeepsGuardGeometryInLandscape',
+    '-only-testing:LavaSecUITests/RNFullAppUITests/testOnboardingCentersWelcomeAndStepsAcrossRotation',
   ]);
   const phoneShutdown = calls.findIndex(call=>call.tool==='xcrun'&&call.args.join(' ')==='simctl shutdown isolated-test-simulator');
   const tabletBoot = calls.findIndex(call=>call.tool==='xcrun'&&call.args.join(' ')==='simctl boot isolated-ipad-simulator');

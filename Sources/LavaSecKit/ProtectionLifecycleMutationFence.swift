@@ -16,7 +16,9 @@ public enum ProtectionLifecycleMutationFenceError: Error, Equatable, Sendable {
 }
 
 /// An owned kernel lock. The file descriptor keeps the lock alive across task suspension and
-/// cancellation; the kernel closes it automatically if the process exits.
+/// cancellation; the kernel closes it automatically if the process exits. Swift task suspension
+/// is distinct from iOS process suspension: app callers must keep background execution time
+/// until this descriptor is released. The async entry points establish that lifetime.
 public final class ProtectionLifecycleMutationFenceHandle: @unchecked Sendable {
     private let stateLock = NSLock()
     private var fileDescriptor: Int32?
@@ -98,17 +100,20 @@ public enum ProtectionLifecycleMutationFence {
         lockFileURL: URL,
         waitUntilAvailable: Bool = false,
         validateWaiting: @escaping @MainActor () -> Bool = { true },
+        beginBackgroundExecution: ProtectionLifecycleExecution.Begin? = nil,
         operation: @escaping @MainActor () async throws -> T
     ) async throws -> T {
-        let fence = try await acquireWithoutBlockingMainActor(
-            lockFileURL: lockFileURL,
-            waitUntilAvailable: waitUntilAvailable,
-            validateWaiting: validateWaiting
-        )
-        defer {
-            fence.release()
+        try await ProtectionLifecycleExecution.run(begin: beginBackgroundExecution) {
+            let fence = try await acquireWithoutBlockingMainActor(
+                lockFileURL: lockFileURL,
+                waitUntilAvailable: waitUntilAvailable,
+                validateWaiting: validateWaiting
+            )
+            defer {
+                fence.release()
+            }
+            return try await operation()
         }
-        return try await operation()
     }
 
     /// Runs one non-cancellable platform mutation while a try-once kernel fence is held.
@@ -120,26 +125,30 @@ public enum ProtectionLifecycleMutationFence {
     public static func withOwnedMutation<T>(
         lockFileURL: URL,
         validateOwnership: @escaping @MainActor () -> Bool,
+        beginBackgroundExecution: ProtectionLifecycleExecution.Begin? = nil,
         operation: @escaping @MainActor () async throws -> T
     ) async throws -> T {
-        guard let fence = try acquire(lockFileURL: lockFileURL, wait: false) else {
-            // Never block the MainActor behind a callback owned by a suspended process. The
-            // current automatic attempt aborts safely; the explicit restart already holding the
-            // fence remains responsible for convergence.
-            throw ProtectionLifecycleMutationFenceError.busy
-        }
-        defer {
-            fence.release()
-        }
+        try await ProtectionLifecycleExecution.run(begin: beginBackgroundExecution) {
+            try Task.checkCancellation()
+            guard let fence = try acquire(lockFileURL: lockFileURL, wait: false) else {
+                // Never block the MainActor behind a callback owned by a suspended process. The
+                // current automatic attempt aborts safely; the explicit restart already holding the
+                // fence remains responsible for convergence.
+                throw ProtectionLifecycleMutationFenceError.busy
+            }
+            defer {
+                fence.release()
+            }
 
-        guard validateOwnership() else {
-            throw ProtectionLifecycleMutationFenceError.ownershipLost
+            guard validateOwnership() else {
+                throw ProtectionLifecycleMutationFenceError.ownershipLost
+            }
+            let result = try await operation()
+            guard validateOwnership() else {
+                throw ProtectionLifecycleMutationFenceError.ownershipLost
+            }
+            return result
         }
-        let result = try await operation()
-        guard validateOwnership() else {
-            throw ProtectionLifecycleMutationFenceError.ownershipLost
-        }
-        return result
     }
 
     /// Runs a lifecycle mutation descended from an earlier asynchronous decision (for example a
@@ -157,29 +166,32 @@ public enum ProtectionLifecycleMutationFence {
         lockFileURL: URL,
         validateLocalOwnership: @escaping @MainActor () -> Bool,
         validateExternalGeneration: @escaping @MainActor () throws -> Bool,
+        beginBackgroundExecution: ProtectionLifecycleExecution.Begin? = nil,
         operation: @escaping @MainActor () async throws -> T
     ) async throws -> T {
-        // A foreground app action can own this same process-wide flock when a very fast chained
-        // terminal arrives. Retry asynchronously rather than dropping the terminal or blocking the
-        // MainActor. If direct Restart owns it, the later strict generation check invalidates this
-        // stale descendant after Restart releases.
-        let fence = try await acquireWithoutBlockingMainActor(
-            lockFileURL: lockFileURL,
-            waitUntilAvailable: true,
-            validateWaiting: validateLocalOwnership
-        )
-        defer {
-            fence.release()
-        }
+        try await ProtectionLifecycleExecution.run(begin: beginBackgroundExecution) {
+            // A foreground app action can own this same process-wide flock when a very fast chained
+            // terminal arrives. Retry asynchronously rather than dropping the terminal or blocking the
+            // MainActor. If direct Restart owns it, the later strict generation check invalidates this
+            // stale descendant after Restart releases.
+            let fence = try await acquireWithoutBlockingMainActor(
+                lockFileURL: lockFileURL,
+                waitUntilAvailable: true,
+                validateWaiting: validateLocalOwnership
+            )
+            defer {
+                fence.release()
+            }
 
-        guard validateLocalOwnership(), try validateExternalGeneration() else {
-            throw ProtectionLifecycleMutationFenceError.ownershipLost
+            guard validateLocalOwnership(), try validateExternalGeneration() else {
+                throw ProtectionLifecycleMutationFenceError.ownershipLost
+            }
+            let result = try await operation()
+            guard validateLocalOwnership(), try validateExternalGeneration() else {
+                throw ProtectionLifecycleMutationFenceError.ownershipLost
+            }
+            return result
         }
-        let result = try await operation()
-        guard validateLocalOwnership(), try validateExternalGeneration() else {
-            throw ProtectionLifecycleMutationFenceError.ownershipLost
-        }
-        return result
     }
 
     @MainActor
@@ -189,6 +201,7 @@ public enum ProtectionLifecycleMutationFence {
         validateWaiting: @escaping @MainActor () -> Bool
     ) async throws -> ProtectionLifecycleMutationFenceHandle {
         while true {
+            try Task.checkCancellation()
             guard validateWaiting() else {
                 throw ProtectionLifecycleMutationFenceError.ownershipLost
             }

@@ -13,6 +13,24 @@ extension Notification.Name {
     static let lavaOpenDeepLinkURL = Notification.Name("com.lavasec.openDeepLinkURL")
 }
 
+/// iOS terminates a suspended process that owns an App Group file lock (0xdead10cc).
+/// Install before the lazy model and background App Intents can acquire the lifecycle fence.
+/// pinned: ProtectionLifecycleExecutionSourceTests.testAppInstallsExecutionTimeBeforeStartingServices
+@MainActor
+private enum LavaProtectionLifecycleBackgroundExecution {
+    static func install() {
+        ProtectionLifecycleExecution.beginBackgroundExecution = { expire in
+            let identifier = UIApplication.shared.beginBackgroundTask(withName: "Finish Lava VPN operation") {
+                MainActor.assumeIsolated { expire() }
+            }
+            guard identifier != .invalid else { return nil }
+            // Expiration cancels the work. Its fence must unwind before ending this assertion;
+            // ending directly inside the expiration callback recreates the suspension race.
+            return { UIApplication.shared.endBackgroundTask(identifier) }
+        }
+    }
+}
+
 /// One serialized scheduling port for both identifiers, including recovery requests.
 private enum LavaBackgroundTaskScheduling {
     static let coordinator = BackgroundTaskScheduleCoordinator(
@@ -582,6 +600,7 @@ struct LavaSecApp: App {
     @UIApplicationDelegateAdaptor(LavaNotificationDelegate.self) private var notificationDelegate
 
     init() {
+        LavaProtectionLifecycleBackgroundExecution.install()
         #if DEBUG && targetEnvironment(simulator)
         // Seed the real preference once for the isolated onboarding journey.
         // A -hasSeenLavaOnboarding NO launch argument would outrank subsequent

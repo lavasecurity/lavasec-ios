@@ -1,7 +1,8 @@
 import {act,fireEvent,render,renderHook,screen,within} from '@testing-library/react-native';
 import {Animated,AppState,Dimensions,ScrollView,View,type AppStateStatus} from 'react-native';
 import {useOnboardingMeasurements,type Anchor} from '../review/onboarding-geometry';
-import {OnboardingSetupAction,OnboardingCurtain,OnboardingFooter,OnboardingPageScroll,OnboardingProgress,OnboardingStageLayout,OnboardingStep} from '../review/onboarding-scaffold';
+import {OnboardingTravel} from '../review/onboarding-motion';
+import {OnboardingSetupAction,OnboardingCurtain,OnboardingFooter,OnboardingPageContent,OnboardingProgress,OnboardingStageLayout,OnboardingStep} from '../review/onboarding-scaffold';
 
 jest.mock('@react-navigation/native',()=>({useNavigation:()=>({}),useIsFocused:()=>true}));
 jest.mock('../specs/LavaDecorationNativeComponent',()=>({__esModule:true,default:require('react-native').View}));
@@ -33,6 +34,17 @@ test('the shared tree measures native insets and deduplicates unchanged destinat
   expect(hook.result.current.origin).toEqual({x:0,y:60});
   expect(hook.result.current.frames?.mascot).toEqual({x:152,y:328,width:96,height:96});
   const previous=hook.result.current.frames;await tick();expect(hook.result.current.frames).toBe(previous);
+  hook.unmount();
+});
+test.each([-500,0,850])('a source scrolled to window y=%s still reaches the visible Guard destination',async y=>{
+  const refs=anchors();const hook=renderHook(()=>useOnboardingMeasurements('visit',refs));await act(async()=>{});
+  refs.source.current=anchor([136,y,128,128]).current;await tick();
+  const source=hook.result.current.sourceFrame;
+  expect(source).toEqual({x:136,y:y-60,width:128,height:128});
+  const destination=hook.result.current.frames!.mascot;
+  const travel=new OnboardingTravel(source!,destination,0);
+  expect(travel.position(2)).toEqual({x:destination.x+destination.width/2,y:destination.y+destination.height/2});
+  refs.source.current=null;await tick();expect(hook.result.current.sourceFrame).toBeUndefined();
   hook.unmount();
 });
 test('missing, nonfinite and off-screen measurements remove stale destinations',async()=>{
@@ -93,32 +105,32 @@ test('a later onboarding page never mounts a floor when its first canvas arrives
   expect(screen.queryByTestId('onboarding.floor',{includeHiddenElements:true})).toBeNull();
 });
 
-test('landscape keeps progress below the measured mascot and frees the content heading for the native title while retaining scroll and footer ownership',()=>{
+test('rotation keeps the centered scene, body heading, scroll owner and footer controls',()=>{
   const source:Anchor={current:null};const choose=jest.fn(),page=jest.fn(),next=jest.fn();
   const content=(width:number,height:number,busy=false,vpnInstalled=false)=>{
     const landscape=width>height;
     const progress=<OnboardingProgress page={2} visited={[0,1,2,3,4]} busy={busy} vpnInstalled={vpnInstalled} onPage={page} duration={320} smooth={false}/>;
-    return <View><OnboardingStageLayout source={source} progress={landscape?progress:null} width={width} height={height} left={59} right={59}>
-      <OnboardingPageScroll landscape={landscape}><OnboardingStep title="First, let’s get Lava ready to help." showTitle={!landscape}><OnboardingSetupAction title="Install local VPN" symbol="shield" completed={false} disabled={busy} onPress={choose} testID="onboarding.install-vpn"/></OnboardingStep></OnboardingPageScroll>
-    </OnboardingStageLayout><OnboardingFooter page={2} busy={busy} vpnInstalled={vpnInstalled} bottom={21} progress={landscape?null:progress} onNext={next}/></View>;
+    return <View><OnboardingStageLayout source={source} width={width} height={height} left={59} right={59}>
+      <OnboardingPageContent><OnboardingStep title="First, let’s get Lava ready to help." showTitle><OnboardingSetupAction title="Install local VPN" symbol="shield" completed={false} disabled={busy} onPress={choose} testID="onboarding.install-vpn"/></OnboardingStep></OnboardingPageContent>
+    </OnboardingStageLayout><OnboardingFooter page={2} busy={busy} vpnInstalled={vpnInstalled} bottom={21} progress={progress} onNext={next}/></View>;
   };
   render(content(402,874));
   const measuredSource=screen.getByTestId('onboarding.source'),scroll=screen.UNSAFE_getByType(ScrollView),action=screen.getByTestId('onboarding.primary');
-  expect(screen.getByTestId('onboarding.stage')).toHaveStyle({flex:1,flexDirection:'column',paddingLeft:0,paddingRight:0});
+  expect(screen.getByTestId('onboarding.composition')).toHaveStyle({flexDirection:'column',alignItems:'center'});
   expect(within(screen.getByTestId('onboarding.footer')).getByTestId('onboarding.steps')).toBeTruthy();
   expect(within(screen.getByTestId('onboarding.source.column')).queryByTestId('onboarding.steps')).toBeNull();
   expect(action).toBeDisabled();
   screen.rerender(content(874,402));
-  expect(screen.getByTestId('onboarding.stage')).toHaveStyle({flex:1,flexDirection:'row',paddingLeft:59,paddingRight:59});
+  expect(screen.getByTestId('onboarding.composition')).toHaveStyle({flexDirection:'row',alignItems:'center'});
   expect(screen.getByTestId('onboarding.source')).toBe(measuredSource);
   expect(measuredSource).toHaveStyle({width:128,height:128});
   expect(measuredSource.props.collapsable).toBe(false);
   expect(screen.getByTestId('onboarding.source.column')).toHaveStyle({width:128});
-  expect(screen.getByTestId('onboarding.pages.viewport')).toHaveStyle({flex:1,minWidth:0,overflow:'hidden'});
+  expect(screen.getByTestId('onboarding.pages.viewport')).toHaveStyle({width:'100%',flexShrink:1,minWidth:0});
   expect(screen.UNSAFE_getByType(ScrollView)).toBe(scroll);
-  expect(within(scroll).queryByRole('header')).toBeNull();
-  expect(within(screen.getByTestId('onboarding.source.column')).getByTestId('onboarding.steps')).toBeTruthy();
-  expect(within(screen.getByTestId('onboarding.footer')).queryByTestId('onboarding.steps')).toBeNull();
+  expect(within(scroll).getByRole('header',{name:'First, let’s get Lava ready to help.'})).toBeTruthy();
+  expect(within(screen.getByTestId('onboarding.source.column')).queryByTestId('onboarding.steps')).toBeNull();
+  expect(within(screen.getByTestId('onboarding.footer')).getByTestId('onboarding.steps')).toBeTruthy();
   expect(screen.getAllByTestId('onboarding.steps')).toHaveLength(1);
   expect(screen.getAllByRole('button',{name:/^Step [1-6] of 6$/})).toHaveLength(6);
   expect(screen.getByRole('button',{name:'Step 3 of 6',selected:true})).toBeTruthy();
@@ -131,7 +143,7 @@ test('landscape keeps progress below the measured mascot and frees the content h
   expect(screen.getByRole('button',{name:'Step 1 of 6'})).toBeDisabled();
   expect(screen.getByTestId('onboarding.primary')).toBeDisabled();
   screen.rerender(content(402,874,false,true));
-  expect(screen.getByTestId('onboarding.stage')).toHaveStyle({flexDirection:'column'});
+  expect(screen.getByTestId('onboarding.composition')).toHaveStyle({flexDirection:'column'});
   expect(screen.getByTestId('onboarding.source')).toBe(measuredSource);
   expect(screen.UNSAFE_getByType(ScrollView)).toBe(scroll);
   expect(screen.getByTestId('onboarding.primary')).toBe(action);
@@ -143,18 +155,19 @@ test('landscape keeps progress below the measured mascot and frees the content h
   fireEvent.press(screen.getByTestId('onboarding.install-vpn'));expect(choose).toHaveBeenCalledTimes(2);
 });
 
-test('landscape Welcome copy starts near the native header and uses the full stage without moving its retained source anchor',()=>{
+test.each([[402,874],[874,402],[768,1024],[1366,1024],[700,600]])('the %s×%s scene centers with flex alignment and lets overflow scroll', (width,height)=>{
   const source:Anchor={current:null};
-  const content=(welcome:boolean,width=874,height=402)=><OnboardingStageLayout source={source} width={width} height={height} left={59} right={59} welcome={welcome}><OnboardingPageScroll welcome={welcome} landscape={width>height}><View/></OnboardingPageScroll></OnboardingStageLayout>;
-  render(content(true));const measuredSource=screen.getByTestId('onboarding.source');
-  expect(screen.getByTestId('onboarding.source.column')).toHaveStyle({position:'absolute',left:59,width:128});
-  expect(measuredSource).toHaveStyle({width:128,height:128});
-  expect(screen.UNSAFE_getByType(ScrollView).props.contentContainerStyle).toMatchObject({paddingTop:8,paddingHorizontal:24,paddingBottom:24});
-  expect(screen.UNSAFE_getByType(ScrollView).props.contentInsetAdjustmentBehavior).toBe('never');
+  const content=(welcome:boolean)=><OnboardingStageLayout source={source} width={width} height={height} left={0} right={0} welcome={welcome}><OnboardingPageContent><View/></OnboardingPageContent></OnboardingStageLayout>;
+  render(content(true));const measuredSource=screen.getByTestId('onboarding.source',{includeHiddenElements:true});
+  const scroll=screen.UNSAFE_getByType(ScrollView);
+  expect(scroll.props.contentContainerStyle).toMatchObject({flexGrow:1,justifyContent:'center',paddingVertical:24});
+  expect(scroll.props.contentContainerStyle.height).toBeUndefined();
+  expect(scroll.props.contentInsetAdjustmentBehavior).toBe('never');
+  expect(scroll.props.removeClippedSubviews).toBe(false);
+  expect(screen.getByTestId('onboarding.composition')).toHaveStyle({width:'100%',alignSelf:'center',alignItems:'center'});
+  expect(screen.getByTestId('onboarding.source.column',{includeHiddenElements:true})).toHaveStyle({position:'absolute',opacity:0});
   screen.rerender(content(false));
   expect(screen.getByTestId('onboarding.source')).toBe(measuredSource);
-  expect(screen.getByTestId('onboarding.source.column')).toHaveStyle({position:'absolute',left:59,width:128});
-  screen.rerender(content(true,402,874));
-  expect(screen.UNSAFE_getByType(ScrollView).props.contentContainerStyle.paddingTop).toBe(72);
-  expect(screen.getByTestId('onboarding.stage')).toHaveStyle({flexDirection:'column',paddingLeft:0,paddingRight:0});
+  expect(screen.UNSAFE_getByType(ScrollView)).toBe(scroll);
+  expect(screen.getByTestId('onboarding.source.column')).not.toHaveStyle({position:'absolute'});
 });

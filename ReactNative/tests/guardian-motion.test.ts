@@ -1,5 +1,5 @@
 import {guardianFrame,guardianPlan,type GuardianState,type GuardianFrame} from '../src/guardian-motion';
-import {OnboardingTravel,OnboardingPhaseCommands,onboardingTravelProgress,validOnboardingDestination,lavaWavePhase} from '../review/onboarding-motion';
+import {OnboardingTravel,OnboardingPhaseCommands,onboardingTravelProgress,validOnboardingDestination,lavaWavePhase,lavaWavePath} from '../review/onboarding-motion';
 
 test('returning to arrival after Back permits a new acknowledgement and retires an old pending reply',async()=>{
   const phases=new OnboardingPhaseCommands();const accepted=jest.fn(async()=>true);
@@ -56,4 +56,14 @@ test('travel clamps its endpoints and the welcome clock repeats in eighteen seco
   expect(onboardingTravelProgress(.7)).toBe(.875);
   expect(onboardingTravelProgress(20)).toBe(1);
   expect(lavaWavePhase(2)).toBeCloseTo(lavaWavePhase(20),12);
+});
+
+test.each([320,402,768,1389])('tiled lava crests close seamlessly at each viewport period (%s)',width=>{
+  const amplitude=24,radius=Math.ceil(amplitude*1.5)+1;
+  const path=lavaWavePath(width*2,radius*2,.7,amplitude,.5,width);
+  const points=[...path.matchAll(/ L([\d.e+-]+) ([\d.e+-]+)/g)].slice(1,-1).map(match=>({x:Number(match[1]),y:Number(match[2])}));
+  expect(points[0]!.x).toBe(0);expect(points.at(-1)!.x).toBe(width*2);
+  expect(points.find(point=>point.x===width)!.y).toBeCloseTo(points[0]!.y,8);
+  expect(points.at(-1)!.y).toBeCloseTo(points[0]!.y,8);
+  expect(points.every(point=>point.y>0&&point.y<radius*2)).toBe(true);
 });

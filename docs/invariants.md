@@ -1357,6 +1357,22 @@ activity generation, connection, and intent; sampler shutdown alone does not ret
 Admission may create a new epoch and never awaits its arm
 while owning the fence.
 
+App-owned asynchronous lifecycle fences require background execution time before lock
+acquisition, including foreground ON/OFF/reconnect, automatic preference mutations,
+descendant/on-demand repair, foreground repair reads, and app-hosted Live Activity Restart.
+Swift task suspension does not permit iOS process suspension with an App Group `flock`:
+the latter matches the 2026-10-25 `0xdead10cc` termination during chained reconnect.
+The app installs the UIKit execution port before starting services. A refused assertion
+admits no lock or mutation. Expiration cancels waits and prevents subsequent lifecycle
+steps; an already-dispatched, non-cancellable platform callback must drain while its
+fence and execution assertion remain owned. Release the fence before ending the
+assertion, including error and cancellation paths. Extensions retain their system-owned
+execution lifetime; the package owns no UIKit dependency.
+- Enforced: `ProtectionLifecycleExecutionTests` (real kernel lock admission, expiration,
+  callback drain, cancellation and release ordering), `VPNLifecycleControllerTests` (expired
+  connect/stop waits do not reload preferences), and `ProtectionLifecycleExecutionSourceTests`
+  (app startup port and raw-fence Live Activity wiring).
+
 The sidecar is new after the `INV-PERSIST-2` migration: upgrades legitimately begin with it
 absent, and its first atomic write stamps Class-None directly. It therefore needs no pair
 migration or backfill; rewriting legacy configuration merely to manufacture an intent record
